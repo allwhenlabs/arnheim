@@ -9,6 +9,9 @@
                             permission requests, and start and stop them (docs/connect.md)
   python3 serve.py --brain  and let the receptionist and your assistant talk about anything, with
                             Claude through your own Claude Code (docs/brain.md)
+  python3 serve.py --remote my-mac.your-tailnet.ts.net
+                            and let your own phone in, from anywhere, through a private way in such as
+                            Tailscale Serve, once it is paired with a code from this computer (docs/phone.md)
 
 It serves the page and its files from this folder, and nothing else: no other folders, no
 listings, nothing cached, so a change shows on the next reload. Your own company goes in data/
@@ -20,6 +23,9 @@ It also answers /voice/, the voice the walk's people speak with, if this compute
 with --brain, /brain/ (connect/brain.py), only to the page on this computer: never with --lan.
 With --share, another computer gets in only through the view-only link it prints, and only to look: it
 never gets the founder's notes, and nothing it sends is acted on.
+With --remote, it still listens only on this computer; what reaches it forwarded (from your phone, through
+Tailscale Serve) is never taken for this computer, and needs a paired phone (connect/remote.py). Without
+--remote, anything forwarded is refused.
 """
 import argparse
 import errno
@@ -37,10 +43,12 @@ import subprocess
 import sys
 import threading
 import time
+from html import escape as html_escape
 from urllib.parse import parse_qs, unquote
 
 from connect.brain import Brain
 from connect.control import Control
+from connect.remote import COOKIE as PHONE_COOKIE, LIFE as PHONE_LIFE, Remote
 from voice.bridge import Voice
 
 ROOT = os.path.dirname(os.path.realpath(__file__))  # links resolved, as every file below is
@@ -59,6 +67,10 @@ VIEW = "arnheim_view"  # the cookie a view-only link leaves, so the page's own f
 KEY = re.compile(r"^[A-Za-z0-9_-]{20,64}$")
 NEVER_AWAY = ("/data/control/",)  # control's mail with Claude Code: never to another computer, link or not
 NOT_SHARED = ("/data/notes.json",)  # the founder's notes: never through a view-only link
+NEVER_SERVED = ("/data/remote/",)  # the paired phones and their log: never to anyone, this computer included
+# A request that came through a proxy carries one of these. Without --remote it is refused; with it, it is a phone's.
+FORWARDED = ("X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "Forwarded", "X-Real-IP",
+             "Tailscale-User-Login", "Tailscale-User-Name", "Tailscale-Headers-Info")
 # Both are checked by spelling in lower case, and again by what the file is on disk: a Mac's disk takes
 # /data/Notes.json for /data/notes.json.
 
@@ -138,7 +150,24 @@ def host_ok(host, port, lan=False):
     return True
 
 
+PAIRING = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="same-origin"><title>Pair this phone</title>
+<style>body{font:17px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;background:#0d0f13;color:#eceef3;margin:0;padding:28px 18px}
+main{max-width:420px;margin:0 auto}h1{font-size:22px;margin:0 0 12px}p{color:#b9bfca}label{display:block;font-weight:600;margin:20px 0 8px}
+input{width:100%;box-sizing:border-box;font:600 22px/1.2 ui-monospace,Menlo,monospace;letter-spacing:.12em;padding:12px;border-radius:12px;border:1px solid #3a404c;background:#171a20;color:#fff;text-transform:uppercase}
+button{margin-top:16px;width:100%;font:600 17px/1 inherit;padding:14px;border-radius:12px;border:0;background:#eceef3;color:#0d0f13}
+.no{color:#ff9aac;font-weight:600}</style></head>
+<body><main><h1>Pair this phone with Arnheim</h1>
+<p>On your computer, open Arnheim's Company page and choose Pair a phone. Type the code it shows here.</p>
+{error}<form method="post" action="/remote/pair"><label for="code">The code from your computer</label>
+<input id="code" name="code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" maxlength="12" required autofocus>
+<button type="submit">Pair</button></form></main></body></html>"""
+
+
 class Handler(http.server.SimpleHTTPRequestHandler):
+    timeout = 120  # a phone that stops mid-request lets go of its thread
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=ROOT, **kwargs)
 
@@ -148,10 +177,36 @@ class Handler(http.server.SimpleHTTPRequestHandler):
     def end_headers(self):
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Referrer-Policy", "same-origin")  # nothing to other sites; this page's own posts keep their Origin
+        if self.away():
+            self.send_header("Strict-Transport-Security", "max-age=31536000")
+            self.send_header("Permissions-Policy", "microphone=(self), camera=(), geolocation=()")
+            self.send_header("X-Frame-Options", "DENY")
         super().end_headers()
 
+    def forwarded(self):
+        headers = getattr(self, "headers", None)  # none yet on a request too broken to read
+        return headers is not None and any(headers.get(name) for name in FORWARDED)
+
+    def host_name(self):
+        headers = getattr(self, "headers", None)
+        host = (headers.get("Host", "") if headers is not None else "").strip().lower()
+        name, colon, port = host.rpartition(":")
+        return name if colon and "]" not in port else host
+
+    def away(self):
+        """A request that came through the way in for phones (--remote): never this computer."""
+        remote = self.server.remote
+        return remote is not None and (self.forwarded() or self.host_name() == remote.name)
+
     def here(self):
-        return self.client_address[0] in HERE_ONLY
+        return self.client_address[0] in HERE_ONLY and not self.forwarded() and not self.away()
+
+    def phone(self):
+        """The paired phone this request came from, or None (not away, or not paired)."""
+        if not self.away():
+            return None
+        return self.server.remote.phone(self.headers.get("Cookie", ""), self.headers.get("Tailscale-User-Login", ""))
 
     def has_key(self):
         """With --share: whether another computer came through the view-only link (its cookie)."""
@@ -167,8 +222,23 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         goes on to the page; one without the key, or asking for what a viewer never gets, is refused. True when
         the request may go on; otherwise the answer has been sent."""
         low = path.lower()
-        if not self.here() and low.startswith(NEVER_AWAY):
+        if low.startswith(NEVER_SERVED) or (not self.here() and low.startswith(NEVER_AWAY)):
             self.send_error(404)
+            return False
+        if self.away():
+            if self.phone() is not None:
+                if low.startswith("/remote/") and path not in ("/remote/me", "/remote/leave"):
+                    self.send_error(403, "That is for your computer's own page.")
+                    return False
+                return True
+            if path == "/remote/pair" and self.command == "POST":
+                return True
+            if path in ("/", "/index.html") and self.command in ("GET", "HEAD"):
+                page = self.pairing_page()
+                if self.command == "GET":
+                    self.wfile.write(page.getvalue())
+                return False
+            self.send_error(403, "Pair this phone first: open its address and type the code from your computer.")
             return False
         if not self.server.share or self.here():
             return True
@@ -193,6 +263,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         mail never goes to another computer, the founder's notes never through a view-only link, and Markdown
         in data/ only if it is a how-to company.json lists."""
         data = os.path.join(ROOT, "data")
+        folder = os.path.dirname(full)
+        while folder.startswith(ROOT + os.sep):  # the paired phones' records, to no one
+            if same_file(folder, os.path.join(data, "remote")):
+                return True
+            folder = os.path.dirname(folder)
         if not self.here():
             folder = os.path.dirname(full)
             while folder.startswith(ROOT + os.sep):
@@ -206,7 +281,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         return False
 
     def allowed(self):
-        """A name this server answers to, and on a POST its own page (the Origin)."""
+        """A name this server answers to, and on a POST its own page (the Origin). Something forwarded is
+        refused unless the way in for phones is on (--remote), and then it must be for that name."""
+        remote = self.server.remote
+        if self.forwarded() and remote is None:
+            return False
+        if self.away():
+            sent = self.headers.get("X-Forwarded-Host", "").strip().lower().split(":")[0]
+            if self.host_name() != remote.name and sent != remote.name:
+                return False
+            return self.command != "POST" or self.headers.get("Origin") == f"https://{remote.name}"
         host = self.headers.get("Host", "")
         if not host_ok(host, self.server.server_address[1], self.server.lan):
             return False
@@ -231,8 +315,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             off = name == "token" and method == "GET"
             code, data = (200, {"on": False}) if off else (404, {"error": "Control is off. Start Arnheim with --control to switch it on."})
             kind, data, extra = "application/json; charset=utf-8", json.dumps(data).encode(), {}
-        elif self.client_address[0] not in HERE_ONLY:
-            code, kind, data, extra = 403, "application/json; charset=utf-8", b'{"error": "Only on this computer."}', {}
+        elif not self.here() and not self.phone_controls():
+            if self.phone() is not None and name == "token" and method == "GET":
+                code, data = 200, {"on": False, "phone": "Control from this phone is off. Switch it on for this phone on your computer."}
+            else:
+                code, data = 403, {"error": "Only on this computer, or from a phone it has let control agents."}
+            kind, data, extra = "application/json; charset=utf-8", json.dumps(data).encode(), {}
+        elif not self.here() and not self.server.remote.acted(self.phone(), f"{method} {name}" if method == "POST" else "", 0):
+            code, kind, data, extra = 429, "application/json; charset=utf-8", b'{"error": "Too many at once from this phone. Wait a minute."}', {}
         else:
             code, kind, data, extra = control.handle(method, name, body, self.headers.get("X-Arnheim-Control", ""))
         self.send_response(code)
@@ -253,10 +343,20 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             off = name == "status" and method == "GET"
             code, data = (200, {"on": False}) if off else (404, {"error": "The brain is off. Start Arnheim with --brain to switch it on."})
             kind, data, extra = "application/json; charset=utf-8", json.dumps(data).encode(), {}
-        elif self.client_address[0] not in HERE_ONLY:
-            code, kind, data, extra = 403, "application/json; charset=utf-8", b'{"error": "Only on this computer."}', {}
+        elif not self.here() and self.phone() is None:
+            code, kind, data, extra = 403, "application/json; charset=utf-8", b'{"error": "Only on this computer, or a phone paired with it."}', {}
         else:
-            code, kind, data, extra = brain.handle(method, name, body, self.headers.get("X-Arnheim-Brain", ""))
+            # an instruction passed on from a phone counts as control: only while this computer lets that phone,
+            # counted and written down like any other
+            phone = None if self.here() else self.phone()
+            may = self.here() or self.phone_controls()
+
+            def done(key, result=None):
+                if result is None:  # about to send: counted, and False for one too many this minute
+                    return self.server.remote.acted(phone, "", 0)
+                self.server.remote.log(event="control", phone=phone["id"], label=phone["label"], request=f"POST brain pass {key}", result=result)
+                return True
+            code, kind, data, extra = brain.handle(method, name, body, self.headers.get("X-Arnheim-Brain", ""), may_pass=may, passed=done if phone else None)
         self.send_response(code)
         self.send_header("Content-Type", kind)
         for header, value in extra.items():
@@ -277,6 +377,78 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             data.close()
         return None
 
+    def phone_controls(self):
+        """Whether this request is from a paired phone that this computer has let control agents, for now."""
+        phone = self.phone()
+        return phone is not None and self.server.remote.may_control(phone)
+
+    def pairing_page(self, error=""):
+        said = f'<p class="no">{html_escape(error)}</p>' if error else ""
+        data = PAIRING.replace("{error}", said).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        return io.BytesIO(data)
+
+    def remote_route(self, path, body=b""):
+        """/remote/: pairing a phone and what it may do. On this computer's page: status, a new code, control
+        for a phone, removing phones. From a phone: pairing, what it may do, and leaving."""
+        method = self.command if self.command != "HEAD" else "GET"
+        name = path[len("/remote/"):]
+        remote = self.server.remote
+
+        def answer(code, data, headers=()):
+            out = json.dumps(data).encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Length", str(len(out)))
+            for header, value in headers:
+                self.send_header(header, value)
+            self.end_headers()
+            return io.BytesIO(out)
+
+        if remote is None:
+            return answer(200, {"on": False}) if name == "status" and method == "GET" and self.here() else answer(404, {"error": "Phones are off. Start Arnheim with --remote (docs/phone.md)."})
+        if self.away():
+            phone = self.phone()
+            if name == "pair" and method == "POST":
+                given = parse_qs(body.decode("utf-8", "replace")).get("code", [""])[0]
+                key, got = remote.pair(given, self.headers.get("User-Agent", ""), self.headers.get("Tailscale-User-Login", ""))
+                if key is None:
+                    return self.pairing_page(got)
+                self.send_response(303)
+                self.send_header("Location", "/")
+                self.send_header("Set-Cookie", f"{PHONE_COOKIE}={key}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age={PHONE_LIFE}")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return io.BytesIO(b"")
+            if phone is not None and name == "me" and method == "GET":
+                return answer(200, {"phone": True, "label": phone["label"], "control": round(phone["control"]) if remote.may_control(phone) else 0})
+            if phone is not None and name == "leave" and method == "POST":
+                remote.remove(phone["id"])
+                return answer(200, {"ok": True}, [("Set-Cookie", f"{PHONE_COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0")])
+            return answer(403, {"error": "Not from a phone."})
+        if not self.here():
+            return answer(403, {"error": "Only on this computer."})
+        if method == "GET" and name == "status":
+            return answer(200, remote.status())
+        if method != "POST" or self.headers.get("X-Arnheim-Remote") != "1":
+            return answer(404, {"error": "No such request."})
+        try:
+            given = json.loads(body.decode("utf-8") or "{}")
+        except ValueError:
+            return answer(400, {"error": "That wasn't JSON."})
+        if not isinstance(given, dict):
+            return answer(400, {"error": "That wasn't a JSON object."})
+        if name == "code":
+            return answer(200, remote.code())
+        if name == "grant" and isinstance(given.get("id"), str) and isinstance(given.get("minutes"), (int, float)):
+            return answer(200, {"ok": remote.grant(given["id"], given["minutes"])})
+        if name == "remove" and (given.get("id") is None or isinstance(given.get("id"), str)):
+            return answer(200, {"removed": remote.remove(given.get("id"))})
+        return answer(400, {"error": "That request doesn't make sense."})
+
     def do_POST(self):
         path = unquote(self.path.split("?", 1)[0])
         if not self.allowed():
@@ -289,13 +461,15 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         except ValueError:
             self.send_error(400)
             return
-        known = path.startswith(("/voice/", "/control/", "/brain/"))
+        known = path.startswith(("/voice/", "/control/", "/brain/", "/remote/"))
         if not known or not 0 <= size <= 2_000_000:
             self.send_error(404 if not known else 413)
             return
         body = self.rfile.read(size)
         if path.startswith("/brain/"):
             reply = self.brain(path, body)
+        elif path.startswith("/remote/"):
+            reply = self.remote_route(path, body)
         else:
             reply = self.voice(path, body) if path.startswith("/voice/") else self.control(path, body)
         if reply is not None:
@@ -314,6 +488,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.control(path)
         if path.startswith("/brain/"):
             return self.brain(path)
+        if path.startswith("/remote/"):
+            return self.remote_route(path)
         if path in ("/", "/index.html"):
             path = "/index.html"
         else:
@@ -349,6 +525,7 @@ class Server(http.server.ThreadingHTTPServer):
     share = None  # the view-only link's key, with --share
     control = None  # connect/control.py's Control, with --control
     brain = None  # connect/brain.py's Brain, with --brain
+    remote = None  # connect/remote.py's Remote, with --remote
 
 
 def network_address():
@@ -433,6 +610,9 @@ def main():
                         help="don't look at your floors' folders for unsaved changes and open pull requests (connect/projects.py)")
     parser.add_argument("--brain", action="store_true",
                         help="let the receptionist and your assistant talk about anything, with Claude through your own Claude Code")
+    parser.add_argument("--remote", metavar="NAME",
+                        help="let your own paired phone in from anywhere, through a private https way in such as Tailscale Serve "
+                             "that answers at NAME (docs/phone.md)")
     args = parser.parse_args()
     if not 0 < args.port < 65536:
         parser.error("the port is a number from 1 to 65535")
@@ -447,6 +627,12 @@ def main():
     if args.brain and away:
         sys.exit(f"The brain works only on this computer, so it can't go with {away}. Leave out one of them, or run a second "
                  f"copy on another port: python3 serve.py --brain, and python3 serve.py {args.port + 1} {away}")
+    if args.remote and away:
+        sys.exit(f"--remote keeps Arnheim on this computer and lets only paired phones in, so it can't go with {away}. Leave out one of them.")
+    try:
+        remote = Remote(args.remote, os.path.join(ROOT, "data")) if args.remote else None
+    except ValueError as error:
+        sys.exit(str(error))
     control = Control() if args.control else None
     try:
         brain = Brain(tell=lambda why: print(f"The brain had no answer: {why}", file=sys.stderr, flush=True), control=control) if args.brain else None
@@ -462,10 +648,15 @@ def main():
             sys.exit(f"This computer won't let Arnheim use port {args.port}. Give one above 1024: python3 serve.py 8740")
         raise
     server.lan = args.lan or args.share
+    server.remote = remote
     server.share = share_key(new=args.new_link) if args.share else None
     server.control = control
     server.brain = brain
     print(f"Arnheim is at http://127.0.0.1:{args.port}", flush=True)
+    if remote:
+        print(f"Phones are on: a phone paired with this computer can open https://{remote.name}/ from anywhere your "
+              f"private way in reaches. With Tailscale, run once: tailscale serve --bg {args.port}. To pair a phone, open "
+              "the Company page here and choose Pair a phone (docs/phone.md).", flush=True)
     if args.control:
         print("Control is on: the page on this computer can talk to your Claude Code agents, answer their "
               "permission requests, and start and stop them (docs/connect.md).", flush=True)

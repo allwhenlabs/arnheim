@@ -750,6 +750,24 @@ class Control:
         feed = read(os.path.join(self.data, "feeds", "claude-code.json")) or {}
         return any(isinstance(c, dict) and c.get("id") == key and c.get("working") for c in feed.get("conversations") or [])
 
+    def project_named(self, name):
+        """The project of the floor with this label, id or project name in data/company.json, or None."""
+        company = read(os.path.join(self.data, "company.json")) or {}
+        for floor in company.get("floors") or []:
+            if isinstance(floor, dict) and name and name in (floor.get("label"), floor.get("id"), floor.get("project")):
+                return str(floor.get("project") or floor.get("label") or floor.get("id") or "")
+        return None
+
+    def project_of(self, key):
+        """The project a conversation the building knows is on, or None."""
+        with self.lock:
+            run = self.runs.get(key)
+            if run:
+                return run.get("project")
+        feed = read(os.path.join(self.data, "feeds", "claude-code.json")) or {}
+        talk = next((c for c in feed.get("conversations") or [] if isinstance(c, dict) and c.get("id") == key), None)
+        return (talk or {}).get("project")
+
     def conversation(self, key):
         """A conversation the building knows: in the Claude Code feed, or started here."""
         if not isinstance(key, str) or not KEY.match(key):

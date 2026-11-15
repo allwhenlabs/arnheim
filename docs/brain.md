@@ -71,6 +71,15 @@ work. Ask them plainly, such as "Please tell the Lantern agent to check the logi
 too". They say they are passing it on, and it reaches that agent's Claude Code conversation at its
 next step, as a message sent from the building does.
 
+Each floor's lead can do the same for their own floor, and only for its own agents: "tell them to test
+it on the spare laptop" goes straight to the agent on it, without Claude, and with the brain on, a
+lead can pass on what you ask in your own words too. Which agents are on the floor is worked out by
+Arnheim itself, never taken from the page. Anything that can't be taken back (merging, pushing,
+deleting and the like) Claude never passes on: say "tell them to" and the lead reads it back to you
+first. From a phone, nothing is passed on unless this computer lets that phone control agents
+([phone.md](phone.md)). Each lead has a Claude of their own, and at most six run at once: the one
+talked to longest ago stops first.
+
 They only do it when you clearly ask, only to an agent that is working now, and never with
 anything the receptionist would refuse: asked to have an agent deploy, publish or merge, they say
 no, as the rules do. If it can't go, they say why. The receptionist doesn't pass things on; with

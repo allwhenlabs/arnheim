@@ -178,6 +178,14 @@ Optional, and off unless you switch it on. Then the person at this computer can:
 - **Pass something on through your assistant.** With the brain on too ([brain.md](brain.md)), ask
   your assistant to tell an agent at work something, and it reaches that agent as a message from the
   building does.
+- **Or through the floor's lead.** Each floor's lead passes on what you tell them ("tell them to test
+  it on the spare laptop") to the agent at work on that floor, brain or not, and asks which one when
+  several are. Anything final, such as merging, deploying or deleting, is read back first. Ask them
+  "what's new?" later to hear what that agent did since. Leads can be switched off in the Talk panel.
+- **Answer by voice.** Say "allow" in the Talk panel, or to the receptionist, a lead or the agent
+  itself, and the next request is read back first; say "allow" again within a minute to answer it,
+  once, or "deny". A request that may touch something private is never answered by voice: it opens on
+  the screen. Allow and Deny on a card still answer at once.
 
 To switch it on, connect Claude Code (step 2) and add one more hook beside those, for permission
 requests (`connect/setup.py` adds it for you). It waits for your answer, so it gets a longer time limit:

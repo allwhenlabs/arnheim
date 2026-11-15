@@ -318,7 +318,7 @@ class PassOnTest(unittest.TestCase):
     """With control on, the assistant passes a clear instruction on to an agent at work: her answer's
     last line, which is never said, goes through control's own message path."""
 
-    WORKING, RESTING = "cc-abc123def456", "cc-0f9e8d7c6b5a"
+    WORKING, RESTING, ELSEWHERE = "cc-abc123def456", "cc-0f9e8d7c6b5a", "cc-0ther0floor1"
 
     def setUp(self):
         self.fake = Fake()
@@ -328,9 +328,12 @@ class PassOnTest(unittest.TestCase):
         feed = {"conversations": [
             {"id": self.WORKING, "project": "Lantern", "title": "Fix the login page", "working": True},
             {"id": self.RESTING, "project": "Lantern", "title": "Plan the week", "working": False, "check": True},
+            {"id": self.ELSEWHERE, "project": "Tidepool", "title": "Tide tables", "working": True},
         ]}
         with open(os.path.join(self.data, "feeds", "claude-code.json"), "w", encoding="utf-8") as handle:
             json.dump(feed, handle)
+        with open(os.path.join(self.data, "company.json"), "w", encoding="utf-8") as handle:
+            json.dump({"floors": [{"id": "lantern", "label": "Lantern", "project": "Lantern"}, {"id": "tide", "label": "Tidepool", "project": "Tidepool"}]}, handle)
         self.control = control.Control(self.data, claude=[sys.executable, "-c", "pass"])
         self.brain = self.make(control=self.control)
 
@@ -373,6 +376,65 @@ class PassOnTest(unittest.TestCase):
         self.assertEqual(self.say(f"please tell {self.WORKING} to use the blue button", to=alone), "I'll pass that on.\n")
         self.assertNotIn("PASS ON", self.persona())
         self.assertEqual(self.control.box.take(self.WORKING), [])
+
+    def lead(self, text, floor="Lantern", keys=None, to=None, **given):
+        to = to or self.brain
+        body = {"who": "lead", "name": "Juno", "floor": floor, "company": "Example Studio", "facts": FACTS, "text": text}
+        if keys is not None:
+            body["keys"] = keys  # what an old page sent: never trusted
+        code, _, data, _ = to.handle("POST", "ask", json.dumps(body).encode(), to.token, **given)
+        if isinstance(data, bytes):
+            return code, json.loads(data)
+        lines = [json.loads(raw) for raw in data]
+        self.assertEqual((code, lines[-1]), (200, {"done": True}), lines)
+        return code, "".join(x["text"] for x in lines[:-1])
+
+    def test_a_lead_passes_on_only_to_their_own_floors_agents(self):
+        self.assertEqual(self.lead(f"please tell {self.WORKING} to use the blue button"), (200, "I'll pass that on.\n"))
+        self.assertEqual([row["text"] for row in self.control.box.take(self.WORKING)], ["use the blue button"])
+        self.assertIn("You are Juno, the lead for Lantern at Example Studio", self.persona())
+        self.assertIn("PASS ON <conversation>", self.persona())
+        # an agent on another floor: never, whatever the page says its agents are
+        self.assertEqual(self.lead(f"please tell {self.ELSEWHERE} to tidy up", keys=[self.ELSEWHERE]),
+                         (200, "I'll pass that on.\n I couldn't pass it on, though: that agent isn't at work on this floor."))
+        self.assertEqual(self.lead(f"please tell {self.WORKING} to tidy up", floor="Nowhere"),
+                         (200, "I'll pass that on.\n I couldn't pass it on, though: that agent isn't at work on this floor."))
+        self.assertIn("I can't pass that on", self.lead(f"please tell {self.WORKING} to deploy the shop")[1])
+        # what can't be taken back is only ever sent after the lead's own read-back, never by Claude
+        self.assertIn("That can't be taken back, though, so I haven't sent it.", self.lead(f"please tell {self.WORKING} to delete the old branches and force push")[1])
+        self.assertEqual(self.control.box.take(self.WORKING), [])
+        self.assertEqual(self.control.box.take(self.ELSEWHERE), [])
+
+    def test_a_phone_passes_on_only_while_it_may_control(self):
+        # serve.py says whether whoever asks may (this computer, or a phone this computer lets), and counts each one
+        said = self.say_as(f"please tell {self.WORKING} to use the blue button", may_pass=False)
+        self.assertIn("control from it is off", said)
+        counted = []
+        self.assertEqual(self.say_as(f"please tell {self.WORKING} to use the blue button", passed=lambda key, result=None: counted.append((key, result)) or True),
+                         "I'll pass that on.\n")
+        self.assertEqual(counted, [(self.WORKING, None), (self.WORKING, 200)])  # counted first, written down once it went
+        self.assertIn("too many at once", self.say_as(f"please tell {self.WORKING} to use the blue button", passed=lambda key, result=None: False))
+        self.assertEqual([row["text"] for row in self.control.box.take(self.WORKING)], ["use the blue button"])
+
+    def say_as(self, text, **given):
+        body = {"who": "assistant", "name": "Wren", "company": "Example Studio", "facts": FACTS, "text": text}
+        code, _, data, _ = self.brain.handle("POST", "ask", json.dumps(body).encode(), self.brain.token, **given)
+        lines = [json.loads(raw) for raw in data]
+        self.assertEqual((code, lines[-1]), (200, {"done": True}), lines)
+        return "".join(x["text"] for x in lines[:-1])
+
+    def test_each_lead_has_their_own_claude_and_needs_a_floor(self):
+        self.lead("hello", floor="Lantern")
+        self.lead("hello", floor="Tidepool")
+        self.assertEqual(sorted(self.brain.running()), ["lead:Lantern", "lead:Tidepool"])
+        code, said = self.lead("hello", floor="")
+        self.assertEqual((code, said), (400, {"error": "Say which floor's lead."}))
+
+    def test_only_so_many_claudes_at_once(self):
+        for i in range(brain.MINDS + 3):
+            self.lead("hello", floor=f"Floor {i}")
+        self.assertEqual(len(self.brain.running()), brain.MINDS)
+        self.assertIn(f"lead:Floor {brain.MINDS + 2}", self.brain.running())  # the newest stays, the oldest went
 
     def test_a_line_that_only_looks_like_one_is_said(self):
         hold = brain.Hold()

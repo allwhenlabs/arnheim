@@ -68,10 +68,29 @@ more). Only `answer` is needed:
 - `base`: where the voice server is, if not `../voice/` beside `src`.
 - `controls(who)`: buttons for their card while you stand with them, as
   `{ note, buttons: [{ label, run }] }`, or null. `run` gives what they say about it after.
+- `waiting()`: what waits on you, as `[{ key, title, kind }]`, for the walk's Needs you button.
+- `lead(floorId)`: the lead who stands by the lift on that floor, as `{ title, sub, href, voice, look }`,
+  or null for none. `src/leads.js` has the rules Arnheim's own page uses for what they say.
+- `through(who, text)`: for the Talk panel, someone to put the person through to when what they said
+  is meant for them ("how's Tidepool doing?"), as `{ who, then }`, where `then` is the question for
+  them to answer, or null to just greet them.
+- `desk`: the receptionist as talk knows them, `{ href, title }`, for the Talk panel.
+
+`answer` is also given a fourth argument, `{ spoken }`, true when the words were heard rather than
+typed, so a page can keep some answers off the voice, as Arnheim's keeps allowing anything that may
+be private.
 
 `who` is the person: `{ title, href }`. The receptionist's `href` is `#/front-desk` and the
 assistant's `#/assistant`, unless the map gives them another; anyone else's is what they are
 working on. Without `talk`, the rings only open what someone is working on.
+
+### Talk from any screen
+
+`createTalkDock({ talk, features, people, here, place, before })` in `src/talk-dock.js` adds the Talk
+button to `place` (before `before`) and the panel it opens, with the same `talk`. `people()` lists who
+can be talked to, as `[{ who, label }]`; `here()` says who to start with on the screen showing now.
+`features` is `createFeatures()` from `src/features.js`, the three switches, which the panel shows.
+Call `hide(true)` while a walk is open, which has its own voice.
 
 The voice is a few requests under `/voice/`. `serve.py` answers them, and so can a server of your
 own: `voice/bridge.py` is standard-library Python, with one call (`Voice.handle`) for all of them.

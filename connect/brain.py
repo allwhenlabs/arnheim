@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A brain for the receptionist and the assistant, for the person at this computer.
+"""A brain for the receptionist, the assistant and each floor's lead, for the person at this computer.
 
 Off unless you switch it on: `python3 serve.py --brain` (docs/brain.md). Then what you ask the
 receptionist or your assistant, out loud on a walk or typed at the front desk, is answered by
@@ -17,6 +17,7 @@ With control on too (serve.py --control), your assistant can pass a clear instru
 to an agent at work: her answer ends with a line "PASS ON <conversation>: <instruction>", which is
 never said aloud. The brain sends it through control's own message path, as a message from the
 building, and only to an agent working now, and never anything the receptionist would refuse.
+Each floor's lead (src/leads.js) can do the same, but only to an agent at work on their own floor.
 """
 import collections
 import hmac
@@ -35,8 +36,9 @@ import time
 
 JSON = "application/json; charset=utf-8"
 NDJSON = "application/x-ndjson; charset=utf-8"
-PEOPLE = ("receptionist", "assistant")
+PEOPLE = ("receptionist", "assistant", "lead")
 IDLE = 600  # seconds: a claude nobody has talked to for this long is stopped
+MINDS = 6  # claudes running at once at most: the receptionist, the assistant and the leads talked to lately
 WAIT = 90  # seconds: the longest one answer may take, or its claude is stopped
 MAX_TEXT = 2000
 MAX_SECTIONS = 80
@@ -45,8 +47,11 @@ MODEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:\[\]-]{0,79}$")
 READY = "Reply with just: Ready."
 MARK = "PASS ON"
 PASS = re.compile(r"^PASS ON\s+(cc-[A-Za-z0-9]{1,12})\s*:\s*(\S.*)$")
+PASS_KEY = re.compile(r"^cc-[A-Za-z0-9]{1,12}$")
 # What the receptionist refuses (src/poe-desk.js, REFUSE), for what the assistant passes on: never a
 # way round a refusal.
+# What can't be taken back (src/leads.js, FINAL): never passed on by Claude, only by the lead's own read-back.
+FINAL = re.compile(r" (merge|merging|publish|release (it|this|that|the app|v?\d)|cut a release|ship|deploy|push|delete|remove|drop|wipe|erase|reset|force|pay|buy|purchase|transfer|sign in|log in|login|password|email|tweet|post (it|this|that|on|to)|send (it|this|that|an?|the|them)) ")
 REFUSE = re.compile(r" (merge|merging|publish|deploy|tweet|sign in|sign me in|signin|log in|log me in|login|password|run (a |the |my )?(job|command|script|tests?|build)|start (a |the )?(job|build)|post (it|this|that|on|to)|send (an |the |a )?(email|message|post)|buy|pay|transfer) ")
 
 
@@ -60,11 +65,18 @@ def norm(text):
     return " " + re.sub(r"[^a-z0-9]+", " ", re.sub(r"['\u2019]", "", str(text).lower())).strip() + " "
 
 
-def persona(who, name, company, passes=False):
+def persona(who, name, company, passes=False, floor=""):
     """Who they are, as their claude is told when it starts: the same for every company, with its
     names in it. The building's facts come later, in the conversation. `passes`: they can pass an
-    instruction on to an agent at work (the assistant, with control on)."""
-    me = f"You are {name}, the {who} of {company}" if name else f"You are the {who} of {company}"
+    instruction on to an agent at work (the assistant, or a lead, with control on). `floor`: a lead's
+    floor, the one project they look after."""
+    if who == "lead":
+        me = (f"You are {name}, the lead for {floor} at {company}" if name else f"You are the lead for {floor} at {company}") + (
+            ". Like a good product manager, you know this one project in depth: its agents and what each is "
+            "doing, what waits on the person, its goals, open work, checks, spending and what changed today. "
+            f"You speak only for {floor}: for other projects, say the person can ask that floor's lead")
+    else:
+        me = f"You are {name}, the {who} of {company}" if name else f"You are the {who} of {company}"
     pass_on = (
         "\n\nYou can also pass an instruction on to one of the company's agents, but only when the "
         "person clearly asks you to tell an agent that the facts say is working now to do something. "
@@ -301,6 +313,7 @@ class Brain:
 
     def __init__(self, claude=None, model=None, idle=IDLE, wait=WAIT, tell=None, control=None):
         self.control = control  # connect/control.py's Control, with --control: the assistant can pass things on
+        self.lead_floors = {}  # a lead's key -> the floor they were asked as; their project is worked out from control
         self.claude = list(claude) if claude else shlex.split(os.environ.get("ARNHEIM_CLAUDE") or "claude")
         self.model = model or os.environ.get("ARNHEIM_BRAIN_MODEL") or "sonnet"
         if not MODEL.match(self.model):
@@ -317,10 +330,13 @@ class Brain:
 
     # ---------- requests ----------
 
-    def handle(self, method, name, body=b"", token=""):
+    def handle(self, method, name, body=b"", token="", may_pass=True, passed=None):
         """One request under /brain/: (status, content type, data, extra headers). The data is bytes,
         or for `ask` an iterator of NDJSON lines to send as they come. Every request but `status`
-        needs the page's token, in the X-Arnheim-Brain header."""
+        needs the page's token, in the X-Arnheim-Brain header. `may_pass`: whether whoever asks may
+        have an instruction passed on (serve.py: this computer, or a phone it lets control agents);
+        `passed(key)`, if given, is told of each one first and says False for one too many; then
+        `passed(key, 200)` once it went, or `passed(key, 400)` if it didn't."""
         def answer(code, data):
             return code, JSON, json.dumps(data, ensure_ascii=False).encode("utf-8"), {}
 
@@ -341,7 +357,7 @@ class Brain:
         try:
             if name == "prime":
                 return answer(200, self.prime(given))
-            return 200, NDJSON, self.ask(given), {}
+            return 200, NDJSON, self.ask(given, may_pass, passed), {}
         except Refused as why:
             return answer(400, {"error": str(why)})
 
@@ -368,7 +384,7 @@ class Brain:
                 return {"ok": False, "error": str(why)}
         return {"ok": True, "primed": True}
 
-    def ask(self, given):
+    def ask(self, given, may_pass=True, passed=None):
         """Their answer, as NDJSON lines for the page: {"text": piece} as each piece comes, then
         {"done": true}; or {"error": why} if there is none, and the page answers from the
         building's files instead."""
@@ -394,7 +410,7 @@ class Brain:
                             yield line({"text": said})
                     rest, held = hold.end()
                     if held:
-                        rest += self.pass_on(who, held)
+                        rest += self.pass_on(who, held, may_pass, passed)
                     if rest:
                         yield line({"text": rest})
                 except Trouble as why:
@@ -407,25 +423,43 @@ class Brain:
             yield line({"done": True})
         return lines()
 
-    def pass_on(self, who, held):
+    def pass_on(self, who, held, may_pass=True, passed=None):
         """An answer's "PASS ON <conversation>: <instruction>" line, sent to that conversation through
         control's own message path, as a message from the building (connect/control.py, say). Gives
         what she adds to her answer: nothing once it has gone, or why it didn't."""
         found = PASS.match(held.strip().splitlines()[0]) if held.strip() else None
         if not found:
             return held  # not an instruction after all: words to say
-        if who != "assistant" or self.control is None:
+        if not (who == "assistant" or who.startswith("lead:")) or self.control is None:
             return ""  # nobody here passes things on
         key, words = found.group(1), found.group(2).strip()
+        if not may_pass:
+            return " I can't pass it on from this phone, though: control from it is off. Switch it on for this phone on your computer."
+        if who.startswith("lead:"):
+            # the floor is worked out here, never from what the page says its agents are
+            with self.lock:
+                floor = self.lead_floors.get(who)
+            project = self.control.project_named(floor)
+            if not project or self.control.project_of(key) != project:
+                return " I couldn't pass it on, though: that agent isn't at work on this floor."
         if REFUSE.search(norm(words)):
             return " I can't pass that on, though. I never ask an agent to merge, publish, deploy, run jobs, sign in, send messages, buy or pay."
+        if FINAL.search(norm(words)):
+            return (" That can't be taken back, though, so I haven't sent it. Say \"tell them to\" and what to do, and the floor's lead "
+                    "will read it back to you first.")
         try:
             if not self.control.working(key):
                 return " I couldn't pass it on, though: that agent isn't working right now."
+            if passed is not None and passed(key) is False:
+                return " I couldn't pass it on, though: too many at once from this phone. Wait a minute."
             self.control.say(key, words)
         except Exception as why:  # control's own Refused, in words for you, or a message it couldn't write
+            if passed is not None:
+                passed(key, 400)  # written down as it went: not sent
             reason = str(why) or "it didn't go"
             return f" I couldn't pass it on, though: {reason[:1].lower()}{reason[1:]}"
+        if passed is not None:
+            passed(key, 200)
         return ""
 
     def request(self, given, words=True):
@@ -433,7 +467,10 @@ class Brain:
         doesn't make sense."""
         who = given.get("who")
         if who not in PEOPLE:
-            raise Refused("Ask the receptionist or the assistant.")
+            raise Refused("Ask the receptionist, the assistant or a floor's lead.")
+        floor = one_line(given.get("floor"), 60) if who == "lead" else ""
+        if who == "lead" and not floor:
+            raise Refused("Say which floor's lead.")
         name = one_line(given.get("name"), 60)
         company = one_line(given.get("company"), 100) or "this company"
         facts = given.get("facts") or []
@@ -456,7 +493,12 @@ class Brain:
                 raise Refused("Say something first.")
             if len(text) > MAX_TEXT:
                 raise Refused(f"That's too long: keep it under {MAX_TEXT} characters.")
-        return who, persona(who, name, company, passes=who == "assistant" and self.control is not None), sections, text
+        key = f"lead:{floor}" if who == "lead" else who  # each lead has a claude of their own
+        if who == "lead":
+            with self.lock:
+                self.lead_floors[key] = floor
+        passes = who in ("assistant", "lead") and self.control is not None
+        return key, persona(who, name, company, passes=passes, floor=floor), sections, text
 
     # ---------- their claudes ----------
 
@@ -474,7 +516,7 @@ class Brain:
     def mind(self, who, me):
         """Their claude: the warm one, or a new one if it has stopped or they are someone else now
         (a new name, say). Started under the lock, so two questions at once never start two."""
-        old = None
+        old = []
         try:
             with self.lock:
                 if self.closed.is_set():
@@ -483,13 +525,19 @@ class Brain:
                 if mind and mind.alive() and mind.persona == me:
                     mind.used = time.time()  # not idle: it is about to be asked
                     return mind
-                old = self.minds.pop(who, None)
+                old = [self.minds.pop(who)] if who in self.minds else []
+                # at most MINDS claudes at once: the one talked to longest ago goes first, unless it is answering
+                while len(self.minds) >= MINDS:
+                    spare = [(m.used, k) for k, m in self.minds.items() if not m.lock.locked()]
+                    if not spare:
+                        raise Trouble("Too many people are talking at once. Try again in a moment.")
+                    old.append(self.minds.pop(min(spare)[1]))
                 mind = Mind(self.args(me), me)
                 self.minds[who] = mind
                 return mind
         finally:
-            if old is not None:
-                old.stop()
+            for gone in old:
+                gone.stop()
 
     def trouble(self, who, why, mind=None):
         """No answer: a claude that went wrong is stopped, so the next question starts afresh."""

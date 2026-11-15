@@ -1,0 +1,70 @@
+/* Talk from any screen (talk-dock.js): the Talk button in the top bar, and the panel it opens, over the building
+   on the left so the list it moves you round stays in sight. The panel is the
+   walk's dark glass, so it reads the same over the building, the list and any page that uses it. */
+
+.td-open { display: inline-flex; align-items: center; gap: 7px; padding: 6px 12px; border-radius: 8px; cursor: pointer; font: 600 14px/1.1 inherit; border: 1px solid var(--line, rgba(127, 127, 127, .35)); background: var(--surface, transparent); color: inherit; }
+.td-open[aria-expanded="true"] { background: var(--ink, #17191e); border-color: var(--ink, #17191e); color: var(--on-ink, #fff); }
+.td-open[hidden] { display: none; }
+.td-open:focus-visible { outline: 2px solid var(--accent, #ffcf8f); outline-offset: 2px; }
+
+.td-dock { position: fixed; z-index: 40; left: 16px; bottom: 16px; width: min(400px, calc(100vw - 32px)); max-height: min(560px, calc(100dvh - 96px)); display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 16px; background: rgba(14, 16, 24, .92); border: 1px solid rgba(255, 214, 170, .3); color: #f7f2ea; box-shadow: 0 14px 40px rgba(0, 0, 0, .45); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
+.td-dock[hidden] { display: none; }
+.td-dock .aw-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 40px; min-height: 40px; padding: 0 12px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, .22); background: rgba(255, 255, 255, .06); color: #f7f2ea; font: 600 14px/1.1 inherit; cursor: pointer; }
+.td-dock .aw-btn:hover { background: rgba(255, 255, 255, .12); }
+.td-dock .aw-btn:focus-visible, .td-who:focus-visible { outline: 2px solid #ffcf8f; outline-offset: 2px; }
+.td-dock .aw-btn[aria-pressed="true"], .td-dock .aw-btn[aria-expanded="true"] { border-color: #ffcf8f; color: #ffd9a8; }
+.td-dock .aw-btn[hidden] { display: none; }
+.td-icon { padding: 0; width: 40px; }
+
+.td-head { display: flex; align-items: center; gap: 6px; }
+.td-who { flex: 1; min-width: 0; min-height: 40px; padding: 0 10px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, .22); background: rgba(255, 255, 255, .08); color: #f7f2ea; font: 600 14px/1.2 inherit; }
+.td-who option { color: #17191e; background: #fff; }
+.td-dock .aw-voice { white-space: nowrap; }
+.td-dock .aw-voice .icon { display: none; }
+@media (max-width: 420px) { .td-dock .aw-voice { padding: 0; width: 40px; } .td-dock .aw-voice .icon { display: block; } .td-dock .aw-voice-word { display: none; } }
+
+.td-body { display: grid; gap: 8px; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.td-dock .aw-talk { display: grid; gap: 8px; }
+.td-dock .aw-talk[hidden], .td-dock .aw-said[hidden], .td-dock .aw-acts[hidden] { display: none; }
+.td-dock .aw-said { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; max-height: 38vh; overflow-y: auto; font-size: 14px; line-height: 1.45; }
+.td-dock .aw-said li { overflow-wrap: anywhere; }
+.td-dock .aw-said b { margin-right: 4px; font-weight: 600; color: #ffd9a8; }
+.td-dock .aw-said .aw-you b { color: #c4d3ee; }
+.td-dock .aw-mic { margin: 0; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #d6dbe6; }
+.td-dock .aw-mic::before { content: ''; flex: none; width: 8px; height: 8px; border-radius: 50%; background: rgba(255, 255, 255, .35); }
+.td-dock .aw-mic.aw-listening::before { background: #8fd3a8; animation: td-breathe 1.6s ease-in-out infinite; }
+.td-dock .aw-mic.aw-hearing::before { background: #7ee0a0; box-shadow: 0 0 10px #7ee0a0; }
+.td-dock .aw-mic.aw-thinking::before { background: #ffd29a; animation: td-breathe .9s ease-in-out infinite; }
+.td-dock .aw-mic.aw-speaking::before { background: #ffb870; box-shadow: 0 0 10px #ffb870; }
+.td-dock .aw-ask { display: flex; gap: 6px; }
+.td-dock .aw-ask input { flex: 1; min-width: 0; min-height: 40px; padding: 0 10px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, .22); background: rgba(255, 255, 255, .08); color: #f7f2ea; font: 14px/1.2 inherit; }
+.td-dock .aw-ask input::placeholder { color: rgba(247, 242, 234, .55); }
+.td-dock .aw-ask input:focus-visible { outline: 2px solid #ffcf8f; outline-offset: 1px; }
+.td-dock .aw-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.td-dock .aw-act-note { flex: 1 0 100%; margin: 0; font-size: 13px; color: #ffd9a8; overflow-wrap: anywhere; }
+.td-hint { margin: 0; font-size: 12px; color: rgba(247, 242, 234, .62); }
+
+.td-switches { display: grid; gap: 10px; padding: 10px; border-radius: 12px; background: rgba(255, 255, 255, .05); border: 1px solid rgba(255, 255, 255, .12); max-height: 50vh; overflow-y: auto; }
+.td-switches[hidden] { display: none; }
+.td-switches h3 { margin: 0; font-size: 13px; color: #e6d9c8; }
+.td-switch { display: flex; align-items: flex-start; gap: 10px; cursor: pointer; }
+.td-switch input { flex: none; width: 18px; height: 18px; margin: 2px 0 0; accent-color: #ffb870; }
+.td-switch-words { display: grid; gap: 2px; font-size: 13px; }
+.td-switch-words span { color: rgba(247, 242, 234, .7); }
+.td-note { margin: 0; font-size: 12px; color: rgba(247, 242, 234, .6); }
+
+@keyframes td-breathe { 50% { opacity: .35; } }
+@media (prefers-reduced-motion: reduce) { .td-dock .aw-mic::before { animation: none; } }
+
+/* a phone: a sheet along the bottom; 16px fields, or an iPhone zooms the page into them */
+@media (max-width: 560px) {
+  .td-dock { left: 8px; right: 8px; bottom: 8px; width: auto; max-height: min(78dvh, calc(100dvh - 64px)); padding: 10px; }
+  .td-dock .aw-ask input, .td-who { font-size: 16px; }
+  .td-open-word { display: none; }
+  .td-open { padding: 6px 9px; }
+}
+@media (pointer: coarse) { .td-dock .aw-ask input, .td-who { font-size: 16px; } }
+/* the page's own parts shown in the switches (pairing a phone) */
+.td-switches .phone-card { border-top-color: rgba(255, 255, 255, .12); }
+.td-switches .muted { color: rgba(247, 242, 234, .65); }
+.td-switches .btn { color: #f7f2ea; background: rgba(255, 255, 255, .06); border-color: rgba(255, 255, 255, .22); }

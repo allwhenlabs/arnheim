@@ -5,6 +5,10 @@
 // something to see. Nothing is saved anywhere: a reload reads the files again.
 import { createBrain } from './brain.js';
 import { agentControls, agentReply, createControl, deskControls, deskStart } from './control.js';
+import { FEATURES, createFeatures } from './features.js';
+import { createTalkDock } from './talk-dock.js';
+import { hasLead, isLeadHref, leadUpdate, voiceAnswer } from './leads.js';
+import { WAITING, createLeadDesk } from './lead-desk.js';
 import { allowReadsAsked, sayWaiting, together, waitingOnYou } from './queue.js';
 import { inner, proofMood, proofOf } from './proof.js';
 import { reviewMood, reviewOf, reviewSaid } from './review.js';
@@ -57,6 +61,8 @@ const control = createControl({ busy: () => !!building?.walking?.() });
 // The receptionist's and the assistant's brain, with serve.py --brain: they answer with Claude,
 // through Claude Code on the computer that serves the page (brain.js). Off otherwise.
 const brain = createBrain();
+const features = createFeatures(); // talking from any screen, the floors' leads, answering by voice (features.js)
+let dock = null; // the Talk panel (talk-dock.js)
 let starting = null; // an agent the receptionist was asked to start, waiting for your word
 let controlNote = ''; // what came of the last thing done from the panel
 let noteUsed = false; // it shows once a page, in the first place that has room for it (render resets this)
@@ -691,18 +697,20 @@ function sampleReply(item, text) {
 
 // The founder's assistant (org.assistant), in their office: in the sample they answer as the receptionist does.
 // "What's waiting on me?", "what needs me?": the receptionist reads out the one list (queue.js).
-const WAITING = /\b(?:wait(?:s|ing)? (?:on|for) (?:me|you)|needs? me|need anything from me|my queue|what(?:'s| is) (?:on|in) my (?:plate|queue))\b/i;
 const isAide = (who) => !!org.assistant && who.href === (org.assistant.href || '#/assistant');
 
 const talk = {
   name(who) {
     if (who.href === DESK) return deskName() || 'Receptionist';
+    if (isLeadHref(who.href)) return who.name || who.title;
     if (isAide(who)) return org.assistant.name;
     const item = talkItem(who);
     return item ? `${item.project} agent` : null;
   },
   greet(who) {
     if (who.href === DESK || isAide(who)) primeBrain(who.href === DESK ? 'receptionist' : 'assistant'); // walked up to: read Claude the facts now
+    const lead = leads.floorOf(who);
+    if (lead) return leads.greet(lead, who);
     if (who.href === DESK) {
       const hr = new Date().getHours();
       const hello = hr >= 5 && hr < 12 ? 'Good morning' : hr >= 12 && hr < 18 ? 'Good afternoon' : hr >= 18 && hr < 23 ? 'Good evening' : 'Hello';
@@ -718,9 +726,21 @@ const talk = {
     const item = talkItem(who);
     return item ? `Hi. I'm on "${item.title}". Ask me how it's going.` : null;
   },
-  answer(who, text) {
+  answer(who, text, _before, { spoken = false } = {}) {
+    const lead = leads.floorOf(who);
+    if (lead) return leads.says(lead, text, { spoken });
     if (who.href === DESK) {
       const waiting = waitingNow();
+      // a permission, answered out loud: read back first, then "allow" or "deny" (leads.js)
+      const v = voiceAnswer(text, waiting.filter(canAnswer), deskVoice, { spoken, on: features.get('answers'), label: floorLabel });
+      if (v) {
+        deskVoice = v.pending;
+        if (v.pending) starting = null; // only the last question waits for your word
+        if (v.show) showWaiting(v.show);
+        return v.act ? answerSaid(v.act) : v.reply;
+      }
+      const went = leads.go(text);
+      if (went) return went;
       const reads = control.on ? allowReadsAsked(text, waiting) : null;
       if (reads) return allowReads(reads);
       if (WAITING.test(String(text || ''))) return sayWaiting(waiting, (p) => floorOf(p)?.label || p);
@@ -733,11 +753,22 @@ const talk = {
       const start = deskStart(control, text, starting);
       if (start) {
         starting = start.pending;
+        if (start.pending) deskVoice = null;
         if (start.reply != null) return start.reply;
       }
     }
     if (who.href === DESK || isAide(who)) return deskSays(who.href === DESK ? 'receptionist' : 'assistant', text);
     const item = talkItem(who);
+    if (item && spoken) {
+      // in an agent's ring, out loud, as anywhere: read back first, never when it is switched off, and never for
+      // anything that may be private (its card's buttons answer at once)
+      const asks = waitingNow().filter((i) => i.key === item.id && canAnswer(i));
+      const v = asks.length ? voiceAnswer(text, asks, ringVoice.get(item.id) || null, { spoken, on: features.get('answers'), label: floorLabel }) : null;
+      if (v) {
+        ringVoice.set(item.id, v.pending);
+        return v.act ? answerSaid(v.act) : v.reply;
+      }
+    }
     if (item && control.on && isConvo(item)) return agentReply(control, item, text, () => convoNow(item.id));
     return item ? sampleReply(item, text) : "I've finished here, so there's nothing new to tell.";
   },
@@ -745,8 +776,17 @@ const talk = {
   waiting() {
     return waitingNow().map((i) => ({ key: i.key || null, title: i.title, kind: i.kind }));
   },
-  // With control on: Allow and Deny, or Stop, on an agent's card; Start at the front desk.
+  // The receptionist, a floor's lead (a question for one of them goes to them: "how's Tidepool doing?"), for
+  // the Talk panel (talk-dock.js).
+  through: (who, text) => leads.through(who, text, deskWho()),
+  get desk() { return deskWho(); },
+  // The lead by the lift on a floor, for the walk: null where there is none, or leads are switched off.
+  lead: (floorId) => leads.lead(floorId),
+  // With control on: Allow and Deny, or Stop, on an agent's card; Start at the front desk. A lead's card has
+  // what waits for your word (a start, an instruction to send, a stop) or this floor's first permission request.
   controls(who) {
+    const lead = leads.floorOf(who);
+    if (lead) return leads.controls(lead);
     if (!control.on) return null;
     if (who.href === DESK) {
       return deskControls(starting, () => {
@@ -759,6 +799,192 @@ const talk = {
     return item && isConvo(item) ? agentControls(control, item) : null;
   },
 };
+
+/* ---------- the floors' leads (lead-desk.js), and talking from any screen (talk-dock.js) ---------- */
+
+const floorLabel = (p) => floorOf(p)?.label || p;
+const deskWho = () => ({ href: DESK, title: deskName() || 'Receptionist', sub: org.receptionist?.title || 'Receptionist', voice: org.receptionist?.voice || null });
+const aideWho = () => (org.assistant?.name ? { href: org.assistant.href || '#/assistant', title: org.assistant.name, sub: org.assistant.title || 'Assistant', voice: org.assistant.voice || null } : null);
+let deskVoice = null; // the receptionist's request read back, waiting for "allow" or "deny"
+const ringVoice = new Map(); // an agent's own request read back in its ring, by its conversation
+
+// The floor as its lead sees it.
+function floorView(floor) {
+  const p = floor.project;
+  return {
+    label: floor.label,
+    conversations: work.conversations.filter((c) => c.project === p),
+    waiting: waitingNow().filter((i) => i.project === p),
+    goals: work.goals.filter((g) => g.project === p),
+    tasks: openTasks().filter((t) => t.project === p),
+    prs: work.pullRequests.filter((x) => x.project === p),
+    health: healthOf(p, work),
+    spend: spendOf(floor),
+    clashes: clashesOf(work.conversations).filter((c) => c.project === p),
+  };
+}
+// The floor's agents, as [{ id, title, working }]: its conversations, and agents started from the building.
+function floorAgents(floor) {
+  const p = floor.project;
+  const runs = control.on ? control.state().runs.filter((r) => r.project === p && !work.conversations.some((c) => c.id === r.key)) : [];
+  return [
+    ...work.conversations.filter((c) => c.project === p).map((c) => ({ id: c.id, title: c.title, working: !!c.working || control.run?.(c.id)?.state === 'working' })),
+    ...runs.map((r) => ({ id: r.key, title: r.title, working: r.state === 'working' })),
+  ];
+}
+const momentsOn = (floor) => [...yesterday.moments, ...history].filter((m) => m && m.project === floor.project);
+const notConnected = () => (fromAway() && phoneMe?.phone ? phoneControlOff : "I can't do that here: this building isn't connected to your agents. Start it with serve.py --control.");
+
+// A permission answered by voice, once it was read back.
+function answerSaid(act) {
+  if (answered.has(act.id)) return 'That one is answered already.';
+  focusSince = Date.now();
+  return answerAsk(act.id, act.behavior).then((r) => { render(); return answeredSaid(act.behavior, act.item)(r); }, (error) => error.message);
+}
+// Something that must be answered on the screen: its page, unless you are walking.
+function showWaiting(item) {
+  const href = waitingHref(item);
+  if (href && !walkOn()) goTo(href);
+}
+
+// Where "take me to ..." can go: every room, every floor, the company page and the front desk.
+function places() {
+  const out = [];
+  for (const floor of floors()) {
+    for (const room of roomsOf(floor)) {
+      out.push({ href: `#/${floor.id}/${room.id}`, label: `${room.label} on ${floor.label}`, room: true,
+        names: [`${room.label} on ${floor.label}`, `${room.label} room on ${floor.label}`, `${floor.label} ${room.label}`, `${floor.label}s ${room.label}`, `${room.label} on the ${floor.label}`] });
+    }
+    out.push({ href: `#/${floor.id}`, label: floor.label, names: [floor.label, floor.project, floor === org.lobby && 'lobby', floor === org.basement && 'basement'].filter(Boolean) });
+  }
+  out.push({ href: '#/company', label: 'the company page', names: ['company page', 'company', org.company] });
+  out.push({ href: DESK, label: 'the front desk', names: ['front desk', 'reception', deskName()].filter(Boolean) });
+  return out;
+}
+
+const leads = createLeadDesk({
+  company: () => org?.company,
+  floors: () => org.floors,
+  label: floorLabel,
+  view: floorView,
+  agents: floorAgents,
+  moments: momentsOn,
+  waiting: () => waitingNow(),
+  canAnswer,
+  answer: answerSaid,
+  show: showWaiting,
+  control,
+  places,
+  go: (href) => goTo(href),
+  back: () => window.history.back(),
+  walking: () => walkOn(),
+  think: (floor, said) => (brain.on ? leadThinks(floor, said) : null),
+  prime: (floor) => primeLead(floor),
+  features,
+  madeUp,
+  notConnected,
+});
+
+// With the brain on (serve.py --brain), a lead answers anything else through Claude, from this floor's facts
+// alone, and with control on can pass an instruction to an agent at work here.
+function leadFacts(floor) {
+  const keep = new Set(['Company', 'The building', `Floor: ${floor.label}`, `Agents on ${floor.label}`, 'Company memory: what every agent is told as it starts']);
+  const out = brainFacts().filter(([name]) => keep.has(name));
+  const clock = (at) => new Date(at * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  out.push(['Where it stands, in brief', leadUpdate(floorView(floor))]);
+  out.push(['Waiting on the person here', sayWaiting(waitingNow().filter((i) => i.project === floor.project), floorLabel, 8)]);
+  const today = momentsBefore(momentsOn(floor), Date.now() / 1000, 30);
+  out.push([`Today on ${floor.label}, newest first`, today.length ? today.map((m) => `- At ${clock(m.at)}: ${sayMoment(m)}`).join('\n') : 'Nothing has happened here today.']);
+  const passed = leads.passed(floor);
+  if (passed.length) out.push(['What the person asked you to pass on', passed.map((x) => `- At ${clock(x.at)}, to the agent on "${x.title}": ${x.text}`).join('\n')]);
+  return out;
+}
+const leadBrainWho = (floor) => ({ role: 'lead', name: leads.who(floor).name || '', company: org.company, floor: floor.label });
+function primeLead(floor) {
+  if (!brain.on || Date.now() - (primed[`lead:${floor.id}`] || 0) < 3000) return;
+  primed[`lead:${floor.id}`] = Date.now();
+  brain.prime(leadBrainWho(floor), leadFacts(floor));
+}
+function leadThinks(floor, said) {
+  return (async function* thought() {
+    let given = false;
+    try {
+      for await (const piece of brain.ask(leadBrainWho(floor), said, leadFacts(floor))) {
+        given = true;
+        yield piece;
+      }
+    } catch (error) {
+      if (given) throw error;
+      yield `I'm not sure what you mean. Ask me where we are, what's new, or who's working on ${floor.label}.`;
+    }
+  })();
+}
+
+// The lead's card at the top of their floor's page: where it stands, and Talk.
+function leadCard(floor) {
+  if (!features.get('leads') || !hasLead(floor)) return null;
+  const who = leads.who(floor);
+  return h('section.panel-card.lead-card',
+    h('div.lead-head', poeBadge(22, who.look), h('div', h('h3.lead-name', who.title), h('p.small.muted', 'Where it stands'))),
+    h('p.lead-says', leads.update(floor)),
+    features.get('talk') && dock ? h('div.control-row', btn(`Talk to ${who.name || 'the lead'}`, () => dock.open(who), '.primary', 'mic')) : null);
+}
+
+// Using it from a phone (serve.py --remote): how, and the phones paired with it. Filled in by remote below.
+function phoneCard() { return remoteCard(); }
+
+// The switches on the Company page, where Talk can always be switched back on.
+function talkingCard() {
+  return h('section.panel-card.talking-card',
+    sectHead('mic', 'Talking'),
+    h('ul.switch-list', FEATURES.map((f) => h('li', h('label.switch',
+      h('input', { type: 'checkbox', checked: features.get(f.id), onchange: (event) => features.set(f.id, event.currentTarget.checked) }),
+      h('span', h('b', f.label), h('span.small.muted', f.about)))))),
+    phoneCard());
+}
+
+/* ---------- your phone (serve.py --remote, connect/remote.py; docs/phone.md) ---------- */
+
+let remoteNow = null; // on this computer: what /remote/status said
+let remoteCode = null; // on this computer: the pairing code just made, { code, url, until }
+let phoneMe = null; // on a paired phone: what /remote/me said
+let remoteAsked = false;
+async function readRemote() {
+  remoteAsked = true;
+  const get = (name) => fetch(`remote/${name}`, { cache: 'no-store', credentials: 'same-origin' }).then((r) => (r.ok ? r.json() : null)).catch(() => null);
+  if (fromAway()) phoneMe = await get('me');
+  else remoteNow = (await get('status')) || { on: false };
+}
+const remotePost = (name, body = {}) => fetch(`remote/${name}`, {
+  method: 'POST', cache: 'no-store', credentials: 'same-origin',
+  headers: { 'Content-Type': 'application/json', 'X-Arnheim-Remote': '1' }, body: JSON.stringify(body),
+}).then((r) => r.json());
+const remoteRedraw = () => readRemote().then(() => { render(); dock?.refresh(); });
+const phoneControlOff = 'Answering and instructing agents from this phone is off. Switch it on for this phone on your computer, on the Company page under Talking.';
+
+function remoteCard() {
+  if (fromAway()) {
+    if (!phoneMe?.phone) return null;
+    return h('div.phone-card',
+      h('p.small', `This ${phoneMe.label} is paired. ${phoneMe.control ? `It can answer and instruct agents until ${clockOf(phoneMe.control)}.` : phoneControlOff}`),
+      h('div.control-row', btn('Unpair this phone', () => fetch('remote/leave', { method: 'POST', credentials: 'same-origin' }).then(() => location.reload()))));
+  }
+  if (!remoteAsked) { remoteRedraw(); return null; }
+  if (!remoteNow?.on) {
+    return h('div.phone-card', h('p.small.muted', 'Use all of this from your phone too, by voice as well: start Arnheim with --remote and a private way in such as Tailscale, which is free for personal use. docs/phone.md says how.'));
+  }
+  const phones = remoteNow.phones || [];
+  const code = remoteCode && Date.now() < remoteCode.until ? remoteCode : null;
+  return h('div.phone-card',
+    h('p.small', h('strong', 'Your phone: '), `on, at ${remoteNow.url}`),
+    code ? h('p.phone-code', `On your phone, open ${code.url} and type `, h('strong', code.code), '. It works once, for 5 minutes.') : null,
+    h('div.control-row', btn('Pair a phone', () => remotePost('code').then((c) => { remoteCode = { ...c, until: Date.now() + c.seconds * 1000 }; return remoteRedraw(); }), '', 'smartphone')),
+    phones.length ? h('ul.phone-list', phones.map((p) => h('li',
+      h('span.phone-name', h('b', p.label), h('span.small.muted', p.control ? ` Can answer and instruct agents until ${clockOf(p.control)}.` : ` Paired ${agoText(p.paired)}. Can look and talk.`)),
+      h('span.control-row',
+        btn(p.control ? 'Stop control' : 'Control for 15 minutes', () => remotePost('grant', { id: p.id, minutes: p.control ? 0 : 15 }).then(remoteRedraw)),
+        btn('Remove', () => remotePost('remove', { id: p.id }).then(remoteRedraw)))))) : h('p.small.muted', 'No phone is paired yet.'));
+}
 
 /* ---------- control in the panel (control.js) ---------- */
 
@@ -1240,7 +1466,7 @@ function viewOverview() {
     crumbs: [],
     body: [
       h('div.home-head', h('h2', { id: 'view-title', tabindex: '-1' }, heading), h('p', sub), noteOnce('.done-note')),
-      fromAway() && h('p.small', h('strong', 'View only. '), 'You are looking from another device: you can look round and walk in, but nothing here changes anything.'),
+      fromAway() && !phoneMe?.phone && h('p.small', h('strong', 'View only. '), 'You are looking from another device: you can look round and walk in, but nothing here changes anything.'),
       first ? focusCard(first) : h('div.all-clear', h('b', 'You are clear.'), 'Nothing is waiting on you right now.'),
       firstRun && setupCard(),
       pauseCard(),
@@ -1328,6 +1554,7 @@ function viewCompany() {
       org.mission && h('p.mission', h('span.muted', 'Mission: '), org.mission),
       org.about && h('p', org.about),
       h('ul.floor-list', floors().map(floorCard)),
+      talkingCard(),
       memoryCard(),
     ],
   };
@@ -1405,6 +1632,7 @@ function viewFloor(floor) {
     crumbs: crumbsFor(floor),
     body: [
       title(floor.label),
+      org.floors.includes(floor) && leadCard(floor),
       floor === org.lobby && pauseCard(),
       h('p.states', floorLines(floor).map(chip)),
       org.floors.includes(floor) && floorHealth(floor),
@@ -1822,7 +2050,7 @@ async function startBuilding() {
     showNotes();
     applyScene();
     focusBuilding();
-    window.__arnheim = { building, model: liveModel, poe, control, brain, talk, facts: brainFacts };
+    window.__arnheim = { building, model: liveModel, poe, control, brain, talk, facts: brainFacts, dock, features };
   } catch (error) {
     console.error(error);
     building = null;
@@ -1877,6 +2105,7 @@ function setWalking(on) {
   // second, like any change of the home view's first item, so it can never answer a request.
   if (was && !on) focusSince = Date.now();
   $('walk').setAttribute('aria-pressed', String(!!on));
+  dock?.hide(!!on); // the walk has its own voice
   if (on && !was) {
     walkStep += 1;
     walkMark = `${pageMark}:${walkStep}`;
@@ -2194,6 +2423,21 @@ async function boot() {
   setPlaying(params.get('live') !== 'off');
   $('live').addEventListener('click', () => setPlaying(!playing));
   $('walk').addEventListener('click', toggleWalk);
+  features.defaults(org.features);
+  if (fromAway()) await readRemote(); // a paired phone is not view only
+  dock = createTalkDock({
+    talk, features, place: $('top'), before: $('walk'), extra: phoneCard,
+    people: () => [
+      { who: deskWho(), label: `${deskName() || 'The receptionist'}, at the front desk` },
+      ...(aideWho() ? [{ who: aideWho(), label: `${org.assistant.name}, ${org.founder?.name ? `${org.founder.name}'s` : 'the'} assistant` }] : []),
+      ...(features.get('leads') ? leads.floors().map((f) => ({ who: leads.who(f), label: leads.who(f).title })) : []),
+    ],
+    here: () => {
+      const floor = org.floors.find((f) => f.id === route.floor);
+      return floor ? leads.lead(floor.id) : null;
+    },
+  });
+  features.watch(() => render());
   await startBuilding();
   onRoute();
   window.addEventListener('hashchange', onRoute);

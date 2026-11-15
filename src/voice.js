@@ -23,6 +23,13 @@
 //                            they say about it after (control.js: Allow, Deny, Stop, Start)
 //   waiting()                optional, for the walk: what waits on you, as [{ key, title, kind }], where
 //                            key is a conversation's id and kind permission, question, turn or task
+//   lead(floorId)            optional, for the walk: the lead who stands by the lift on that floor, as
+//                            { title, sub, href, voice, look }, or null for none (leads.js)
+// answer is also given a fourth argument, { spoken }: true when the words were heard, not typed, so a page
+// can keep some answers (allowing something, say) off the voice.
+//
+// createVoice gives { talkTo(who, { greet }), ask(text, { spoken }), info(), dispose() }: talkTo puts you with someone
+// (null for no one), and ask says something to them as if it had been typed.
 
 import { icon } from './icons.js';
 
@@ -112,7 +119,10 @@ function wavFile(pcm, rate) {
   return new Blob([head, pcm], { type: 'audio/wav' });
 }
 
-export function createVoice({ hud, card, ctx, el, button, signal }) {
+// `early`: wake the voice server straight away (the walk does, so it is ready by the first ring), rather than
+// when someone is first talked to (the Talk panel, which may never be opened).
+// `written`: a greeting shows in words even with the voice off (the Talk panel; the walk keeps quiet then).
+export function createVoice({ hud, card, ctx, el, button, signal, early = true, written = false }) {
   const talk = ctx.talk || null;
   const allowed = voiceWanted();
   const ownEar = typeof talk?.hear === 'function';
@@ -195,6 +205,7 @@ export function createVoice({ hud, card, ctx, el, button, signal }) {
     let state = mode;
     if (!allowed) { text = 'Type to talk. This device keeps the voice off.'; state = 'off'; }
     else if (!on) { text = 'Type to talk, or turn the voice on.'; state = 'off'; }
+    else if (audio && audio.state !== 'running') { text = 'Tap anywhere to wake the voice.'; state = 'off'; } // a phone's sound, asleep after the screen locked
     else if (!server || server.state === 'starting' || server.state === 'off') { text = 'Waking the voice'; state = 'thinking'; }
     else if (!server.say) { text = 'Type to talk. This computer has no voice set up.'; state = 'off'; }
     else if (server.state === 'failed') { text = `Type to talk. The voice stopped: ${server.error || 'no reason given'}`; state = 'off'; }
@@ -210,7 +221,7 @@ export function createVoice({ hud, card, ctx, el, button, signal }) {
 
   // The page's buttons for whoever is in the ring (talk.controls), looked at again every second
   // while you stand there: Allow and Deny while an agent waits for your permission, and so on.
-  let actsSig = '';
+  let actsSig = null; // draw afresh, even to nothing
   let actsTimer = 0;
   function drawActs() {
     let c = null;
@@ -232,7 +243,7 @@ export function createVoice({ hud, card, ctx, el, button, signal }) {
           add({ them: String(out) });
           say(String(out));
         }
-        actsSig = '';
+        actsSig = null; // draw afresh, even to nothing
         drawActs();
       }, b.label);
       acts.append(node);
@@ -296,6 +307,7 @@ export function createVoice({ hud, card, ctx, el, button, signal }) {
     if (!audio) {
       const Context = window.AudioContext || window.webkitAudioContext;
       try { audio = new Context(); } catch { return; }
+      audio.onstatechange = () => drawLine();
     }
     if (audio.state !== 'running') audio.resume().catch(() => {});
   }
@@ -407,8 +419,8 @@ export function createVoice({ hud, card, ctx, el, button, signal }) {
 
   /* ---------- talking ---------- */
 
-  function greet() {
-    if (!who || !on || logs.get(keyOf(who))?.length) return;
+  function greet(again = false) {
+    if (!who || (!on && !written) || (!again && logs.get(keyOf(who))?.length)) return;
     let text = null;
     try { text = talk?.greet?.(who); } catch (error) { console.warn('Arnheim: no greeting.', error); }
     if (!text) return;
@@ -433,7 +445,7 @@ export function createVoice({ hud, card, ctx, el, button, signal }) {
     times.sayMs = null;
     let out;
     try {
-      out = await talk.answer?.(asked, text, before);
+      out = await talk.answer?.(asked, text, before, { spoken: spokenEnd != null });
     } catch (error) {
       console.warn('Arnheim: no answer.', error);
       out = null;
@@ -463,7 +475,7 @@ export function createVoice({ hud, card, ctx, el, button, signal }) {
     split.end();
     reply = entry.them;
     settle(g);
-    actsSig = '';
+    actsSig = null; // draw afresh, even to nothing
     drawActs();
   }
 
@@ -589,14 +601,15 @@ export function createVoice({ hud, card, ctx, el, button, signal }) {
   /* ---------- the walk's hooks ---------- */
 
   // Someone stepped into a ring (or out of one, with null).
-  function talkTo(next) {
+  function talkTo(next, { greet: hello = true } = {}) {
     if (!talk || keyOf(next) === keyOf(who)) return;
+    // hello: true greets someone new, 'again' greets even someone already talked to (put through to them)
     gen += 1;
     hush();
     stopEar();
     who = next;
     clearInterval(actsTimer);
-    actsSig = '';
+    actsSig = null; // draw afresh, even to nothing
     drawActs();
     if (who && talk.controls) actsTimer = setInterval(drawActs, 1000);
     if (!who) { mode = 'idle'; return; }
@@ -605,11 +618,11 @@ export function createVoice({ hud, card, ctx, el, button, signal }) {
     mode = 'listening';
     drawLog();
     drawLine();
-    if (!on) return;
+    if (!on) { if (hello && written) greet(hello === 'again'); return; }
     arm();
     if (!server || server.state !== 'ready') wake();
     else listen();
-    greet();
+    if (hello) greet(hello === 'again');
   }
 
   function info() {
@@ -649,6 +662,8 @@ export function createVoice({ hud, card, ctx, el, button, signal }) {
 
   drawToggle();
   drawLine();
-  if (on && talk) wake();
-  return { talkTo, info, dispose };
+  if (on && talk && early) wake();
+  // `spoken`: the words were heard (a page handing a question on to someone else keeps it so)
+  const askAs = (text, { spoken = false } = {}) => { const t = String(text || '').trim(); if (t) ask(t, spoken ? performance.now() : null); };
+  return { talkTo, ask: askAs, info, dispose, get who() { return who; } };
 }

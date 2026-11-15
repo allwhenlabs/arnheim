@@ -90,6 +90,15 @@ class ConnectTest(unittest.TestCase):
         feed = self.hook(hook_event_name="SessionEnd", reason="prompt_input_exit")
         self.assertEqual((feed["conversations"], feed["tasks"]), ([], []))
 
+    def test_a_message_handed_in_is_not_what_you_asked(self):
+        # a helper's report, or another session's message, reaches Claude Code as a prompt too
+        feed = self.hook(hook_event_name="UserPromptSubmit", prompt='<agent-message from="a1">[Subagent hand-back] The report.</agent-message>')
+        [talk] = feed["conversations"]
+        self.assertEqual((talk["title"], talk["says"]["now"]), ("A new conversation", "I'm working on it."))
+        self.assertTrue(talk["working"])
+        feed = self.hook(hook_event_name="UserPromptSubmit", prompt="<task-notification>done</task-notification>")
+        self.assertNotIn("<", feed["conversations"][0]["says"]["now"])
+
     def test_a_conversation_that_moves_out_keeps_its_seat(self):
         self.hook(hook_event_name="UserPromptSubmit", prompt="Tidy up")
         feed = self.hook(hook_event_name="Stop", last_assistant_message="Done.", cwd=self.base)

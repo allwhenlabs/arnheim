@@ -53,6 +53,7 @@
     {
       "id": "studio",
       "label": "Studio",
+      "lead": { "name": "Basil", "voice": "am_michael" },
       "project": "Studio",
       "palette": "terracotta",
       "icon": "building-2",
@@ -70,6 +71,7 @@
     {
       "id": "lantern",
       "label": "Lantern",
+      "lead": { "name": "Juno", "voice": "af_nicole" },
       "project": "Lantern",
       "palette": "harbour",
       "icon": "library",
@@ -80,6 +82,7 @@
     {
       "id": "tidepool",
       "label": "Tidepool",
+      "lead": { "name": "Marlo", "voice": "bm_george" },
       "project": "Tidepool",
       "palette": "sage",
       "icon": "gauge",
@@ -89,6 +92,7 @@
     {
       "id": "kitefield",
       "label": "Kitefield",
+      "lead": { "name": "Ines", "voice": "af_bella" },
       "project": "Kitefield",
       "palette": "plum",
       "icon": "shapes",

@@ -68,6 +68,9 @@ KEEP = 12 * 3600  # a conversation not heard from for this long has gone
 ASKS = {"permission_prompt", "elicitation_dialog", "agent_needs_input"}  # Claude waits for you to decide
 CHANGES = {"Edit", "MultiEdit", "Write", "NotebookEdit"}  # tools that change files: then its floor's check is due
 NEW = "A new conversation"
+# A prompt Claude Code was handed by something else, not typed by the person: a helper's report, another
+# session's message, a notice. It is never "what you asked", and never a conversation's title.
+HANDED = re.compile(r"^\s*<(?:agent-message|task-notification|side-sessions-event|system-reminder|ci-monitor-event|local-command-[\w-]+|command-[\w-]+)\b")
 CLASH = 2 * 3600  # seconds: two conversations changing one file this close together may trip over each other
 FILES_KEPT = 30
 HISTORY = os.path.join(DATA, "feeds", "history")
@@ -194,7 +197,7 @@ def change(event, feed, project, now, extra=None):
     elif name == "SessionStart" and event.get("source") in (None, "startup", "clear"):
         talk.update(working=False, check=False)
     elif name == "UserPromptSubmit":
-        said = line(event.get("prompt"), 100)
+        said = "" if HANDED.match(str(event.get("prompt") or "")) else line(event.get("prompt"), 100)
         if talk["title"] == NEW and said:
             talk["title"] = line(event.get("prompt"), 70)
         talk.update(working=True, check=False, says={"now": f'I\'m working on what you asked: "{said}".' if said else "I'm working on it."},

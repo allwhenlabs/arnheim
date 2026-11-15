@@ -5,6 +5,7 @@ import * as THREE from '../vendor/three/three.module.js';
 import { ShaderPass } from '../vendor/three/addons/postprocessing/ShaderPass.js';
 import { createBurn } from './three/burn.js';
 import { buildHall, buildPenthouse } from './three/halls.js';
+import { buildPerson, lookSpec } from './three/poe.js';
 import { dressHall, loadPhoto, photoWanted } from './three/photo.js';
 import { createWalkNotes } from './walk-notes.js';
 import { D, H, W } from './three/rooms.js';
@@ -485,7 +486,8 @@ export function createWalk(ctx) {
         out.push({ kind: 'needs', title: o.title, sub: `${why}, in ${room.label}`, go: () => goToThing(o, room) });
       }
     }
-    for (const spot of spots.slice(0, 8)) {
+    // the floor's lead first: they can tell you everything else on it
+    for (const spot of [...spots].sort((a, b) => (b.who.roomId === 'lead') - (a.who.roomId === 'lead')).slice(0, 8)) {
       if (seen.has(keyOfThing(spot.who))) continue;
       seen.add(keyOfThing(spot.who));
       out.push({ kind: 'person', title: spot.who.title, sub: spot.who.sub || '', go: () => walkToTalk(spot.who) });
@@ -647,6 +649,7 @@ export function createWalk(ctx) {
     me.vx = me.vz = me.speed = 0;
     me.target = null;
     free();
+    if (placeLead(s)) look(); // they stand in the way now, as anyone does
     placeSpots();
     findDoors();
     planBaseOf();
@@ -917,6 +920,8 @@ export function createWalk(ctx) {
     }
     const A = hall.assistant; // the founder's assistant, in their office
     if (A) add({ ...A.who, floorId: here.id, roomId: 'office' }, A.x, A.z, A.stand[0], A.stand[1]);
+    const L = hall.lead; // the floor's lead, by the lift
+    if (L) add({ ...L.who, floorId: here.id, roomId: 'lead' }, L.x, L.z, L.stand[0], L.stand[1]);
     if (!was) return;
     const same = spots.find((s) => (s.who.href || s.who.title) === (was.who.href || was.who.title) && Math.hypot(me.x - s.x, me.z - s.z) < 0.42);
     if (same) {
@@ -926,6 +931,116 @@ export function createWalk(ctx) {
       setTalk(null);
       heldOff = true;
     }
+  }
+
+  // Each project floor's lead (leads.js): a few steps from where the lift lets you out, facing it, with a ring
+  // of their own. The page's talk.lead(floor id) says who they are, or null (no project, or leads switched off).
+  // Gives true when someone came or went, so the floor is surveyed again.
+  const LEAD_LOOKS = {
+    skin: ['#f1c7a5', '#deaa82', '#c68a62', '#a26b48', '#7a4a2e', '#5a3622'],
+    hair: ['#2b1d18', '#5a3926', '#8a5a36', '#1c1c1c', '#b9874f', '#3b2a22'],
+    coat: ['#3d5a6c', '#6b4e3d', '#4a5d3f', '#5b3b5e', '#2f3e5c', '#7a3d3d'],
+    style: [undefined, 'bun', 'swept', undefined],
+  };
+  const pickOf = (key, list, shift) => {
+    let n = 2166136261;
+    for (const ch of String(key)) n = Math.imul(n ^ ch.charCodeAt(0), 16777619);
+    return list[((n >>> 0) >>> shift) % list.length];
+  };
+  function placeLead(s) {
+    let who = null;
+    try { who = s === penthouse ? null : ctx.talk?.lead?.(s.id) || null; } catch (error) { console.warn('Arnheim: no lead.', error); }
+    const had = hall.lead;
+    if (had && (!who || had.who.href !== who.href)) {
+      had.group.removeFromParent();
+      had.hit.removeFromParent();
+      had.group.traverse((o) => o.geometry?.dispose?.());
+      had.hit.geometry.dispose();
+      const at = hall.picks.indexOf(had.hit);
+      if (at >= 0) hall.picks.splice(at, 1);
+      hall.lead = null;
+    }
+    if (!who) return !!had;
+    if (hall.lead) { hall.lead.who = { ...who }; return false; }
+    const a = hall.spot || { x: me.x, z: me.z, yaw: me.yaw };
+    const fx = -Math.sin(a.yaw ?? me.yaw);
+    const fz = -Math.cos(a.yaw ?? me.yaw);
+    const open = reach();
+    const roomy = (x, z) => [[0, 0], [0.45, 0], [-0.45, 0], [0, 0.45], [0, -0.45]].every(([ox, oz]) => !blocked(x + ox, z + oz, true));
+    const clear = (x, z) => {
+      const steps = Math.ceil(Math.hypot(x - a.x, z - a.z) / (CELL / 2));
+      for (let i = 1; i < steps; i++) if (blocked(a.x + ((x - a.x) * i) / steps, a.z + ((z - a.z) * i) / steps, true)) return false;
+      return true;
+    };
+    // The squares still reachable from where you stand with someone at (bx, bz): they must never cut the
+    // floor in two, as one standing in a narrow corridor would.
+    const BODY = 0.7; // their body, and the walker's own width round it
+    const count = (bx, bz) => {
+      const seen = new Uint8Array(open.length);
+      const q0 = Math.floor((me.x - map.x0) / CELL);
+      const r0 = Math.floor((me.z - map.z0) / CELL);
+      if (q0 < 0 || r0 < 0 || q0 >= map.cols || r0 >= map.rows) return 0;
+      const stack = [r0 * map.cols + q0];
+      seen[stack[0]] = 1;
+      let n = 0;
+      while (stack.length) {
+        const i = stack.pop();
+        n += 1;
+        const q = i % map.cols;
+        const r = (i - q) / map.cols;
+        for (const [nq, nr] of [[q + 1, r], [q - 1, r], [q, r + 1], [q, r - 1]]) {
+          const j = nr * map.cols + nq;
+          if (nq < 0 || nr < 0 || nq >= map.cols || nr >= map.rows || seen[j] || !open[j]) continue;
+          if (Math.hypot(map.x0 + (nq + 0.5) * CELL - bx, map.z0 + (nr + 0.5) * CELL - bz) < BODY) continue;
+          seen[j] = 1;
+          stack.push(j);
+        }
+      }
+      return n;
+    };
+    const all = count(Infinity, Infinity);
+    const near = [];
+    for (let i = 0; i < open.length; i++) {
+      if (!open[i]) continue;
+      const q = i % map.cols;
+      const x = map.x0 + (q + 0.5) * CELL;
+      const z = map.z0 + ((i - q) / map.cols + 0.5) * CELL;
+      const d = Math.hypot(x - a.x, z - a.z);
+      if (d < 1.6 || d > 3.6 || hall.inLift?.(x, z) || !roomy(x, z) || !clear(x, z)) continue;
+      const facing = ((x - a.x) * fx + (z - a.z) * fz) / d; // 1 straight ahead as you step out, -1 behind
+      const aside = Math.abs((x - a.x) * fz - (z - a.z) * fx); // how far off the straight way out of the lift
+      near.push({ x, z, d, score: Math.abs(d - 2.3) + (1 - facing) * 1.2 + (aside < 0.7 ? 0.6 : 0) });
+    }
+    near.sort((p, q) => p.score - q.score);
+    let best = null;
+    for (const c of near.slice(0, 60)) {
+      let body = 0; // the squares their body itself takes
+      for (let i = 0; i < open.length; i++) {
+        if (!open[i]) continue;
+        const q = i % map.cols;
+        if (Math.hypot(map.x0 + (q + 0.5) * CELL - c.x, map.z0 + ((i - q) / map.cols + 0.5) * CELL - c.z) < BODY) body += 1;
+      }
+      if (all - count(c.x, c.z) <= body + 2) { best = c; break; }
+    }
+    if (!best) return !!had;
+    const { x, z, d } = best;
+    const spec = lookSpec(who.look || {
+      skin: pickOf(who.href, LEAD_LOOKS.skin, 3), hair: pickOf(who.href, LEAD_LOOKS.hair, 7),
+      coat: pickOf(who.href, LEAD_LOOKS.coat, 11), style: pickOf(who.href, LEAD_LOOKS.style, 17),
+    });
+    spec.at = [x, 0, z];
+    spec.turn = Math.atan2(a.x - x, a.z - z); // towards the lift
+    spec.look = -0.08;
+    const person = buildPerson(spec);
+    const hit = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1.8, 0.8), hitMaterial);
+    hit.position.set(x, 0.92, z);
+    hit.visible = false;
+    hit.userData = { hit: true, talk: true, href: who.href, title: who.title, sub: `${who.sub || 'The lead here'}. Tap to talk.` };
+    hall.group.add(person.group, hit);
+    hall.picks.push(hit);
+    const k = Math.min(1.25, d - 0.4) / d; // where you stand to talk: between them and the lift
+    hall.lead = { x, z, stand: [x + (a.x - x) * k, z + (a.z - z) * k], who: { ...who }, group: person.group, hit };
+    return true;
   }
 
   function setTalk(spot) {
@@ -1531,6 +1646,7 @@ export function createWalk(ctx) {
       entry.dispose();
       // the invisible boxes that take taps (the lift, a desk, the receptionist, the assistant) are the walk's own
       for (const pick of entry.picks || []) pick.geometry?.dispose?.();
+      entry.lead?.group.traverse((o) => o.geometry?.dispose?.()); // the floor's lead is drawn for this walk alone
     }
     halls.clear();
     notes.dispose();
@@ -1637,6 +1753,10 @@ export function createWalk(ctx) {
     roomAt: (x, z) => { const g = roomAt(x, z); return g && { ...g, way: !!wayTo(g.x, g.z) }; },
     target: () => (me.target ? { x: me.target.x, z: me.target.z, left: me.target.next?.length || 0 } : null),
     needs: () => needsAll().map((n) => ({ floor: n.s.id, title: n.o.title })),
+    // the floor you are on, a ride to another (by its id), and where its lead stands (for tests)
+    here: () => here?.id || null,
+    ride: (id) => { const s = order.find((x) => x.id === id); if (s && s !== here) rideTo(s); return !!s; },
+    lead: () => (hall?.lead ? { x: hall.lead.x, z: hall.lead.z, stand: hall.lead.stand, title: hall.lead.who.title, at: hall.spot && { x: hall.spot.x, z: hall.spot.z } } : null),
     // what a live change costs, part by part, in milliseconds (for tests)
     resurveyCost(full = false) {
       const t = [performance.now()];

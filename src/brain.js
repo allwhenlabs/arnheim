@@ -6,7 +6,9 @@
 // createBrain({ base, headers }) talks to the server: `base` is where /brain/ is (by default
 // ../brain/ beside src), `headers()` adds a page token for a server of its own. check() asks once
 // whether it is on, and `on` says so after. `who` is { role, name, company }, where role is
-// 'receptionist' or 'assistant'; `facts` is a list of [section, text]. The server gives Claude all
+// 'receptionist', 'assistant' or 'lead' (a floor's lead, leads.js, who also gives `floor`, the floor's
+// name; the server works out which agents are theirs); `facts` is a list
+// of [section, text]. The server gives Claude all
 // of them the first time, and after that only the sections that changed.
 
 const BASE = new URL('../brain/', import.meta.url).href;
@@ -50,7 +52,7 @@ export function createBrain({ base = BASE, headers = () => ({}) } = {}) {
     }
   }
 
-  const said = (who, facts, text) => ({ who: who.role, name: who.name || '', company: who.company || '', facts, ...(text == null ? {} : { text }) });
+  const said = (who, facts, text) => ({ who: who.role, name: who.name || '', company: who.company || '', ...(who.role === 'lead' ? { floor: who.floor || '' } : {}), facts, ...(text == null ? {} : { text }) });
 
   return {
     check,

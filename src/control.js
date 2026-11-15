@@ -104,10 +104,10 @@ export function createControl({ base = BASE, headers = () => ({}), every = 3000,
 /* ---------- an agent in its ring ---------- */
 
 // Spoken or typed, the whole of what was said: a stray "yes" never allows anything.
-const ALLOW = /^(?:yes[,.!]?\s+)?(?:allow|approve)(?: it| that| this)?(?: once| please)?[.!]?$/i;
-const DENY = /^(?:no[,.!]?\s+)?(?:no|nope|deny|refuse|reject|don'?t|do not)(?: allow)?(?: it| that| this)?(?: please)?[.!]?$/i;
+export const ALLOW = /^(?:yes[,.!]?\s+)?(?:allow|approve)(?: it| that| this)?(?: once| please)?[.!]?$/i;
+export const DENY = /^(?:no[,.!]?\s+)?(?:no|nope|deny|refuse|reject|don'?t|do not)(?: allow)?(?: it| that| this)?(?: please)?[.!]?$/i;
 const NEARLY = /^(?:yes|yeah|yep|ok|okay|sure|go ahead|do it)\b/i;
-const STOP = /^(?:please\s+)?stop(?: now| working| it| that| there| please)*[.!]?$/i;
+export const STOP = /^(?:please\s+)?stop(?: now| working| it| that| there| please)*[.!]?$/i;
 
 // What you said in an agent's ring, if it was "allow" or "deny" for an open permission request
 // (the whole of what you said), or "stop": its answer. Null for anything else, for a page whose

@@ -95,9 +95,37 @@ answer aloud ("Voice", below).
   into their ring and ask.
 - **Your assistant**, at their own desk in your office, if you have one. In the sample they answer
   as the receptionist does; your own page can give them their own answers.
+- **Each floor's lead**, standing by the lift on every project floor. They know that one project in
+  depth: who is working on it and what each last said, what waits on you there, its goals, open
+  work, checks and spending. Ask **"where are we?"**, **"what's new?"** (since you last asked them,
+  with how the agents answered what you passed on) or **"who's working?"**. Say **"tell them to test
+  it on the spare laptop"** and, with control on, it goes to the agent at work there: with several,
+  they ask which; with none, they offer to start one. Anything that can't be taken back (merging,
+  publishing, deleting, paying) is read back first and goes only when you say "send it". Name them
+  and choose their faces in `company.json` ("Make it yours", below).
 
 Your office also holds your notes: the newest eight hang in its library. Tap one, or stand in its
 light, to read it.
+
+## Talk from any screen
+
+**Talk**, at the top of every screen, opens a small panel where you talk, out loud or typed, without
+walking: to the receptionist, your assistant or any floor's lead. On a floor's page it starts with
+that floor's lead, whose card at the top of the page says where the project stands.
+
+- **"How's Tidepool doing?"** puts you through to Tidepool's lead, who answers. **"Talk to the
+  receptionist"** takes you back.
+- **"Take me to Lantern"**, **"show me the work room on Kitefield"**, **"go home"** or **"back"**:
+  the page goes there.
+- **"Allow"**: the request waiting for your permission is read back to you, with how careful to be.
+  Only then does "allow" or "deny" answer it, and only that one, within a minute. **"Next"** reads
+  the next. Anything that may touch something private (a key, a login, a hidden file) is never
+  answered by voice: it opens on the screen for you.
+
+Each of these is a switch, in the panel (the sliders button) and on the Company page under
+Talking: talk from any screen, a lead on each floor, and answering requests by voice. They're kept
+in that browser. A company can set its own starting point in `company.json`, such as `"features":
+{ "leads": false }`.
 
 ### What the receptionist knows, and what they can do
 
@@ -172,6 +200,10 @@ The receptionist and your assistant are yours to name, dress and give a voice, i
 `look` takes colours for skin, hair, lips, coat, shirt and trousers, a hair style (`bun`, `braids`
 or the default swept cut), a round face, and touches such as a round collar, a brooch and
 earrings. Anything you leave out keeps the default. Without an `assistant`, your office has none.
+
+Each project floor's lead is named the same way, on the floor in `company.json`: `"lead": { "name":
+"Juno", "voice": "af_nicole" }`. Without a name they are simply that floor's lead, and `"lead":
+false` leaves a floor without one ([docs/data.md](docs/data.md)).
 
 ## Connect your agents
 
@@ -291,6 +323,19 @@ python3 serve.py --lan
 This prints a second address: open it on a phone on the same Wi-Fi. Anyone on that network can
 then open Arnheim, `data/` included, so use a network you trust. On a phone the people speak and
 you type: browsers only allow the microphone over HTTPS or on the computer itself.
+
+### Your phone, from anywhere
+
+```bash
+python3 serve.py --remote my-mac.your-tailnet.ts.net
+```
+
+Everything above, by voice too, from your own phone wherever you are. Arnheim stays on this
+computer, and a private way in that you run yourself gives the phone a real https address, so its
+microphone works. Tailscale does this, free for personal use: [docs/phone.md](docs/phone.md) takes
+about five minutes. A phone gets in only once you pair it with a one-time code from the Company page
+here. It can look round and talk to everyone; answering and instructing agents from it needs
+**Control for 15 minutes** on this computer, and each such request is written down.
 
 ### A view-only link
 
