@@ -50,6 +50,7 @@ const deskTab = () => deskName() || 'Reception';
 let org = null; // the company map: floors and rooms
 let work = null; // what is going on in it
 let dir = 'sample'; // where they came from: data (your own company) or sample (made up)
+let firstRun = false; // no data/company.json yet: the Overview shows the one step to see your own work
 let feeds = []; // files in data/ that tools keep up to date (docs/connect.md)
 // Control of your Claude Code agents, with serve.py --control and your own company (control.js).
 const control = createControl({ busy: () => !!building?.walking?.() });
@@ -416,7 +417,7 @@ function setupDesk() {
     answer: (c) => has(c.q, ['task', 'goal']) && has(c.q, ['add', 'new', 'set', 'write', 'make', 'create']) && {
       lines: ['Tell me "remind me to ..." and I will add it as a task, in this tab only.', dir === 'data'
         ? 'Goals and everything else come from the company\'s own files, data/company.json and data/work.json, and from any tools connected to it. A change to the work shows within a few seconds.'
-        : 'Goals and everything else come from the sample files, sample/company.json and sample/work.json. Copy them into a folder called data beside them, change them and reload to make the building your own.'],
+        : 'Goals and everything else come from the sample files, sample/company.json and sample/work.json. To make the building your own, run python3 connect/setup.py in Arnheim\'s folder.'],
     },
   };
   poe = createPoe({
@@ -1230,6 +1231,7 @@ function viewOverview() {
       h('div.home-head', h('h2', { id: 'view-title', tabindex: '-1' }, heading), h('p', sub), noteOnce('.done-note')),
       fromAway() && h('p.small', h('strong', 'View only. '), 'You are looking from another device: you can look round and walk in, but nothing here changes anything.'),
       first ? focusCard(first) : h('div.all-clear', h('b', 'You are clear.'), 'Nothing is waiting on you right now.'),
+      firstRun && setupCard(),
       pauseCard(),
       clashCard(),
       rest.length > 0 && h('section.panel-card.home-more',
@@ -1262,9 +1264,41 @@ function viewOverview() {
         h('p', `Each floor of the building is a project and each room holds one kind of thing. Tap a floor to bring it out. Press Walk to go in and talk to the people at work, and to ${deskName() || 'the receptionist'} at the front desk.`),
         h('p', dir === 'data'
           ? 'Everything here comes from data/company.json (the building), and from data/work.json and any tools connected to it (what is going on in it). A change to the work shows within a few seconds; reload after changing the building.'
-          : 'Everything here comes from two files: sample/company.json (the building) and sample/work.json (what is going on in it). To show your own company, copy them into a folder called data beside them, change them and reload.')),
+          : 'Everything here comes from two files: sample/company.json (the building) and sample/work.json (what is going on in it). To show your own company, run python3 connect/setup.py in Arnheim\'s folder (README, "Connect your agents").')),
     ],
   };
+}
+
+// With no data/ yet: the one step from the made-up company to your own projects and agents
+// (connect/setup.py), with what it touches and what it never does.
+let setupNote = '';
+function setupCard() {
+  const command = 'python3 connect/setup.py';
+  const copy = (event) => {
+    const code = event.currentTarget.parentElement.querySelector('code');
+    const select = (el) => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      getSelection().removeAllRanges();
+      getSelection().addRange(range);
+    };
+    const older = () => { // for browsers that keep the clipboard to themselves
+      select(code);
+      let copied = false;
+      try { copied = document.execCommand('copy'); } catch { copied = false; }
+      setupNote = copied ? 'Copied.' : 'Selected: copy it with Ctrl-C, or Cmd-C on a Mac.';
+      render();
+      const again = !copied && document.querySelector('.setup-run code');
+      if (again) select(again);
+    };
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(command).then(() => { setupNote = 'Copied.'; render(); }, older);
+    else older();
+  };
+  return h('section.panel-card.setup-card',
+    sectHead('laptop', 'See your own agents here'),
+    h('p', `${org.company} is made up. To see your own projects, and the Claude Code conversations working in them, run this in a terminal, in Arnheim's folder:`),
+    h('div.setup-run', h('code', command), btn('Copy', copy), setupNote && h('span.small.muted', { role: 'status' }, setupNote)),
+    h('p.small.muted', 'It finds the projects you have worked on with Claude Code or Codex and asks before it changes anything. It writes your building to data/, a floor for each project, and adds Arnheim\'s hooks to Claude Code\'s settings, keeping a copy of each file first. It never changes your projects\' files, and python3 connect/setup.py --undo takes the hooks out again. Then reload this page. On Windows, type py instead of python3.'));
 }
 
 function floorCard(floor) {
@@ -1899,6 +1933,7 @@ async function readCompany() {
       feeds = feedList(map);
     } catch (error) {
       if (error.status !== 404) throw error;
+      firstRun = true;
     }
   }
   const [mapRead, now] = await Promise.all([map || readJson(`${dir}/company.json`), readWork()]);

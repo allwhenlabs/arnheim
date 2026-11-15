@@ -375,7 +375,8 @@ def company_note():
         if os.path.exists(os.path.join(ROOT, "data", "company.json")):
             return ["data/company.json links to somewhere outside this folder, which serve.py doesn't show, "
                     "so the page shows the made-up sample. Copy the files into data/ instead."]
-        return ["Showing the sample company, which is made up. To show your own, see \"Make it yours\" in README.md."]
+        return ["Showing the sample company, which is made up. To show your own projects and agents, run: "
+                f"{'py' if os.name == 'nt' else 'python3'} connect/setup.py"]
     lines = ["Showing your own company, from data/."]
     then = {"notes.json": "The founder's office has no notes until it is fixed."}
     for name in ("company.json", "work.json", "notes.json"):
@@ -389,17 +390,30 @@ def company_note():
     return lines
 
 
-def every_minute(name):
+def every_minute(name, when=None):
     """Every minute, runs a connector: connect/routines.py starts the routines that are due (each in the
-    background), connect/ping.py sends the ping that is due."""
+    background), connect/ping.py sends the ping that is due, connect/projects.py looks at git and GitHub.
+    With `when`, only in the minutes it says yes."""
     runner = os.path.join(ROOT, "connect", name)
     while True:
         try:
-            subprocess.run([sys.executable, runner], cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
-                           stderr=subprocess.DEVNULL, timeout=60)
+            if when is None or when():
+                subprocess.run([sys.executable, runner], cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, timeout=60)
         except (OSError, subprocess.SubprocessError):
             pass
         time.sleep(60 - time.time() % 60 + 1)  # just after each minute begins
+
+
+def floors_have_folders():
+    """Whether data/company.json gives any floor a folder, so there is git to look at (connect/setup.py
+    writes them). Read again each time, so a company made while this runs is seen within a minute."""
+    try:
+        with open(os.path.join(ROOT, "data", "company.json"), encoding="utf-8-sig") as handle:
+            company = json.load(handle)
+        return any(isinstance(f, dict) and (f.get("folder") or f.get("folders")) for f in company.get("floors") or [])
+    except (OSError, ValueError, AttributeError):
+        return False
 
 
 def main():
@@ -415,6 +429,8 @@ def main():
                         help="run the routines in data/company.json when they are due, while this runs (connect/routines.py)")
     parser.add_argument("--pings", action="store_true",
                         help="ping your phone with the morning brief and decisions that wait on you, as data/company.json says, while this runs (connect/ping.py)")
+    parser.add_argument("--no-git", action="store_true",
+                        help="don't look at your floors' folders for unsaved changes and open pull requests (connect/projects.py)")
     parser.add_argument("--brain", action="store_true",
                         help="let the receptionist and your assistant talk about anything, with Claude through your own Claude Code")
     args = parser.parse_args()
@@ -470,6 +486,11 @@ def main():
               "founder's notes. It stays the same each time; python3 serve.py --share --new-link makes a new one and ends this one.", flush=True)
     for line in company_note():
         print(line, flush=True)
+    if not args.no_git:  # each floor's unsaved changes and open pull requests, once there are floors with folders
+        threading.Thread(target=every_minute, args=("projects.py", floors_have_folders), daemon=True).start()
+        if floors_have_folders():
+            print("Looking at your floors' folders every minute for unsaved changes and open pull requests "
+                  "(connect/projects.py). --no-git leaves it off.", flush=True)
     if args.routines:
         threading.Thread(target=every_minute, args=("routines.py",), daemon=True).start()
         print("Routines are on: each floor's routines in data/company.json run when they are due, while this runs "

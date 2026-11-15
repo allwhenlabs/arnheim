@@ -29,6 +29,43 @@ follows along without a reload.
 - **From git**: a crate in the Code room when a project has changes not yet committed, with how
   many. **From GitHub**: a book for each open pull request.
 
+## The quick way
+
+In Arnheim's folder:
+
+```bash
+python3 connect/setup.py
+```
+
+It does steps 1 and 2 for you, and adds step 4's hook too, so control works as soon as you switch it
+on. It finds the projects you have worked on with Claude Code or Codex: it reads only the first lines
+of each recent conversation's file in `~/.claude/projects` (and `~/.codex/sessions`), which name the
+folder it ran in, never what was said. A folder inside a git repository counts as that repository,
+and so does a git worktree; the home folder, hidden and temporary folders, and a folder that only
+holds other projects are left out. It lists at most twelve, the most recent first, and asks which
+to use and what to call the building. Before it changes anything it says what it will do and asks.
+
+- **Your building.** With no `data/company.json`, it writes one: a floor for each project with the
+  Work, Conversations and Code rooms, the connectors' `feeds`, and a front desk with a receptionist.
+  With one already there, it only adds floors for projects that have none, and any of the connectors'
+  `feeds` it lacks, after keeping a copy in `data/backups/`.
+- **Claude Code's settings.** It adds Arnheim's hooks to `~/.claude/settings.json` (or the
+  `settings.json` in `CLAUDE_CONFIG_DIR`, if you set that), beside any hooks already there, after
+  keeping a copy beside it. The hooks run the Python that ran the setup, by a name that survives an
+  upgrade where there is one. A settings file that isn't valid JSON is left alone, with where the
+  mistake is. If another copy of Arnheim already has hooks there, it says so and changes nothing. If
+  you connected a project by hand in its own `.claude/settings.json` (step 2), it says so: take those
+  out, or Claude Code tells the building everything twice in that project.
+
+Running it again changes nothing that is already done. `--yes` takes every suggestion without
+asking, `--folder PATH` names a project yourself (give it again for more), `--name` names a new
+building, and `--no-hooks` leaves Claude Code's settings alone. Nothing is half done: if one file
+can't be written, neither is. `python3 connect/setup.py --undo`
+takes every one of Arnheim's hooks out of Claude Code's settings and leaves every other setting and
+hook there as it was; your building stays, and deleting the `data` folder goes back to the made-up company.
+
+`serve.py` does step 3 itself. The steps below do the same by hand, and say what each piece does.
+
 ## 1. Tell Arnheim where each project lives
 
 Start with your own company in `data/` (README, "Make it yours"). Then, in `data/company.json`,
@@ -101,7 +138,9 @@ echo '{"hook_event_name": "SessionEnd", "session_id": "try", "cwd": "/path/to/a/
 
 ## 3. Connect git and GitHub
 
-In a terminal beside `serve.py`, in Arnheim's folder:
+`serve.py` does this for you: once a floor names a folder, it looks every minute while it runs
+(`python3 serve.py --no-git` leaves it off). To run it yourself instead, in a terminal beside
+`serve.py`, in Arnheim's folder:
 
 ```bash
 python3 connect/projects.py --every 60
@@ -141,7 +180,7 @@ Optional, and off unless you switch it on. Then the person at this computer can:
   building does.
 
 To switch it on, connect Claude Code (step 2) and add one more hook beside those, for permission
-requests. It waits for your answer, so it gets a longer time limit:
+requests (`connect/setup.py` adds it for you). It waits for your answer, so it gets a longer time limit:
 
 ```json
 "PermissionRequest": [{ "hooks": [{ "type": "command", "command": "python3 /path/to/arnheim/connect/claude_code.py", "timeout": 150 }] }]
@@ -492,6 +531,9 @@ those every floor shares, as it starts, with where to read each one, and is aske
 that covers what it is about to do. In the building they stand on the Library's shelf.
 
 ## What is kept, and where
+
+`connect/setup.py` keeps a copy of each file before it changes it: `data/backups/company.before-arnheim-<when>.json`
+for your building, and `settings.before-arnheim-<when>.json` beside Claude Code's settings.
 
 The connectors write `data/feeds/claude-code.json` and `data/feeds/projects.json`. From Claude Code
 they keep, for each conversation: its title, or the first line of your first message; the first

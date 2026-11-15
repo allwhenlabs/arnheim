@@ -135,7 +135,9 @@ topics, or give them answers of its own ([docs/embed.md](docs/embed.md)).
 
 ## Make it yours
 
-Your company goes in a folder called `data`, beside `sample`:
+`python3 connect/setup.py` makes your company for you, a floor for each of your projects ("Connect
+your agents", below). To write it yourself, your company goes in a folder called `data`, beside
+`sample`:
 
 ```bash
 mkdir data
@@ -173,15 +175,26 @@ earrings. Anything you leave out keeps the default. Without an `assistant`, your
 
 ## Connect your agents
 
-Connected to Claude Code, each conversation you have with Claude shows on its project's floor:
-someone sits while Claude works, the floor turns amber when Claude needs your permission or an
-answer, and a blue light shows when it is your turn. git and GitHub add unsaved changes and open
-pull requests. Three steps, all in [docs/connect.md](docs/connect.md):
+One command, in Arnheim's folder:
 
-1. In `data/company.json`, give each floor its project's folder, and list the connectors' files as
-   `feeds`.
-2. Add Arnheim's hooks to Claude Code's settings.
-3. For git and GitHub, run `python3 connect/projects.py --every 60` beside `serve.py`.
+```bash
+python3 connect/setup.py
+```
+
+(On Windows, `py connect/setup.py`.) It finds the projects you have worked on with Claude Code or
+Codex, from the folder each recent
+conversation ran in (never from what was said), lists them, and asks before it changes anything.
+Then it gives each project a floor in `data/company.json` and adds Arnheim's hooks to Claude Code's
+settings, keeping a copy of each file first. It never changes your projects' files, running it again
+changes nothing, and `python3 connect/setup.py --undo` takes the hooks out. `--yes` takes every
+suggestion without asking, and `--folder ~/code/my-app` names a project yourself.
+
+Then start `python3 serve.py`. Each Claude Code conversation in those folders shows on its project's
+floor: someone sits while Claude works, the floor turns amber when Claude needs your permission or
+an answer, and a blue light shows when it is your turn. `serve.py` also looks in each floor's folder
+every minute, for changes not yet committed and, with GitHub's `gh` signed in, open pull requests
+(`--no-git` leaves that off). [docs/connect.md](docs/connect.md) does each step by hand instead,
+and says what each piece does.
 
 Then, if you like, switch on control: start Arnheim with `python3 serve.py --control`, and from
 the building you can talk to your agents for real, answer their permission requests with Allow or

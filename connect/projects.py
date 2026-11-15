@@ -27,7 +27,9 @@ FEED = os.path.join(DATA, "feeds", "projects.json")
 def run(args, folder, timeout=20):
     """A command's output, or None if it isn't there or fails. Fixed arguments, no shell."""
     try:
-        done = subprocess.run(args, cwd=folder, capture_output=True, text=True, timeout=timeout)
+        # GIT_OPTIONAL_LOCKS=0: git status never takes the index's lock, so an agent's commit never collides with a look
+        done = subprocess.run(args, cwd=folder, capture_output=True, text=True, timeout=timeout,
+                              env={**os.environ, "GIT_OPTIONAL_LOCKS": "0"})
     except (OSError, subprocess.TimeoutExpired):
         return None
     return done.stdout if done.returncode == 0 else None
