@@ -9,9 +9,9 @@ questions, and the live work lit up as it happens. Named after Edgar Allan Poe's
 
 - This repository will be public. Keep it free of personal data: no real names, email
   addresses, machine names, home-folder paths, account ids, private company data or
-  secrets. The demo runs on a sample company that is made up and says so. The one exception
-  is the README's last line, which the owner chose: the maker's name and Allwhen Labs, never
-  their role there.
+  secrets. The demo runs on a sample company that is made up and says so. The two exceptions,
+  both the owner's choice, are the README's last line (the maker's name and Allwhen Labs, never
+  their role there) and the author fields in `CITATION.cff` (the maker's name only).
 - The name is just Arnheim. Never put a company name in front of it.
 - Third-party code keeps its licence and notices: three.js (MIT), Lucide icons (ISC), and
   House Control (MIT), whose design this builds on. They go in THIRD_PARTY_NOTICES.md.

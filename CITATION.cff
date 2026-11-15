@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: Arnheim
+type: software
+authors:
+  - given-names: Alistair
+    family-names: Akrofi-Mantey
+license: MIT
+repository-code: "https://github.com/allwhenlabs/arnheim"
+url: "https://allwhengroup.com/arnheim"
