@@ -169,7 +169,8 @@ export function createWalk(ctx) {
   const floorName = button('', () => (picker.hidden ? openPicker() : closePicker()), 'Choose a floor for the lift');
   floorName.classList.add('aw-name');
   const floorBox = el('div', 'aw-floor');
-  floorBox.append(button('▼', () => stepFloor(-1), 'Take the lift down a floor'), floorName, button('▲', () => stepFloor(1), 'Take the lift up a floor'));
+  const helpButton = button('?', () => showHelp(help.classList.contains('aw-faded')), 'Show how to walk');
+  floorBox.append(button('▼', () => stepFloor(-1), 'Take the lift down a floor'), floorName, button('▲', () => stepFloor(1), 'Take the lift up a floor'), helpButton);
   hud.append(button('Leave', () => ctx.leave(), 'Leave the walk'), floorBox);
   const picker = el('div', 'aw-picker');
   picker.hidden = true;
@@ -184,9 +185,11 @@ export function createWalk(ctx) {
   cardText.append(cardTitle, cardSub);
   const openButton = button('Open', () => ctx.leave(), 'Leave the walk and open this in the list');
   card.append(cardText, openButton);
-  const help = el('p', 'aw-help', coarse
-    ? 'Walk with the stick and drag to look. Tap the floor to go there, or something to open it. The lift is where you arrive, and ▲ ▼ at the top take it from anywhere. Double-tap to burn this floor and rebuild it.'
-    : 'WASD or the arrow keys to walk, Shift to hurry, drag to look. Click the floor to go there, or something to open it. The lift is where you arrive, and ▲ ▼ at the top take it from anywhere. Double-click to burn this floor and rebuild it. Esc to leave.');
+  // How to walk, said for the hands in use; the burn is only mentioned where it plays (not with reduced motion).
+  const helpText = () => (coarse
+    ? `Walk with the stick and drag to look. Tap the floor to go there, or someone to walk over and talk. The lift is where you arrive, and ▲ ▼ at the top take it from anywhere.${still() ? '' : ' Double-tap to burn this floor and rebuild it.'} ? brings this back.`
+    : `WASD or the arrow keys to walk, Shift to hurry, drag to look. Click the floor to go there, or someone to walk over and talk. The lift is where you arrive, and ▲ ▼ at the top (or Page Up and Page Down) take it from anywhere.${still() ? '' : ' Double-click to burn this floor and rebuild it.'} Esc to leave, ? brings this back.`);
+  const help = el('p', 'aw-help', helpText());
   const stickEl = el('div', 'aw-stick');
   const knob = el('span');
   stickEl.append(knob);
@@ -203,7 +206,15 @@ export function createWalk(ctx) {
   stage.classList.add('arnheim-walking');
   // Talking with whoever's ring you stand in, by typing or out loud (voice.js).
   const voice = createVoice({ hud, card, ctx, el, button, signal });
-  const helpTimer = setTimeout(() => help.classList.add('aw-faded'), 9000);
+  let helpTimer = 0;
+  function showHelp(on = true) {
+    clearTimeout(helpTimer);
+    help.textContent = helpText();
+    help.classList.toggle('aw-faded', !on);
+    helpButton.setAttribute('aria-pressed', String(on));
+    if (on) helpTimer = setTimeout(() => showHelp(false), 12000);
+  }
+  showHelp();
   // The founder's notes, hung in their office (walk-notes.js): the page gives them and is asked for more.
   const notes = createWalkNotes({
     stage, signal, coarse, notes: ctx.notes?.(), ask: () => ctx.onNotes?.(), wake: ctx.wake,
@@ -609,12 +620,61 @@ export function createWalk(ctx) {
   function move(dx, dz) {
     const steps = Math.max(1, Math.ceil(Math.hypot(dx, dz) / 0.08));
     const loose = blocked(me.x, me.z);
+    const onPlan = (x, z) => x - RADIUS >= map.x0 && z - RADIUS >= map.z0 && x + RADIUS <= map.x0 + map.cols * CELL && z + RADIUS <= map.z0 + map.rows * CELL;
     for (let i = 0; i < steps; i++) {
       const nx = me.x + dx / steps;
-      if (loose || !blocked(nx, me.z)) me.x = nx;
+      if (loose ? onPlan(nx, me.z) : !blocked(nx, me.z)) me.x = nx;
       const nz = me.z + dz / steps;
-      if (loose || !blocked(me.x, nz)) me.z = nz;
+      if (loose ? onPlan(me.x, nz) : !blocked(me.x, nz)) me.z = nz;
     }
+  }
+
+  // The nearest spot to (x, z) with room to stand: a body's width off walls and furniture where there is
+  // one close by, else simply clear. Null if nothing near is.
+  function roomAt(x, z) {
+    // from a clear spot, only places in plain sight of it: never one on the far side of a wall, which
+    // the walker would go the long way round to reach (a narrow corridor keeps the spot itself instead)
+    const open = !blocked(x, z, true);
+    const sight = (px, pz) => {
+      if (!open) return true;
+      const steps = Math.ceil(Math.hypot(px - x, pz - z) / (CELL / 2));
+      for (let i = 1; i <= steps; i++) if (blocked(x + ((px - x) * i) / steps, z + ((pz - z) * i) / steps, true)) return false;
+      return true;
+    };
+    const roomy = (px, pz) => !blocked(px, pz, true) && [[0.3, 0], [-0.3, 0], [0, 0.3], [0, -0.3]].every(([ox, oz]) => !blocked(px + ox, pz + oz, true)) && sight(px, pz);
+    for (const fits of [roomy, (px, pz) => !blocked(px, pz, true)]) {
+      if (fits(x, z)) return { x, z };
+      for (let r = 0.15; r <= 1.2; r += 0.15) {
+        for (let a = 0; a < Math.PI * 2; a += Math.PI / 12) {
+          const px = x + Math.cos(a) * r;
+          const pz = z + Math.sin(a) * r;
+          if (fits(px, pz)) return { x: px, z: pz };
+        }
+      }
+    }
+    return null;
+  }
+
+  // How far you could see ahead along a heading before a wall: for turning away from one on arrival.
+  function openAhead(yaw) {
+    const dx = -Math.sin(yaw);
+    const dz = -Math.cos(yaw);
+    let d = 0.25;
+    while (d < 6 && !blocked(me.x + dx * d, me.z + dz * d, true)) d += 0.25;
+    return d;
+  }
+
+  // Arriving with your nose to a wall, you turn to the most open view, the least turn away.
+  function faceTheRoom() {
+    if (openAhead(me.yawGoal) >= 1.6) return;
+    let best = me.yawGoal;
+    let score = -Infinity;
+    for (let i = 1; i < 16; i++) {
+      const turn = ((i % 2 ? 1 : -1) * Math.ceil(i / 2) * Math.PI) / 8;
+      const s = openAhead(me.yawGoal + turn) - Math.abs(turn) * 0.6;
+      if (s > score) { score = s; best = me.yawGoal + turn; }
+    }
+    me.yawGoal = best;
   }
 
   function free() {
@@ -688,7 +748,11 @@ export function createWalk(ctx) {
     if (event.key === 'Escape') {
       event.preventDefault();
       if (!picker.hidden) closePicker();
+      else if (!card.hidden && !card.classList.contains('aw-talking')) { clearTimeout(cardTimer); card.hidden = true; }
       else ctx.leave();
+    } else if (event.key === '?') {
+      event.preventDefault();
+      showHelp(help.classList.contains('aw-faded'));
     } else if (event.key === 'PageUp' || event.key === 'PageDown') {
       event.preventDefault();
       stepFloor(event.key === 'PageUp' ? 1 : -1);
@@ -699,7 +763,11 @@ export function createWalk(ctx) {
       input();
     }
   }, { signal });
-  window.addEventListener('keyup', (event) => { keys.delete(event.code); }, { signal });
+  window.addEventListener('keyup', (event) => {
+    keys.delete(event.code);
+    if (event.key === 'Meta') keys.clear(); // a Mac drops the key-up of anything held while Cmd was down
+  }, { signal });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) keys.clear(); }, { signal });
   window.addEventListener('blur', () => keys.clear(), { signal });
 
   // Drag to look, as if taking hold of the world; a quick tap goes somewhere or opens something.
@@ -822,7 +890,11 @@ export function createWalk(ctx) {
     if (!surface) return;
     const spot = here.group.worldToLocal(surface.point.clone());
     if (spot.y > 0.08) spot.copy(here.group.worldToLocal(surface.point.clone().addScaledVector(ray.ray.direction, -0.5)));
-    me.target = { x: spot.x, z: spot.z };
+    const goal = roomAt(spot.x, spot.z);
+    const way = goal && wayTo(goal.x, goal.z);
+    if (!way) return; // nowhere to stand there, or no way to it: you stay where you are
+    me.target = { ...way.shift(), next: way, open: true };
+    ctx.wake(2);
   }
 
   // The stick, for thumbs: up walks ahead, sideways steps aside.
@@ -863,7 +935,7 @@ export function createWalk(ctx) {
     if (!here) return false;
     let busy = false;
     if (ride) { advance(dt); busy = true; }
-    if (!ride && ctx.version() !== seen && now - surveyed > 1500) { look(); placeSpots(); }
+    if (!ride && ctx.version() !== seen && now - surveyed > 1500) { look(); placeSpots(); free(); }
 
     // Turning: smooth, whether by drag, keys or walking somewhere.
     const turn = (keys.has('ArrowLeft') ? 1 : 0) - (keys.has('ArrowRight') ? 1 : 0);
@@ -904,7 +976,7 @@ export function createWalk(ctx) {
     } else if (me.target) {
       // On a way with corners (walkToTalk), each corner is passed on the move, not stopped at.
       if (me.target.next?.length && Math.hypot(me.target.x - me.x, me.target.z - me.z) < 0.3) {
-        me.target = { ...me.target.next.shift(), next: me.target.next, face: me.target.face };
+        me.target = { ...me.target.next.shift(), next: me.target.next, face: me.target.face, open: me.target.open };
       }
       const last = !me.target.next?.length;
       const dx = me.target.x - me.x;
@@ -912,7 +984,9 @@ export function createWalk(ctx) {
       const dist = Math.hypot(dx, dz);
       if (last && dist < 0.12) {
         const them = me.target.face;
+        const open = me.target.open;
         me.target = null;
+        if (open) faceTheRoom();
         if (them) {
           const turn = Math.atan2(-(them[0] - me.x), -(them[1] - me.z)) - me.yawGoal;
           me.yawGoal += Math.atan2(Math.sin(turn), Math.cos(turn));
@@ -1112,7 +1186,9 @@ export function createWalk(ctx) {
 
   /* ---------- start: at the reception's door, or at the lift of the floor in view ---------- */
 
-  const first = storeys.find((s) => s.id === ctx.start) || storeys.find((s) => s.role === 'lobby') || order[0];
+  // with no lobby, the floor nearest the ground, and above it rather than the basement below
+  const ground = [...storeys].sort((a, b) => Math.abs(a.y) - Math.abs(b.y) || b.y - a.y)[0];
+  const first = storeys.find((s) => s.id === ctx.start) || storeys.find((s) => s.role === 'lobby') || ground;
   for (const s of storeys) s.group.visible = false; // one floor at a time
   enter(first, first.role === 'lobby' ? 'entrance' : 'lift');
   // No effect on arrival: the walk simply opens on the finished rooms.
@@ -1143,6 +1219,9 @@ export function createWalk(ctx) {
   // For tests: whether a spot on this floor stops the walker, and the squares they can reach from where they stand.
   const debug = { blocked: (x, z) => blocked(x, z), reach: () => reach(), map: () => map, me: () => ({ x: me.x, z: me.z }), doors: () => Object.fromEntries(doors), labels: () => labels(),
     // walks you to a spot on this floor, round whatever is in the way (for tests)
-    go(x, z) { const way = wayTo(x, z); if (way) { me.target = { ...way.shift(), next: way }; ctx.wake(2); } return !!way; } };
+    go(x, z) { const way = wayTo(x, z); if (way) { me.target = { ...way.shift(), next: way }; ctx.wake(2); } return !!way; },
+    // what a tap on the floor at (x, z) does: where you would end up standing, and whether there is a way
+    tapTo(x, z) { const goal = roomAt(x, z); const way = goal && wayTo(goal.x, goal.z); if (way) { me.target = { ...way.shift(), next: way, open: true }; ctx.wake(2); } return way ? goal : null; },
+    yaw: () => me.yawGoal, openAhead: (yaw) => openAhead(yaw ?? me.yawGoal) };
   return { update, labels, info, dispose, setNotes: notes.set, debug };
 }

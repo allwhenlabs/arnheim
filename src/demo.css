@@ -78,6 +78,11 @@ svg.icon { flex: none; vertical-align: -2px; }
   align-items: center; justify-content: center; text-align: center; background: var(--stage); pointer-events: none;
 }
 #stage-fail p { margin: 0; max-width: 340px; }
+#walk-opening {
+  position: absolute; z-index: 3; top: 50%; left: 50%; transform: translate(-50%, -50%); margin: 0; padding: 9px 16px;
+  border-radius: 999px; background: rgba(14, 16, 24, .78); color: #f7f2ea; font-size: 14px; font-weight: 600; pointer-events: none;
+}
+#walk-opening[hidden] { display: none; }
 #stage-retry { pointer-events: auto; padding: 8px 18px; border-radius: 8px; cursor: pointer; background: var(--surface); border: 1px solid var(--line); }
 #tip {
   position: absolute; z-index: 3; pointer-events: none; max-width: 260px; font-size: 13px; padding: 6px 10px; border-radius: 8px;

@@ -1077,7 +1077,7 @@ function forgetIt(r) {
 function watchStart(p) {
   const floor = org.floors.find((f) => f.project === p.project);
   const room = floor && roomsOf(floor).find((r) => kindOf(floor, r) === 'conversations');
-  if (room && !building?.walking?.()) location.hash = `#/${floor.id}/${room.id}`;
+  if (room && !building?.walking?.() && !walkOn()) location.hash = `#/${floor.id}/${room.id}`;
 }
 
 // Allows every waiting read at once ("allow all the reads"): what to say when it's done.
@@ -1740,6 +1740,7 @@ function restartModel() {
   clearTimeout(modelTimer);
   clearTimeout(steadyTimer);
   building?.dispose();
+  opening(false);
   setWalking(false);
   building = null;
   if (modelTries >= MODEL_WAITS.length) {
@@ -1765,10 +1766,20 @@ function onModelStatus(status) {
   }
 }
 
+// three.js needs WebGL 2. A browser or machine without it gets the list on its own, said once.
+function hasWebGL2() {
+  try {
+    const gl = document.createElement('canvas').getContext('webgl2');
+    gl?.getExtension('WEBGL_lose_context')?.loseContext(); // only asked, so give it straight back
+    return !!gl;
+  } catch { return false; }
+}
+
 async function startBuilding() {
-  if (params.has('list')) {
+  if (params.has('list') || !hasWebGL2()) {
     document.body.classList.add('no-3d');
     $('walk').hidden = true;
+    if (!params.has('list')) console.warn('Arnheim: this browser has no WebGL 2, so the building is shown as a list.');
     return;
   }
   try {
@@ -1787,12 +1798,12 @@ async function startBuilding() {
       onNotes: showNotes,
       onPick(hit) {
         tip.hidden = true;
-        if (hit.company) { location.hash = '#/company'; return; }
-        if (hit.href === DESK) { primeBrain('receptionist'); location.hash = DESK; return; }
+        if (hit.company) { goTo('#/company'); return; }
+        if (hit.href === DESK) { primeBrain('receptionist'); goTo(DESK); return; }
         if (isAide(hit)) { primeBrain('assistant'); return; } // she has no page of her own: the talk opens in the walk
-        if (hit.walk) { location.hash = hit.href || `#/${hit.floorId}/${hit.roomId}`; return; }
-        if (route.floor !== hit.floorId) { location.hash = `#/${hit.floorId}`; return; }
-        location.hash = hit.href || `#/${hit.floorId}/${hit.roomId}`;
+        if (hit.walk) { goTo(hit.href || `#/${hit.floorId}/${hit.roomId}`); return; }
+        if (route.floor !== hit.floorId) { goTo(`#/${hit.floorId}`); return; }
+        goTo(hit.href || `#/${hit.floorId}/${hit.roomId}`);
       },
       onHover(info, x, y) {
         tip.hidden = !info;
@@ -1836,23 +1847,89 @@ async function showNotes() {
   }
 }
 
-function setWalking(on) {
-  $('walk').setAttribute('aria-pressed', String(!!on));
+const walkOn = () => $('walk').getAttribute('aria-pressed') === 'true';
+
+// The walk is one step in the browser's history: Back (or a phone's back gesture) leaves it. While it
+// is open, whatever changes the panel (a ring you stand in, something tapped, a link or button in the
+// panel) replaces the address instead of adding a step, so the only steps are Back and Forward and one
+// Back is always enough. Each walk marks its step with its own number, so an old walk's step never
+// counts as this one's. The numbers carry this page load's own mark too, since a step's mark outlives
+// a reload, and a mark left by an earlier load is cleared as the page starts.
+let walkFrom = '';
+let walkStep = 0;
+let walkMark = '';
+const pageMark = `${Math.round(performance.timeOrigin)}.${Math.random().toString(36).slice(2, 8)}`;
+if (window.history.state?.arnheimWalk) window.history.replaceState(null, '', location.href);
+function goTo(hash) {
+  if (!walkOn()) { location.hash = hash; return; }
+  if (location.hash === hash) return;
+  window.history.replaceState(window.history.state, '', hash);
+  onRoute();
 }
 
+function setWalking(on) {
+  const was = walkOn();
+  // Coming out of the walk, a key still held or pressed straight after (A or D in the walk) waits a
+  // second, like any change of the home view's first item, so it can never answer a request.
+  if (was && !on) focusSince = Date.now();
+  $('walk').setAttribute('aria-pressed', String(!!on));
+  if (on && !was) {
+    walkStep += 1;
+    walkMark = `${pageMark}:${walkStep}`;
+    window.history.pushState({ arnheimWalk: walkMark }, '', location.href);
+    walkFrom = location.href;
+  } else if (was && !on && window.history.state?.arnheimWalk === walkMark) {
+    // left where it started: the step it added goes again, so Back isn't pressed for nothing; left
+    // somewhere else: that step stays, as the place the walk took you, but no longer as a walk
+    if (location.href === walkFrom) window.history.back();
+    else window.history.replaceState(null, '', location.href);
+  }
+}
+
+window.addEventListener('popstate', (event) => {
+  if (walkOn() && event.state?.arnheimWalk !== walkMark) { opening(false); setWalking(false); building?.walk(false); }
+});
+// a link in the panel, clicked mid-walk, goes through goTo like everything else
+document.addEventListener('click', (event) => {
+  if (!walkOn() || event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  const link = event.target.closest?.('a[href^="#"]');
+  if (!link || link.target) return;
+  event.preventDefault();
+  goTo(link.getAttribute('href'));
+}, true);
+
+let walkOpening = 0;
 async function toggleWalk() {
   if (!building) return;
-  const on = !building.walking();
+  const on = !building.walking() && !walkOn();
   setWalking(on);
   document.activeElement?.blur?.(); // so Space and Enter don't press the button again mid-walk
-  setWalking(await building.walk(on));
+  if (!on) { opening(false); setWalking(await building.walk(false)); return; }
+  // the walk can take a few seconds to open (the building and its real materials load first): say so
+  const ask = ++walkOpening;
+  const note = setTimeout(() => { if (ask === walkOpening && walkOn()) opening(true); }, 250);
+  let walking = false;
+  try {
+    walking = await building.walk(true);
+  } catch (error) {
+    console.error('Arnheim: the walk did not open.', error); // its files didn't load: Walk lets go again
+  }
+  clearTimeout(note);
+  if (ask !== walkOpening) return; // pressed again while it opened: that press decides
+  opening(false);
+  setWalking(walking && walkOn());
+  if (walking && !walkOn()) building.walk(false); // Leave was pressed while it opened
+}
+
+function opening(on) {
+  $('walk-opening').hidden = !on;
 }
 
 function setupStageTools() {
   $('zoom-in').addEventListener('click', () => building?.zoomBy(0.86));
   $('zoom-out').addEventListener('click', () => building?.zoomBy(1.16));
   $('view-reset').addEventListener('click', () => building?.resetView());
-  $('view-back').addEventListener('click', () => { location.hash = '#/company'; });
+  $('view-back').addEventListener('click', () => goTo('#/company'));
   $('stage-retry').addEventListener('click', () => {
     if (!modelLoaded) { location.reload(); return; } // the files themselves never arrived
     modelTries = 0;
@@ -2116,10 +2193,11 @@ async function boot() {
   await startBuilding();
   onRoute();
   window.addEventListener('hashchange', onRoute);
-  $('back').addEventListener('click', () => { location.hash = parentHash(); });
+  $('back').addEventListener('click', () => goTo(parentHash()));
   $('content').addEventListener('focusout', () => { if (pending) setTimeout(render, 0); });
   document.addEventListener('keydown', (event) => {
-    if (building?.walking?.()) return; // the walk has its own keys
+    // the walk has its own keys, from the moment Walk is pressed (it takes a moment to open) until it has closed
+    if (building?.walking?.() || walkOn()) return;
     const typing = event.target.matches?.('input, select, textarea, [contenteditable]');
     const free = !typing && !event.metaKey && !event.ctrlKey && !event.altKey;
     if (event.key === 'Escape') {

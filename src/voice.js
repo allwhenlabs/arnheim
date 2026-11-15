@@ -633,6 +633,18 @@ export function createVoice({ hud, card, ctx, el, button, signal }) {
     audio = null;
   }
 
+  // A tab you've left neither listens nor talks: the microphone closes, any answer on its way is dropped,
+  // and it listens again when you come back.
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      gen += 1;
+      hush();
+      stopEar();
+      if (who) mode = 'listening';
+      drawLine();
+    } else if (on && who) listen();
+  }, { signal });
+
   drawToggle();
   drawLine();
   if (on && talk) wake();

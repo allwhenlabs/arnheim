@@ -992,7 +992,8 @@ export function createPhotoBuilding(canvas, org, { base, people: ownPeople, onPi
       personRoom.person.tick(now / 1000);
       any = true;
     }
-    if (walker && officeTick && walker.info()?.floor === 'penthouse') {
+    // the assistant breathes for a while after you last moved, like the receptionist, not forever (each check reads the page's layout)
+    if (walker && officeTick && now - lastActive < PULSE_MS * 2 && walker.info()?.floor === 'penthouse') {
       officeTick(now / 1000);
       any = true;
     }
@@ -1359,6 +1360,9 @@ export function createPhotoBuilding(canvas, org, { base, people: ownPeople, onPi
 
   async function walk(on = true) {
     if (!on) { endWalk(); return false; }
+    if (walker || disposed) return !!walker;
+    // pressed while the building still loads: the walk opens as soon as it has
+    if (!ready) await loaded;
     if (walker || disposed || !ready) return !!walker;
     walkStart ??= import('./walk.js');
     const { createWalk, loadStyle } = await walkStart;
@@ -1486,7 +1490,7 @@ export function createPhotoBuilding(canvas, org, { base, people: ownPeople, onPi
   setTheme(true);
   resize();
   observer.observe(canvas);
-  load().catch((error) => {
+  const loaded = load().catch((error) => {
     failed = error;
     console.error('Arnheim: the photo-real building could not load.', error);
     onStatus?.('blank');

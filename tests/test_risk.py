@@ -99,6 +99,16 @@ class RiskTest(unittest.TestCase):
         self.assertIn("if (answered.has(i.ask.id)) return;", page)
         self.assertEqual(page.count("controlDone(answerAsk(i.ask.id"), 1)  # only inside answerOnce
 
+    def test_walk_keys_never_answer(self):
+        # the walk's own keys (A and D move you) never reach the home view's answers: not while the walk is
+        # opening, not while it is open, and not in the second after it closes
+        with open(os.path.join(ROOT, "src", "demo.js"), encoding="utf-8") as handle:
+            page = handle.read()
+        self.assertIn("if (building?.walking?.() || walkOn()) return;", page)
+        self.assertIn("if (was && !on) focusSince = Date.now();", page)
+        guard = page.index("if (building?.walking?.() || walkOn()) return;")
+        self.assertLess(guard, page.index("answerOnce(i, key === 'a' ? 'allow' : 'deny');"))
+
     def test_no_allow_button_is_green(self):
         # every request that asks reaches outside the project or changes something: yes is never the easy reflex
         with open(os.path.join(ROOT, "src", "demo.js"), encoding="utf-8") as handle:
