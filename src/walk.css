@@ -7,6 +7,7 @@
 .aw-btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-width: 40px; min-height: 40px; padding: 0 14px; border-radius: 12px; border: 1px solid rgba(255, 255, 255, .22); background: rgba(14, 16, 24, .68); color: #f7f2ea; font: 600 14px/1.1 -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif; cursor: pointer; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
 .aw-btn:hover { background: rgba(14, 16, 24, .86); }
 .aw-btn:disabled { cursor: default; }
+.aw-floor .aw-btn[aria-disabled="true"] { opacity: .38; cursor: default; }
 .aw-btn:focus-visible { outline: 2px solid #ffcf8f; outline-offset: 2px; }
 .aw-floor { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
 .aw-btn[aria-pressed="true"] { border-color: #ffcf8f; color: #ffd9a8; }

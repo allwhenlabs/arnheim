@@ -170,7 +170,26 @@ export function createWalk(ctx) {
   floorName.classList.add('aw-name');
   const floorBox = el('div', 'aw-floor');
   const helpButton = button('?', () => showHelp(help.classList.contains('aw-faded')), 'Show how to walk');
-  floorBox.append(button('▼', () => stepFloor(-1), 'Take the lift down a floor'), floorName, button('▲', () => stepFloor(1), 'Take the lift up a floor'), helpButton);
+  const downButton = button('▼', () => stepFloor(-1), 'Take the lift down a floor');
+  const upButton = button('▲', () => stepFloor(1), 'Take the lift up a floor');
+  floorBox.append(downButton, floorName, upButton, helpButton);
+  // ▲ on the top floor and ▼ on the bottom one, or either while the lift moves, can't go: they say so
+  let liftDrawn = '';
+  function drawLiftButtons() {
+    const i = order.indexOf(here);
+    const sig = `${i}:${!!ride}`;
+    if (sig === liftDrawn) return;
+    liftDrawn = sig;
+    const top = i <= 0;
+    const bottom = i >= order.length - 1;
+    // aria-disabled, not disabled: a button that keeps its focus (the press itself is refused by stepFloor and rideTo)
+    upButton.setAttribute('aria-disabled', String(!!ride || top));
+    downButton.setAttribute('aria-disabled', String(!!ride || bottom));
+    upButton.setAttribute('aria-label', top ? 'The top floor: the lift goes no higher' : 'Take the lift up a floor');
+    downButton.setAttribute('aria-label', bottom ? 'The bottom floor: the lift goes no lower' : 'Take the lift down a floor');
+    upButton.title = top ? 'The top floor' : '';
+    downButton.title = bottom ? 'The bottom floor' : '';
+  }
   // Take me to what needs me: shown while anything in the building needs you, with how many. Each press
   // goes to the next one, by the lift if it is on another floor.
   const needsButton = button('', () => goToNeeds(), 'Take me to what needs me');
@@ -635,6 +654,7 @@ export function createWalk(ctx) {
     hall.setDoors(0);
     inLift = hall.inLift(me.x, me.z);
     floorName.textContent = s.label;
+    drawLiftButtons();
     drawNeeds(); // the button's count, and this floor's marks on the plan
     const p = s.group.position;
     ctx.shadows(new THREE.Vector3(p.x + (hall.west + hall.east) / 2, p.y + 1, p.z + hall.front / 2), Math.max(hall.east - hall.west, hall.front) / 2 + 2);
@@ -651,7 +671,10 @@ export function createWalk(ctx) {
 
   // Reads the floor as it stands: what stops you (anything between knee and chest height, drawn
   // onto a grid) and what a tap can land on.
-  function survey(s) {
+  // The floor's fixed part (its walls, the hall, the lift) is surveyed once a visit; a live change (people
+  // moving seats, a desk coming or going) only looks again at what stands in the rooms, which is all it can
+  // change. `again`: the survey of the fixed part from the last full one.
+  function survey(s, again = null) {
     s.group.updateMatrixWorld(true);
     const inv = new THREE.Matrix4().copy(s.group.matrixWorld).invert();
     const m = new THREE.Matrix4();
@@ -662,9 +685,11 @@ export function createWalk(ctx) {
     const z0 = (hall.north ?? 0) - 0.4;
     const cols = Math.ceil((hall.east + 0.4 - x0) / CELL);
     const rows = Math.ceil((hall.front + 0.4 - z0) / CELL);
-    const cells = new Uint8Array(cols * rows); // what stops you
-    const sight = new Uint8Array(cols * rows); // what hides a name behind it: walls and tall things
-    const solids = [];
+    const contents = new Set(s.rooms.map((r) => r.content).filter(Boolean)); // what live changes replace
+    const same = again && again.cols === cols && again.rows === rows && again.x0 === x0 && again.z0 === z0;
+    const cells = same ? again.cells.slice() : new Uint8Array(cols * rows); // what stops you
+    const sight = same ? again.sight.slice() : new Uint8Array(cols * rows); // what hides a name behind it: walls and tall things
+    const solids = same ? again.solids.slice() : [];
     const mark = (grid, xa, xb, za, zb) => {
       const c0 = Math.max(0, Math.floor((xa - x0) / CELL));
       const c1 = Math.min(cols - 1, Math.floor((xb - x0) / CELL));
@@ -672,8 +697,9 @@ export function createWalk(ctx) {
       const r1 = Math.min(rows - 1, Math.floor((zb - z0) / CELL));
       for (let r = r0; r <= r1; r++) for (let q = c0; q <= c1; q++) grid[r * cols + q] = 1;
     };
-    const visit = (o, top) => {
+    const visit = (o, top, skip = null) => {
       if (!top && !o.visible) return;
+      if (skip?.has(o)) return;
       if (o.isMesh && !o.userData.hit) {
         const mt = Array.isArray(o.material) ? o.material[0] : o.material;
         if (mt && mt.colorWrite !== false) {
@@ -694,17 +720,43 @@ export function createWalk(ctx) {
               const xb = Math.max(a.x, b.x, c.x);
               const za = Math.min(a.z, b.z, c.z);
               const zb = Math.max(a.z, b.z, c.z);
-              if (lo <= 1.5) mark(cells, xa, xb, za, zb);
-              if (hi > 1.6) mark(sight, xa, xb, za, zb);
+              if (lo <= 1.5) mark(scanInto ? scanInto.cells : cells, xa, xb, za, zb);
+              if (hi > 1.6) mark(scanInto ? scanInto.sight : sight, xa, xb, za, zb);
             }
           }
         }
       }
-      for (const child of o.children) visit(child, false);
+      for (const child of o.children) visit(child, false, skip);
     };
-    visit(s.group, true);
-    return { x0, z0, cols, rows, cells, sight, solids };
+    let fixed = null;
+    if (!same) {
+      visit(s.group, true, contents);
+      fixed = { x0, z0, cols, rows, cells: cells.slice(), sight: sight.slice(), solids: solids.slice() };
+    }
+    // a room whose contents a change didn't rebuild has the same group as before: its squares are reused
+    const key = `${s.id}:${x0}:${z0}:${cols}:${rows}`;
+    for (const content of contents) {
+      if (!content.parent || !content.visible) continue;
+      let found = roomScans.get(content);
+      if (found?.key !== key) {
+        const before = solids.length;
+        const mine = new Uint8Array(cols * rows);
+        const mineSight = new Uint8Array(cols * rows);
+        const into = { cells: mine, sight: mineSight };
+        scanInto = into;
+        try { visit(content, true); } finally { scanInto = null; }
+        const ones = (grid) => { const out = []; for (let i = 0; i < grid.length; i++) if (grid[i]) out.push(i); return out; };
+        found = { key, cells: ones(mine), sight: ones(mineSight), solids: solids.splice(before) };
+        roomScans.set(content, found);
+      }
+      for (const i of found.cells) cells[i] = 1;
+      for (const i of found.sight) sight[i] = 1;
+      solids.push(...found.solids);
+    }
+    return { x0, z0, cols, rows, cells, sight, solids, fixed: fixed || again };
   }
+  const roomScans = new WeakMap(); // a room's contents -> the squares they stop and hide, and their meshes
+  let scanInto = null; // while one room's contents are scanned: the grids they mark
 
   // Whether the walker can see a spot on this floor, or a wall or something tall is in the way.
   function inView(x1, z1) {
@@ -720,8 +772,10 @@ export function createWalk(ctx) {
     }
     return true;
   }
-  function look() {
-    map = survey(here);
+  // again: only what stands in the rooms has changed (a live change on the floor you are on)
+  function look(again = false) {
+    map = survey(here, again && map?.floor === here ? map.fixed : null);
+    map.floor = here;
     surveyed = performance.now();
     seen = ctx.version();
   }
@@ -1237,7 +1291,7 @@ export function createWalk(ctx) {
     if (!here) return false;
     let busy = false;
     if (ride) { advance(dt); busy = true; }
-    if (!ride && ctx.version() !== seen && now - surveyed > 1500) { look(); placeSpots(); free(); planBaseOf(); drawNeeds(); }
+    if (!ride && ctx.version() !== seen && now - surveyed > 1500) { look(true); placeSpots(); free(); planBaseOf(); drawNeeds(); }
 
     // Turning: smooth, whether by drag, keys or walking somewhere.
     const turn = (keys.has('ArrowLeft') ? 1 : 0) - (keys.has('ArrowRight') ? 1 : 0);
@@ -1387,6 +1441,7 @@ export function createWalk(ctx) {
     lastYaw = camera.rotation.y;
     lastPitch = camera.rotation.x;
     drawPlan();
+    drawLiftButtons(); // only touches the page when the floor or the ride changed
     return busy;
   }
 
@@ -1474,6 +1529,8 @@ export function createWalk(ctx) {
     for (const entry of halls.values()) {
       entry.group.removeFromParent();
       entry.dispose();
+      // the invisible boxes that take taps (the lift, a desk, the receptionist, the assistant) are the walk's own
+      for (const pick of entry.picks || []) pick.geometry?.dispose?.();
     }
     halls.clear();
     notes.dispose();
@@ -1579,6 +1636,16 @@ export function createWalk(ctx) {
     rings: () => spots.map((s) => ({ title: s.who.title, x: s.x, z: s.z, way: !!wayTo(s.x, s.z) })),
     roomAt: (x, z) => { const g = roomAt(x, z); return g && { ...g, way: !!wayTo(g.x, g.z) }; },
     target: () => (me.target ? { x: me.target.x, z: me.target.z, left: me.target.next?.length || 0 } : null),
-    needs: () => needsAll().map((n) => ({ floor: n.s.id, title: n.o.title })) };
+    needs: () => needsAll().map((n) => ({ floor: n.s.id, title: n.o.title })),
+    // what a live change costs, part by part, in milliseconds (for tests)
+    resurveyCost(full = false) {
+      const t = [performance.now()];
+      look(!full); t.push(performance.now());
+      placeSpots(); t.push(performance.now());
+      free(); planBaseOf(); t.push(performance.now());
+      drawNeeds(); t.push(performance.now());
+      const ms = (i) => Math.round((t[i + 1] - t[i]) * 10) / 10;
+      return { survey: ms(0), rings: ms(1), plan: ms(2), needs: ms(3) };
+    } };
   return { update, labels, info, dispose, setNotes: notes.set, debug };
 }

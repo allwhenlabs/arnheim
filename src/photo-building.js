@@ -1265,6 +1265,8 @@ export function createPhotoBuilding(canvas, org, { base, people: ownPeople, onPi
     if (seat && assistant?.name) {
       const real = realPerson('assistant', assistant.look);
       const person = real?.make('assistant', { seed: 11 }) || buildPerson(receptionistSpec(assistant));
+      // a drawn assistant's shapes are made for this walk alone (a photo-real one shares its loaded ones)
+      if (!real) extras.push({ dispose: () => person.group.traverse((o) => { if (o.isMesh) o.geometry?.dispose?.(); }) });
       person.group.position.set(seat.at[0], 0, seat.at[2]);
       person.group.rotation.y = seat.rot;
       group.add(person.group);
