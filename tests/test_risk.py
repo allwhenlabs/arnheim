@@ -92,6 +92,13 @@ class RiskTest(unittest.TestCase):
         # only a bare "Nothing yet.", "Not yet." or "None." is not asking; anything more still is
         self.assertEqual(self.r["asking"], ["c", "d", "e", "f", "g", "h", "j", "k", "m"])
 
+    def test_one_answer_per_request(self):
+        # keys and buttons both go through answerOnce, which never answers a request it already answered
+        with open(os.path.join(ROOT, "src", "demo.js"), encoding="utf-8") as handle:
+            page = handle.read()
+        self.assertIn("if (answered.has(i.ask.id)) return;", page)
+        self.assertEqual(page.count("controlDone(answerAsk(i.ask.id"), 1)  # only inside answerOnce
+
     def test_no_allow_button_is_green(self):
         # every request that asks reaches outside the project or changes something: yes is never the easy reflex
         with open(os.path.join(ROOT, "src", "demo.js"), encoding="utf-8") as handle:

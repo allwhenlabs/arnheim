@@ -165,6 +165,13 @@ const answerAsk = (id, behavior) => {
   return control.answer(id, behavior).catch((error) => { answered.delete(id); throw error; });
 };
 const canAnswer = (i) => i.kind === 'permission' && (control.on || !!i.ask?.sample);
+// One answer per request: a quick second press, before the list has redrawn, never answers it again, and the
+// next key waits a second, as when the first item changes.
+const answerOnce = (i, behavior) => {
+  if (answered.has(i.ask.id)) return;
+  focusSince = Date.now();
+  controlDone(answerAsk(i.ask.id, behavior), answeredSaid(behavior, i));
+};
 const answeredSaid = (behavior, i) => (r) => `${behavior === 'allow' ? 'Allowed' : 'Denied'}: ${i ? `${i.title}, ${i.what}` : 'that'}${behavior === 'allow' ? ', just this once' : ''}.${r?.sample ? ' The company is made up, so nothing really ran.' : ''}`;
 const moodOf = (t) => (t.status === 'needs_you' ? 'needs' : t.status === 'working' ? 'working' : 'quiet');
 const taskHref = (t) => `#/${floorOf(t.project)?.id}/work/${enc(t.id)}`;
@@ -1105,8 +1112,8 @@ function waitingActions(i, { keys = false } = {}) {
     // never green: every request that asks reaches outside the project or changes something, so yes is never the easy reflex
     const label = (text, key) => (keys ? [text, h('span.kbd', key)] : text);
     out.push(h('div.control-row.waiting-do',
-      h('button.btn.primary', { type: 'button', onclick: () => controlDone(answerAsk(i.ask.id, 'allow'), answeredSaid('allow', i)) }, label('Allow', 'A')),
-      h('button.btn', { type: 'button', onclick: () => controlDone(answerAsk(i.ask.id, 'deny'), answeredSaid('deny', i)) }, label('Deny', 'D'))));
+      h('button.btn.primary', { type: 'button', onclick: () => answerOnce(i, 'allow') }, label('Allow', 'A')),
+      h('button.btn', { type: 'button', onclick: () => answerOnce(i, 'deny') }, label('Deny', 'D'))));
   }
   if (i.kind === 'task' && i.task?.routine && control.on && dir === 'data') {
     out.push(h('div.control-row.waiting-do',
@@ -2130,8 +2137,7 @@ async function boot() {
       if (key === 'l') { event.preventDefault(); later.add(i.id); render(); return; }
       if (!canAnswer(i)) return;
       event.preventDefault();
-      const behavior = key === 'a' ? 'allow' : 'deny';
-      controlDone(answerAsk(i.ask.id, behavior), answeredSaid(behavior, i));
+      answerOnce(i, key === 'a' ? 'allow' : 'deny');
     }
   });
   setInterval(step, Math.max(2, Number(work.every) || 6) * 1000);
