@@ -39,7 +39,7 @@ const cases = {
     .map((x) => r.kindWord({ kind: 'turn', ...x }).word),
   meanings: ['permission', 'question', 'turn', 'task', 'other'].map((kind) => !!r.meaningOf({ kind })),
   asking: q.waitingOnYou({ conversations: [
-    { id: 'a', title: 'A', says: { needs: 'Nothing yet. I will ask you first.' } },
+    { id: 'a', title: 'A', says: { needs: 'Nothing yet.' } },
     { id: 'b', title: 'B', says: { needs: 'Not yet.' } },
     { id: 'c', title: 'C', says: { needs: 'Should the badge be gold or silver?' } },
     { id: 'd', title: 'D', says: { needs: 'Now: pick a colour.' } },
@@ -49,6 +49,9 @@ const cases = {
     { id: 'h', title: 'H', says: { needs: 'Not yet sure which colour you want.' } },
     { id: 'i', title: 'I', says: { needs: 'None.' } },
     { id: 'j', title: 'J', says: { needs: 'Not yet. Is the spare sensor ready?' } },
+    { id: 'k', title: 'K', says: { needs: 'Not yet. Please add the API key to settings.' } },
+    { id: 'l', title: 'L', says: { needs: 'Nothing yet!' } },
+    { id: 'm', title: 'M', says: { needs: 'None. But the deploy needs your sign-off.' } },
   ] }).map((i) => i.key),
 };
 console.log(JSON.stringify(cases));
@@ -86,8 +89,15 @@ class RiskTest(unittest.TestCase):
         self.assertEqual(self.r["meanings"], [True, True, True, True, False])
 
     def test_needing_nothing_is_not_asking(self):
-        # a whole "Nothing yet." or "None." is not a question; anything with a question in it still is
-        self.assertEqual(self.r["asking"], ["c", "d", "e", "f", "g", "h", "j"])
+        # only a bare "Nothing yet.", "Not yet." or "None." is not asking; anything more still is
+        self.assertEqual(self.r["asking"], ["c", "d", "e", "f", "g", "h", "j", "k", "m"])
+
+    def test_no_allow_button_is_green(self):
+        # every request that asks reaches outside the project or changes something: yes is never the easy reflex
+        with open(os.path.join(ROOT, "src", "demo.js"), encoding="utf-8") as handle:
+            page = handle.read()
+        self.assertNotIn("'.go'", page)
+        self.assertNotIn("btn.go", page)
 
 
 if __name__ == "__main__":

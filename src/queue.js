@@ -16,10 +16,10 @@ export const READS = new Set(['Read', 'NotebookRead']);
 export const HIDDEN = /(?:^|[\\/\s])\.(?![.\\/\s]|$)|(?:^|[\\/\s])(?:Library|AppData)(?:[\\/]|$)/i;
 export const SECRET = /(?:^|[\\/\s~])(?:[^\\/\s]*\.env\w*|\.ssh|\.aws|\.gnupg|\.netrc|\.npmrc|\.pypirc|\.pgpass|\.docker|\.kube|\.git-credentials|\.config[\\/]gh|keychains?|id_(?:rsa|dsa|ecdsa|ed25519)|[^\\/\s]*\.(?:pem|key|p8|p12|pfx|keystore|jks|ppk|gpg|asc|kdbx|ovpn)\b|login data|cookies(?![\w.-])|[^\\/\s]*(?:credential|secret|password|passwd|token|api[_-]?key|service[_-]?account)|[^\\/\s]*_history\b)/i;
 const RANK = { permission: 0, question: 1, task: 2, turn: 3 };
-// An agent whose needs open with a whole "Nothing yet.", "Not yet." or "None." isn't asking anything, unless a
-// question follows: "No, but should it be gold?" or "None of these fit. Which one?" still ask.
-const NOTHING = /^\s*(?:nothing(?:\s+yet)?|not\s+yet|none)\s*(?:[.!]|$)/i;
-const asksNothing = (text) => NOTHING.test(text) && !text.includes('?');
+// An agent whose needs are only "Nothing yet.", "Not yet." or "None." isn't asking anything. Anything more is
+// kept: "Not yet. Please add the key." and "No, but should it be gold?" still ask.
+const NOTHING = /^\s*(?:nothing(?:\s+yet)?|not\s+yet|none)\s*[.!]?\s*$/i;
+const asksNothing = (text) => NOTHING.test(text);
 const RECENT = 2 * 3600; // seconds: an agent that finished longer ago than this is no longer waiting on you
 
 // What a permission is for, in plain words: "to read notes.md", "to run npm test".

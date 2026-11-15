@@ -1234,7 +1234,7 @@ function viewOverview() {
       clashCard(),
       rest.length > 0 && h('section.panel-card.home-more',
         sectHead('bell', `Also waiting (${rest.length})`),
-        reads && h('div.control-row', { style: 'margin-bottom: 8px' }, btn(reads.label, () => controlDone(allowReads(reads.ids), (said) => said), '.go')),
+        reads && h('div.control-row', { style: 'margin-bottom: 8px' }, btn(reads.label, () => controlDone(allowReads(reads.ids), (said) => said), '.primary')),
         h('ul.list', rest.map(waitingItem)),
         waitMeter(waiting)),
       rest.length === 0 && waitMeter(waiting) && h('section.panel-card', waitMeter(waiting)),

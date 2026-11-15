@@ -161,7 +161,6 @@ a.row:hover { background: var(--surface-2); }
 }
 .btn:hover { filter: brightness(.95); }
 .btn.primary { background: var(--ink); border-color: var(--ink); color: var(--on-ink); }
-.btn.go { background: var(--go); border-color: var(--go); color: var(--on-go); }
 .btn.quiet { background: transparent; border-color: transparent; color: var(--muted); }
 .banner { font-size: 14px; padding: 8px 10px; border-radius: 8px; margin: 8px 0; }
 .banner.fail { background: var(--fail-bg); color: var(--fail); }
