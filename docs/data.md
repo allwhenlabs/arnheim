@@ -179,6 +179,11 @@ one every `every` seconds (6 if left out, and at least 2). Each step is
 names a list, an `id` in it and the fields to change. A real company leaves it out or empties it
 (`"story": []`), and the Live button, which pauses the story, only shows when there is one.
 
+The sample also has `asks`: made-up permission requests, so its first screen shows one with Allow and
+Deny. Each is `{ "id": "...", "key": "<a conversation's id>", "tool": "Bash", "what": "Bash: npm test", "ago": 240 }`.
+Answering one there runs nothing. Your own company's requests come from your agents, with control on,
+and `asks` in `data/work.json` is ignored.
+
 ### How-tos
 
 A how-to is a short Markdown file: `#` headings, paragraphs, lists (`-` or `1.`), `` `code` ``,

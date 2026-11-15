@@ -16,6 +16,8 @@ export const READS = new Set(['Read', 'NotebookRead']);
 export const HIDDEN = /(?:^|[\\/\s])\.(?![.\\/\s]|$)|(?:^|[\\/\s])(?:Library|AppData)(?:[\\/]|$)/i;
 export const SECRET = /(?:^|[\\/\s~])(?:[^\\/\s]*\.env\w*|\.ssh|\.aws|\.gnupg|\.netrc|\.npmrc|\.pypirc|\.pgpass|\.docker|\.kube|\.git-credentials|\.config[\\/]gh|keychains?|id_(?:rsa|dsa|ecdsa|ed25519)|[^\\/\s]*\.(?:pem|key|p8|p12|pfx|keystore|jks|ppk|gpg|asc|kdbx|ovpn)\b|login data|cookies(?![\w.-])|[^\\/\s]*(?:credential|secret|password|passwd|token|api[_-]?key|service[_-]?account)|[^\\/\s]*_history\b)/i;
 const RANK = { permission: 0, question: 1, task: 2, turn: 3 };
+// An agent saying it needs nothing ("Nothing yet", "Not yet", "None") isn't asking anything.
+const NOTHING = /^\s*(?:nothing|not yet|none|no\b)/i;
 const RECENT = 2 * 3600; // seconds: an agent that finished longer ago than this is no longer waiting on you
 
 // What a permission is for, in plain words: "to read notes.md", "to run npm test".
@@ -51,7 +53,7 @@ export function waitingOnYou({ asks = [], runs = [], conversations = [], tasks =
   }
   for (const c of talks.values()) {
     if (asking.has(c.id) || c.working) continue;
-    if (c.says?.needs) {
+    if (c.says?.needs && !NOTHING.test(c.says.needs)) {
       items.push({ kind: 'question', id: `talk:${c.id}`, key: c.id, title: c.title, project: c.project, what: c.says.needs, at: seconds(c.at) });
     } else if (c.check && now - seconds(c.stopped || c.at) < recent) {
       items.push({ kind: 'turn', id: `turn:${c.id}`, key: c.id, title: c.title, project: c.project, what: c.says?.now || 'It has finished for now.',

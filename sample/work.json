@@ -113,6 +113,10 @@
     { "id": "rp-b2d93f6e0a17", "ago": 840, "project": "Lantern", "key": "cl1", "title": "Why the bookmark jumps", "why": "before: rm -rf build/cache", "by": "agent", "files": 2 }
   ],
   "every": 6,
+  "asks": [
+    { "id": "sample-ask-tests", "key": "cl1", "tool": "Bash", "what": "Bash: npm test -- reader", "ago": 240 },
+    { "id": "sample-ask-read", "key": "ck1", "tool": "Read", "what": "Read: ../field-tests/run-3.csv", "ago": 95 }
+  ],
   "story": [
     { "line": "Lantern's nightly build started on the Build server.", "change": [["jobs", "j1", { "state": "running" }]] },
     { "line": "A conversation about the wind sensor on Tidepool started working.", "change": [["conversations", "ct2", { "working": true, "check": false, "proof": null, "says": {"now": "I'm looking at why the wind sensor reads high after a few days. It drifts by about half a metre a second.", "next": "Next I'll compare it with the spare sensor and write down a fix.", "when": "Once the spare has run for a day."} }]] },

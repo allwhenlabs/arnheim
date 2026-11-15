@@ -21,6 +21,7 @@ import { LONG, WAITED_ASKED, meter, sayWaited, waitFor, waitMood, waitedSum, wai
 import { WEEKLY_ASKED, floorLine, sayWeek, weekReport, weekText } from './weekly.js';
 import { blocks, howtoFor, howtosOf, runs, sayShelf, shelfAsked } from './howto.js';
 import { icon } from './icons.js';
+import { exactOf, kindWord, meaningOf, riskOf } from './risk.js';
 import { createPoe, has, insertAfter, needWord, norm, poeBadge } from './poe-desk.js';
 
 const $ = (id) => document.getElementById(id);
@@ -57,6 +58,8 @@ const control = createControl({ busy: () => !!building?.walking?.() });
 const brain = createBrain();
 let starting = null; // an agent the receptionist was asked to start, waiting for your word
 let controlNote = ''; // what came of the last thing done from the panel
+let noteUsed = false; // it shows once a page, in the first place that has room for it (render resets this)
+const noteOnce = (cls = '') => { if (!controlNote || noteUsed) return null; noteUsed = true; return h(`p.small.muted${cls}`, { role: 'status' }, controlNote); };
 const lastFeed = new Map();
 let workSig = ''; // the work as last read, to tell when it has changed
 const mine = []; // tasks the receptionist took down in this tab, kept through each fresh read
@@ -143,7 +146,7 @@ const briefNow = () => briefOf({ moments: [...yesterday.moments, ...history], co
   waiting: waitingNow(), since: sinceOf(dir === 'data' ? lastSeen : null) });
 
 const waitingNow = () => {
-  const { asks, runs } = control.on ? control.state() : { asks: [], runs: [] };
+  const { asks, runs } = control.on ? control.state() : { asks: work.asks || [], runs: [] };
   // a floor's budget question goes as soon as it is under budget again, without waiting for the hook
   const tasks = openTasks().filter((t) => !t.budget || spendOf(floorOf(t.budget))?.over !== false);
   return waitingOnYou({ asks: asks.filter((a) => !answered.has(a.id)), runs, conversations: work.conversations, tasks });
@@ -152,8 +155,12 @@ const waitingNow = () => {
 const answered = new Set();
 const answerAsk = (id, behavior) => {
   answered.add(id);
+  // the sample's own requests are answered here: the company is made up, so nothing runs
+  if ((work.asks || []).some((a) => a.id === id && a.sample)) return Promise.resolve({ sample: true });
   return control.answer(id, behavior).catch((error) => { answered.delete(id); throw error; });
 };
+const canAnswer = (i) => i.kind === 'permission' && (control.on || !!i.ask?.sample);
+const answeredSaid = (behavior, i) => (r) => `${behavior === 'allow' ? 'Allowed' : 'Denied'}: ${i ? `${i.title}, ${i.what}` : 'that'}${behavior === 'allow' ? ', just this once' : ''}.${r?.sample ? ' The company is made up, so nothing really ran.' : ''}`;
 const moodOf = (t) => (t.status === 'needs_you' ? 'needs' : t.status === 'working' ? 'working' : 'quiet');
 const taskHref = (t) => `#/${floorOf(t.project)?.id}/work/${enc(t.id)}`;
 const goalHref = (g) => `#/${floorOf(g.project)?.id}/goals/${enc(g.id)}`;
@@ -745,8 +752,8 @@ function controlDone(promise, said) {
 
 // A conversation's page: its permission request with Allow and Deny, a box to say something to
 // it, and Stop while it works.
-function convoControls(c) {
-  const ask = control.askFor(c.id);
+function convoControls(c, { noAsk = false } = {}) {
+  const ask = noAsk ? null : control.askFor(c.id);
   const run = control.run(c.id);
   const working = c.working || run?.state === 'working';
   const send = (event) => {
@@ -770,7 +777,7 @@ function convoControls(c) {
       h('input', { name: 'text', type: 'text', maxlength: 2000, autocomplete: 'off', placeholder: 'Say something to it', 'aria-label': `A message for ${c.title}` }),
       h('button.btn', { type: 'submit' }, 'Send')),
     working && h('div.control-row', btn('Stop', () => controlDone(control.halt(c.id), () => 'Stopping. It stops at its next step.'))),
-    controlNote && h('p.small.muted', { role: 'status' }, controlNote));
+    noteOnce());
 }
 
 // Restore points (restore.js): the files as they were before an agent changed them, and with control on, a
@@ -793,7 +800,7 @@ function restoreCard(points, { titles = false } = {}) {
     h('p.small.muted', canGo ? "Going back puts the floor's files as they were then. Files that weren't there then stay where they are."
       : dir === 'data' ? 'With control on, you can put the files back to one of these.'
         : 'Made up, like the rest of the sample. With your own company and control on, you can put the files back to one of these.'),
-    canGo && controlNote && h('p.small.muted', { role: 'status' }, controlNote));
+    canGo && noteOnce());
 }
 
 // Collision warnings (clashes.js): two agents changing the same files, and, with control on, a way to make
@@ -812,7 +819,7 @@ function clashCard() {
       return li;
     })),
     h('p.small.muted', 'Each was told as it changed the file. Look at both before either goes on.'),
-    controlNote && h('p.small.muted', { role: 'status' }, controlNote));
+    noteOnce());
 }
 
 // Every agent at once: paused from here until you resume them (connect/budget.py), with control on.
@@ -1011,7 +1018,7 @@ function waitingList(items) {
     waitMeter(items),
     reads && h('div.control-row', btn(reads.label, () => allowAll(reads.ids), '.primary')),
     h('ul.list', items.map(waitingItem)),
-    controlNote && h('p.small.muted', { role: 'status' }, controlNote));
+    noteOnce());
 }
 
 // The agents held up waiting on you now (a permission or a question), by conversation.
@@ -1095,23 +1102,34 @@ function waitingItem(i) {
   const li = row(href, head, sub, i.kind === 'turn' ? reviewMood(i.review) || proofMood(i.proof) || 'check' : 'needs');
   const waited = waitingLine(i);
   if (waited) li.querySelector('.row-main')?.append(h('span.row-sub.wait-time', { 'data-wait': i.at }, waited));
-  if (i.kind === 'permission' && control.on) {
-    li.append(h('div.control-row.waiting-do',
-      btn('Allow', () => controlDone(answerAsk(i.ask.id, 'allow'), () => 'Allowed, just this once.'), '.primary'),
-      btn('Deny', () => controlDone(answerAsk(i.ask.id, 'deny'), () => 'Denied.'))));
+  li.append(...waitingActions(i));
+  return li;
+}
+
+// The answers a waiting item takes, where it is: Allow and Deny, run a routine again, let a floor go on,
+// send a decision made before, or a reply. The home view shows the same under the one it puts first.
+function waitingActions(i, { keys = false } = {}) {
+  const out = [];
+  if (canAnswer(i)) {
+    // green only when it only looks: a command or a change gets a plain button, so yes is never the easy reflex
+    const safe = riskOf(i)?.mood === 'ok';
+    const label = (text, key) => (keys ? [text, h('span.kbd', key)] : text);
+    out.push(h('div.control-row.waiting-do',
+      h(`button.btn${safe ? '.go' : '.primary'}`, { type: 'button', onclick: () => controlDone(answerAsk(i.ask.id, 'allow'), answeredSaid('allow', i)) }, label('Allow', 'A')),
+      h('button.btn', { type: 'button', onclick: () => controlDone(answerAsk(i.ask.id, 'deny'), answeredSaid('deny', i)) }, label('Deny', 'D'))));
   }
   if (i.kind === 'task' && i.task?.routine && control.on && dir === 'data') {
-    li.append(h('div.control-row.waiting-do',
+    out.push(h('div.control-row.waiting-do',
       btn('Run it again', () => controlDone(control.runRoutine(i.task.routine), (r) => `"${r.routine}" is running again.`), '.primary')));
   }
   if (i.kind === 'task' && i.task?.budget && control.on && dir === 'data') {
-    li.append(h('div.control-row.waiting-do',
+    out.push(h('div.control-row.waiting-do',
       btn('Let them go on', () => controlDone(control.allowMore(i.task.budget), (r) => `${i.task.budget}'s agents may spend as much again today. Tell them to go on.`), '.primary')));
   }
   const decided = i.kind === 'question' ? decidedFor(i.what, memoryNow()) : [];
   const reachable = control.on && (REACHABLE.test(i.key) || control.run(i.key));
   if (decided.length) {
-    li.append(h('div.waiting-do.decided',
+    out.push(h('div.waiting-do.decided',
       h('p.small', h('span.muted', 'You decided before: '), decided.map((r) => r.text).join(' ')),
       reachable && h('div.control-row', btn('Send it that', () => controlDone(control.say(i.key, `You decided this before: ${decided.map((r) => r.text).join(' ')}`),
         () => 'Sent. It is waiting for you in Claude Code, so it sees this the next time you send it something there.'), '.primary'))));
@@ -1127,11 +1145,11 @@ function waitingItem(i) {
       controlDone(control.say(i.key, text), (r) => (r.sent === 'resumed' ? 'Sent. It is answering now.'
         : 'Sent. It is waiting for you in Claude Code, so it sees this the next time you send it something there.'));
     };
-    li.append(h('form.control-say.waiting-do', { onsubmit: send },
+    out.push(h('form.control-say.waiting-do', { onsubmit: send },
       h('input', { name: 'text', type: 'text', maxlength: 2000, autocomplete: 'off', placeholder: i.kind === 'question' ? 'Answer it' : 'What next?', 'aria-label': `A reply to ${i.title}` }),
       h('button.btn', { type: 'submit' }, 'Send')));
   }
-  return li;
+  return out;
 }
 
 // A floor's Conversations room: start an agent on its project, in its folder.
@@ -1152,7 +1170,7 @@ function startForm(floor) {
     h('textarea', { name: 'text', rows: 3, maxlength: 2000, placeholder: `What should it do on ${floor.label}?`, 'aria-label': `What a new agent on ${floor.label} should do` }),
     h('div.control-row', h('button.btn.primary', { type: 'submit' }, 'Start')),
     h('p.small.muted', 'It runs in this project\'s folder with your own Claude Code settings, as if you had started it there.'),
-    controlNote && h('p.small.muted', { role: 'status' }, controlNote));
+    noteOnce());
 }
 
 /* ---------- the panel ---------- */
@@ -1165,48 +1183,94 @@ function crumbsFor(floor, room, last) {
   return list;
 }
 
+// The one waiting item the home view puts first, with everything needed to answer it where it is: what it
+// wants exactly, how careful to be, what it means in plain words, and its answers.
+const later = new Set(); // items put off with Later, for this visit: they go to the end of the list
+let focusNow = null; // the item the home view shows first, for the A, D and L keys
+function focusCard(i, { open = true } = {}) {
+  const k = kindWord(i);
+  const risk = riskOf(i);
+  const exact = i.kind === 'permission' ? exactOf(i) : null;
+  const agent = i.key ? work.conversations.find((c) => c.id === i.key)?.agent || (REACHABLE.test(i.key) ? 'Claude Code' : null) : null;
+  const where = [i.project ? (floorOf(i.project)?.label || i.project) : '', agent, waitingLine(i)].filter(Boolean).join(' · ');
+  const verb = exact && i.what.endsWith(exact) ? i.what.slice(0, -exact.length).trim() : i.what;
+  const heading = { permission: `${i.title} wants your permission`, question: `${i.title} asks you`, turn: `${i.title} has finished`, task: i.title }[i.kind];
+  const marked = i.review || i.proof;
+  const what = i.kind === 'permission' ? `It wants ${verb}${exact ? ':' : '.'}`
+    : i.kind === 'question' ? `"${i.what}"` : i.kind === 'turn' ? [marked && `${marked.word}. ${marked.line}`, i.what].filter(Boolean).join(' ') : i.what || i.task?.says?.now || '';
+  const href = waitingHref(i);
+  const meaning = meaningOf(i);
+  return h('section.focus', { 'aria-label': `First: ${heading}` },
+    h('div.focus-top', h(`span.pill.k-${k.mood}`, k.word), where && h('span', where)),
+    h('h3.focus-title', heading),
+    what && h('p.focus-what', what),
+    exact && h('div.what-code', exact),
+    risk && h('div.risk', h(`span.pill.k-${risk.mood}`, risk.word), h('span', risk.line)),
+    meaning && h('details.explain', h('summary', 'What does this mean?'), h('p', meaning)),
+    h('div.focus-do',
+      ...waitingActions(i, { keys: open }),
+      open && href && h('a.btn.quiet', { href }, 'Open'),
+      open && h('button.btn.quiet', { type: 'button', onclick: () => { later.add(i.id); render(); }, title: 'Put it at the end of the list (L)' }, 'Later', h('span.kbd', 'L')),
+));
+}
+
 function viewOverview() {
-  const waiting = waitingNow();
+  const all = waitingNow();
+  const waiting = [...all.filter((i) => !later.has(i.id)), ...all.filter((i) => later.has(i.id))];
   const talking = byProject(work.conversations.filter((c) => c.working));
   const jobs = work.jobs.filter((j) => j.state === 'running');
-  const tile = (glyph, mood, n, label) => h(`div.stat.glow.glow-${n ? mood : 'quiet'}`, h('span.stat-top', h('span.tile-icon', icon(glyph, 20)), h('span.stat-num', String(n))), h('span.stat-label', label));
+  const first = waiting[0] || null;
+  focusNow = first;
+  const rest = waiting.slice(1);
+  const now = Date.now() / 1000;
+  const blocked = waiting.filter((i) => (i.kind === 'permission' || i.kind === 'question') && i.at > 0);
+  const oldest = blocked.length ? Math.max(...blocked.map((i) => now - i.at)) : 0;
+  const moving = talking.length + jobs.length;
+  const heading = waiting.length ? count(waiting.length, 'thing needs you', 'things need you') : 'Nothing needs you';
+  const sub = waiting.length
+    ? [oldest > 0 && `The longest an agent has waited is ${waitFor(oldest)}.`, moving ? `${count(moving, 'other thing is', 'other things are')} moving on ${moving === 1 ? 'its' : 'their'} own.` : null].filter(Boolean).join(' ') || 'The first is below, with its answer.'
+    : moving ? `${count(moving, 'thing is', 'things are')} moving on ${moving === 1 ? 'its' : 'their'} own. Anything that stops for you shows here first.` : 'All quiet. Anything that stops for you shows here first.';
+  const reads = control.on ? together(waiting) : null;
   return {
     top: true,
     crumbs: [],
     body: [
-      h('section.panel-card.intro',
-        title(madeUp() ? `${org.company}, a company that is made up` : org.company),
-        madeUp() ? h('p', sampleLine()) : org.about && h('p', org.about),
-        h('p.small.muted', `Arnheim shows a company as a building. Each floor is a project and each room holds one kind of thing. Tap a floor to bring it out, then a room to look inside. Press Walk to go in and talk to the people at work, and to ${deskName() || 'the receptionist'} at the front desk.`),
-        fromAway() && h('p.small', h('strong', 'View only. '), 'You are looking from another device: you can look round and walk in, but nothing here changes anything.')),
-      h('div.stats', tile('bell-ring', 'needs', waiting.length, 'Need you'), tile('messages-square', 'working', talking.length, 'Working now'), tile('server', 'working', jobs.length, 'Jobs running')),
-      briefCard(),
+      h('div.home-head', h('h2', { id: 'view-title', tabindex: '-1' }, heading), h('p', sub), noteOnce('.done-note')),
+      fromAway() && h('p.small', h('strong', 'View only. '), 'You are looking from another device: you can look round and walk in, but nothing here changes anything.'),
+      first ? focusCard(first) : h('div.all-clear', h('b', 'You are clear.'), 'Nothing is waiting on you right now.'),
       pauseCard(),
       clashCard(),
-      h('section.panel-card',
-        sectHead('bell', 'Waiting on you'),
-        waitingList(waiting)),
-      healthCard(),
-      replayCard(),
-      weekCard(),
-      spendCard(),
-      routinesCard(),
+      rest.length > 0 && h('section.panel-card.home-more',
+        sectHead('bell', `Also waiting (${rest.length})`),
+        reads && h('div.control-row', { style: 'margin-bottom: 8px' }, btn(reads.label, () => controlDone(allowReads(reads.ids), (said) => said), '.go')),
+        h('ul.list', rest.map(waitingItem)),
+        waitMeter(waiting)),
+      rest.length === 0 && first && waitMeter(waiting) && h('section.panel-card', waitMeter(waiting)),
       h('section.panel-card',
         sectHead('zap', 'Working now'),
         talking.length || jobs.length
           ? h('ul.list', [
-            ...talking.map((c) => row(convoHref(c), c.title, `${c.project}. A conversation`, 'working')),
+            ...talking.map((c) => row(convoHref(c), c.title, [floorOf(c.project)?.label || c.project, c.agent, c.says?.now].filter(Boolean).join(' · '), 'working')),
             ...jobs.map((j) => row(`#/${org.basement?.id}/${j.machine}`, j.name, `On the ${machineLabel(j.machine)}`, 'working')),
           ])
           : empty('Nothing is working right now.')),
+      briefCard(),
+      spendCard(),
+      healthCard(),
+      routinesCard(),
+      weekCard(),
+      replayCard(),
       hasStory() && h('section.panel-card',
         sectHead('history', 'Just now'),
         happened.length
           ? h('ul.list.happened', happened.map((e) => h('li', h('div.row', dot('quiet'), h('span.row-main', h('span.row-title', e.line), h('span.row-sub', { 'data-at': e.at }, agoText(e.at)))))))
           : empty(playing ? 'The work starts moving in a few seconds.' : 'Paused. Press Live at the top to let the work move.')),
-      h('p.small.muted.foot-note', dir === 'data'
-        ? 'Everything here comes from data/company.json (the building), and from data/work.json and any tools connected to it (what is going on in it). A change to the work shows within a few seconds; reload after changing the building.'
-        : 'Everything here comes from two files: sample/company.json (the building) and sample/work.json (what is going on in it). To show your own company, copy them into a folder called data beside them, change them and reload.'),
+      h('div.intro-small',
+        h('p', h('strong', madeUp() ? `${org.company} is made up. ` : `${org.company}. `), madeUp() ? sampleLine() : org.about || ''),
+        h('p', `Each floor of the building is a project and each room holds one kind of thing. Tap a floor to bring it out. Press Walk to go in and talk to the people at work, and to ${deskName() || 'the receptionist'} at the front desk.`),
+        h('p', dir === 'data'
+          ? 'Everything here comes from data/company.json (the building), and from data/work.json and any tools connected to it (what is going on in it).'
+          : 'Everything here comes from two files: sample/company.json (the building) and sample/work.json (what is going on in it). To show your own company, copy them into a folder called data beside them, change them and reload.')),
     ],
   };
 }
@@ -1257,7 +1321,7 @@ function memoryCard() {
       h('input', { name: 'text', type: 'text', maxlength: 300, autocomplete: 'off', placeholder: 'We never push on a Friday', 'aria-label': 'Something every agent should be told' }),
       h('button.btn', { type: 'submit' }, 'Remember'))
       : h('p.small.muted', 'To add from here, start Arnheim with --control. Or edit data/memory.json.'),
-    controlNote && h('p.small.muted', { role: 'status' }, controlNote));
+    noteOnce());
 }
 
 // A shelf of how-tos (howto.js): each opens on its own floor's page, or the Library's for the whole company's.
@@ -1362,6 +1426,32 @@ function facts(pairs) {
   return h('dl.facts', pairs.filter(([, v]) => v != null && v !== '').flatMap(([k, v]) => [h('dt', k), h('dd', v)]));
 }
 
+// A conversation's page, answer first: what it waits on you for, then what it said in short (doing, next,
+// when, what it needs), whether its work is proven, and the rest.
+function convoPage(c) {
+  const pr = proofOf(c);
+  const rv = reviewOf(c);
+  const asking = waitingNow().find((i) => i.key === c.id && (i.kind === 'permission' || i.kind === 'question'));
+  const agent = c.agent || (REACHABLE.test(c.id) ? 'Claude Code' : null);
+  const state = c.working ? (asking ? 'Waiting on you' : 'Working') : c.check ? 'Finished, to check' : 'Quiet';
+  const said = c.says?.now || control.run(c.id)?.said;
+  const short = [['Doing', c.working ? said : null], ['Said', c.working ? null : said], ['Next', c.says?.next], ['When', c.says?.when], ['Needs you', asking ? null : c.says?.needs]]
+    .filter(([, v]) => v);
+  const verdict = pr || rv ? (rv?.state === 'failed' || pr?.state === 'failed' ? 'failed' : pr?.state === 'proven' || rv?.state === 'passed' ? 'ok' : 'quiet') : null;
+  return [
+    title(c.title),
+    h('p.muted', { style: 'margin-top: -4px' }, [state, agent, floorOf(c.project)?.label || c.project].filter(Boolean).join(' · ')),
+    asking && h('div', { style: 'margin: 14px 0' }, focusCard(asking, { open: false })),
+    short.length > 0 && h('dl.short', short.flatMap(([k, v]) => [h('dt', k), h('dd', v)])),
+    verdict && h('section.panel-card', sectHead('shield-check', 'Is it proven?'),
+      h('div.verdict', h(`span.pill.k-${verdict}`, verdict === 'ok' ? 'Proven' : verdict === 'failed' ? 'Not proven' : pr?.word || 'Not yet'),
+        h('div', pr && h('p', pr.line), rv && h('p.small.muted', rv.line))),
+      proofPart(c, pr)),
+    control.on ? convoControls(c, { noAsk: !!asking }) : null,
+    restoreCard(pointsOf(work.restore, { key: c.id })),
+  ];
+}
+
 function viewItem(floor, room, id) {
   const kind = kindOf(floor, room);
   const gone = () => ({ crumbs: crumbsFor(floor, room), body: [title('Not here any more'), h('p', `That is not in ${room.label} now.`), h('a.btn', { href: `#/${floor.id}/${room.id}` }, `Back to ${room.label}`)] });
@@ -1386,9 +1476,8 @@ function viewItem(floor, room, id) {
   }
   if (kind === 'conversations') {
     const c = work.conversations.find((x) => x.id === id && x.project === floor.project);
-    const pr = c && proofOf(c);
-    return c ? show(c.title, [['Now', c.working ? 'Working' : c.check ? 'To check' : 'Quiet'], ['Agent', c.agent || (REACHABLE.test(c.id) ? 'Claude Code' : null)], ['Project', c.project], ['Last said', c.says?.now || control.run(c.id)?.said],
-      ['Its work', pr && `${pr.word}. ${pr.line}`], ['Review line', reviewOf(c)?.line]], [proofPart(c, pr), control.on ? convoControls(c) : null, restoreCard(pointsOf(work.restore, { key: c.id }))]) : gone();
+    if (!c) return gone();
+    return { crumbs: crumbsFor(floor, room, c.title), body: [...convoPage(c), h('a.btn', { href: `#/${floor.id}/${room.id}` }, icon('arrow-left', 15), `Back to ${room.label}`)] };
   }
   if (kind === 'code') {
     const [what, key] = id.split('/');
@@ -1440,6 +1529,7 @@ function renderTabs() {
 }
 
 function render({ nav = false } = {}) {
+  noteUsed = false;
   const panel = $('content');
   const active = document.activeElement;
   // Never redraw under someone's typing: wait until they leave the box.
@@ -1766,7 +1856,7 @@ function setupIcons() {
 
 /* ---------- reading the company's files ---------- */
 
-const LISTS = ['tasks', 'goals', 'conversations', 'pullRequests', 'copies', 'company', 'presence', 'machines', 'jobs', 'library', 'story', 'routines', 'restore'];
+const LISTS = ['tasks', 'goals', 'conversations', 'pullRequests', 'copies', 'company', 'presence', 'machines', 'jobs', 'library', 'story', 'routines', 'restore', 'asks'];
 const problem = (text, status) => Object.assign(new Error(text), { own: true, status });
 
 // One of the company's files, or an error that says which one and why.
@@ -1854,6 +1944,8 @@ async function readWork() {
   if (dir !== 'data') now.pullRequests = now.pullRequests.map((p) => (p.waited ? { ...p, updated: OPENED - p.waited * 86400 } : p)); // the sample's: days waited
   if (dir !== 'data') now.restore = now.restore.map((p) => (Number.isFinite(p.ago) ? { ...p, at: OPENED - p.ago } : p)); // the sample's: seconds ago
   if (dir !== 'data') now.conversations = now.conversations.map((c) => (Number.isFinite(c.ago) ? { ...c, at: OPENED - c.ago } : c));
+  // the sample's own permission requests, so it shows one being answered: nothing runs when you do
+  now.asks = dir !== 'data' ? now.asks.filter((a) => a && a.id).map((a) => ({ ...a, sample: true, at: OPENED - (Number(a.ago) || 0), until: OPENED + (Number(a.lasts) || 3600) })) : [];
   if (dir !== 'data') { // the sample's routines: their times from their schedules, as if each last ran on time
     now.routines = now.routines.map((r) => {
       const t = timesOf(r, OPENED);
@@ -2000,6 +2092,15 @@ async function boot() {
     } else if (TAB_KEYS[event.key] && free) {
       event.preventDefault();
       location.hash = TAB_KEYS[event.key];
+    } else if (free && !route.floor && focusNow && /^[adl]$/i.test(event.key)) {
+      // the home view's first item: A allows it, D denies it, L puts it off till later
+      const i = focusNow;
+      const key = event.key.toLowerCase();
+      if (key === 'l') { event.preventDefault(); later.add(i.id); render(); return; }
+      if (!canAnswer(i)) return;
+      event.preventDefault();
+      const behavior = key === 'a' ? 'allow' : 'deny';
+      controlDone(answerAsk(i.ask.id, behavior), answeredSaid(behavior, i));
     }
   });
   setInterval(step, Math.max(2, Number(work.every) || 6) * 1000);
