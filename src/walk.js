@@ -207,7 +207,16 @@ export function createWalk(ctx) {
   track.append(loadingBar);
   loading.append(loadingText, track);
   loading.hidden = photoState !== 'loading';
-  stage.append(hud, picker, card, help, stickEl, loading);
+  // A small floor plan, bottom right: the floor you can walk, where you are and which way you face, the
+  // people's rings (filled where they wait on you), what else waits on you, and the lift. A tap on it walks
+  // you there. Its button folds it away to a small Map button, remembered in this browser.
+  const planBox = el('div', 'aw-plan');
+  const plan = el('canvas');
+  plan.setAttribute('role', 'img');
+  const planToggle = button('', () => setPlan(planBox.classList.contains('aw-plan-off')), '');
+  planToggle.classList.add('aw-plan-toggle');
+  planBox.append(plan, planToggle);
+  stage.append(hud, picker, card, help, stickEl, loading, planBox);
   stage.classList.add('arnheim-walking');
   // Talking with whoever's ring you stand in, by typing or out loud (voice.js).
   const voice = createVoice({ hud, card, ctx, el, button, signal });
@@ -255,11 +264,136 @@ export function createWalk(ctx) {
       item.append(b);
       guide.append(item);
     }
-    picker.replaceChildren(...(guide.children.length ? [el('p', null, `On ${here.label}`), guide] : []), el('p', null, 'Take the lift to'), list);
+    const where = resumed ? `Back on ${here.label}, where you left off` : `On ${here.label}`;
+    resumed = false; // said once, as the walk opens
+    picker.replaceChildren(...(guide.children.length ? [el('p', null, where), guide] : []), el('p', null, 'Take the lift to'), list);
     picker.hidden = false;
     card.hidden = true;
   }
   function closePicker() { picker.hidden = true; }
+
+  /* ---------- the floor plan ---------- */
+
+  let planBase = null; // the floor's walkable squares, one pixel each, drawn again at each survey
+  let planCrop = null; // the part of the plan that can be walked, so the small picture is all floor
+  let planFit = null;
+  let planSig = '';
+  let planNeeds = new Set(); // the keys of what waits on you on this floor (drawNeeds keeps it)
+  function setPlan(on) {
+    planBox.classList.toggle('aw-plan-off', !on);
+    planToggle.textContent = on ? 'Hide' : 'Map';
+    planToggle.setAttribute('aria-label', on ? 'Fold the floor plan away' : 'Show the floor plan');
+    try { localStorage.setItem('arnheim-walk-plan', on ? 'on' : 'off'); } catch { /* a private window: it simply isn't remembered */ }
+    planSig = '';
+    planSize = [0, 0]; // measured again as it opens
+    drawPlan();
+  }
+  function planBaseOf() {
+    planBase = null;
+    if (!map) return;
+    const { cols, rows } = map;
+    const open = reach();
+    const base = document.createElement('canvas');
+    base.width = cols;
+    base.height = rows;
+    const g = base.getContext('2d');
+    const img = g.createImageData(cols, rows);
+    let q0 = cols, q1 = -1, r0 = rows, r1 = -1;
+    for (let i = 0; i < open.length; i++) {
+      if (!open[i]) continue;
+      img.data.set([236, 226, 210, 120], i * 4);
+      const q = i % cols;
+      const r = (i - q) / cols;
+      q0 = Math.min(q0, q); q1 = Math.max(q1, q); r0 = Math.min(r0, r); r1 = Math.max(r1, r);
+    }
+    if (q1 < 0) return;
+    g.putImageData(img, 0, 0);
+    planBase = base;
+    const c0 = Math.max(0, q0 - 2);
+    const d0 = Math.max(0, r0 - 2);
+    planCrop = { q0: c0, r0: d0, w: Math.min(cols, q1 + 3) - c0, h: Math.min(rows, r1 + 3) - d0 };
+    planSig = '';
+  }
+  // its size: measured once when first drawn (or unfolded), then kept up to date by a ResizeObserver, so
+  // no frame reads the page's layout
+  let planSize = [0, 0];
+  const planWatch = new ResizeObserver(([entry]) => {
+    planSize = [entry.contentRect.width, entry.contentRect.height];
+    planSig = '';
+    drawPlan();
+  });
+  planWatch.observe(plan);
+  function drawPlan() {
+    if (!planBase || !here || planBox.classList.contains('aw-plan-off')) return;
+    if (!planSize[0] || !planSize[1]) planSize = [plan.clientWidth, plan.clientHeight];
+    const [w, h] = planSize;
+    if (!w || !h) return;
+    const sig = [w, h, here.id, me.x.toFixed(2), me.z.toFixed(2), me.yaw.toFixed(2), spots.length, talking?.ring?.id || 0, [...planNeeds].join('|')].join(',');
+    if (sig === planSig) return;
+    planSig = sig;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    if (plan.width !== Math.round(w * dpr) || plan.height !== Math.round(h * dpr)) { plan.width = Math.round(w * dpr); plan.height = Math.round(h * dpr); }
+    const g = plan.getContext('2d');
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+    g.clearRect(0, 0, w, h);
+    const c = planCrop;
+    const k = Math.min((w - 10) / c.w, (h - 10) / c.h);
+    const ox = (w - c.w * k) / 2;
+    const oy = (h - c.h * k) / 2;
+    planFit = { k, ox, oy };
+    g.imageSmoothingEnabled = false;
+    g.drawImage(planBase, c.q0, c.r0, c.w, c.h, ox, oy, c.w * k, c.h * k);
+    const at = (x, z) => [ox + ((x - map.x0) / CELL - c.q0) * k, oy + ((z - map.z0) / CELL - c.r0) * k];
+    const L = hall.lift;
+    const [lx, ly] = at(L.x, L.z);
+    g.strokeStyle = 'rgba(255, 255, 255, .75)';
+    g.lineWidth = 1.5;
+    g.strokeRect(lx - 4, ly - 4, 8, 8);
+    for (const room of here.rooms) {
+      const r = roomAround(room);
+      for (const o of room.objects) {
+        if (o.figure || !planNeeds.has(keyOfThing(o))) continue;
+        const [x, y] = at(r.x + o.x, r.z + o.z);
+        g.fillStyle = '#ffb35c';
+        g.fillRect(x - 3, y - 3, 6, 6);
+      }
+    }
+    for (const spot of spots) {
+      const [x, y] = at(spot.x, spot.z);
+      g.beginPath();
+      g.arc(x, y, 3.2, 0, Math.PI * 2);
+      if (planNeeds.has(keyOfThing(spot.who))) { g.fillStyle = '#ffb35c'; g.fill(); } else { g.strokeStyle = '#ffc985'; g.lineWidth = 1.5; g.stroke(); }
+    }
+    // you: a dot and the way you face
+    const [mx, my] = at(me.x, me.z);
+    const fx = -Math.sin(me.yaw);
+    const fy = -Math.cos(me.yaw);
+    g.fillStyle = 'rgba(255, 255, 255, .28)';
+    g.beginPath();
+    g.moveTo(mx, my);
+    g.arc(mx, my, 16, Math.atan2(fy, fx) - 0.5, Math.atan2(fy, fx) + 0.5);
+    g.closePath();
+    g.fill();
+    g.fillStyle = '#ffffff';
+    g.beginPath();
+    g.arc(mx, my, 3.6, 0, Math.PI * 2);
+    g.fill();
+    plan.setAttribute('aria-label', `Floor plan of ${here.label}: you are the white dot. Tap a place to walk there.`);
+  }
+  // a tap on the plan walks you to that place, round whatever is in the way
+  plan.addEventListener('click', (event) => {
+    if (!planFit || ride) return;
+    const box = plan.getBoundingClientRect();
+    const c = planCrop;
+    const x = map.x0 + ((event.clientX - box.left - planFit.ox) / planFit.k + c.q0) * CELL;
+    const z = map.z0 + ((event.clientY - box.top - planFit.oy) / planFit.k + c.r0) * CELL;
+    const goal = roomAt(x, z);
+    const way = goal && wayTo(goal.x, goal.z);
+    if (!way) return;
+    closePicker();
+    me.target = { ...way.shift(), next: way, open: true };
+    input();
+  }, { signal });
 
   /* ---------- finding your way: what is on this floor, and what needs you ---------- */
 
@@ -364,10 +498,14 @@ export function createWalk(ctx) {
   }
 
   let needsTimer = 0; // started once the walk is open (at the end of createWalk)
+  let resumed = false; // this walk started where the last one was left
   let needsGone = new Set(); // the ones this walk has taken you to, so the next press goes on to the next
   let afterRide = null; // what to do once the lift has brought you to another floor
   function drawNeeds() {
-    const n = needsAll().length;
+    const all = needsAll();
+    planNeeds = new Set(all.filter((x) => x.s === here).map((x) => keyOfThing(x.o)));
+    drawPlan();
+    const n = all.length;
     needsButton.hidden = !n;
     needsButton.replaceChildren(el('span', 'aw-needs-word', 'Needs you'), el('b', null, String(n)));
     needsButton.setAttribute('aria-label', `Take me to what needs me: ${n} waiting`);
@@ -492,10 +630,12 @@ export function createWalk(ctx) {
     free();
     placeSpots();
     findDoors();
+    planBaseOf();
     hall.lift.open = 0;
     hall.setDoors(0);
     inLift = hall.inLift(me.x, me.z);
     floorName.textContent = s.label;
+    drawNeeds(); // the button's count, and this floor's marks on the plan
     const p = s.group.position;
     ctx.shadows(new THREE.Vector3(p.x + (hall.west + hall.east) / 2, p.y + 1, p.z + hall.front / 2), Math.max(hall.east - hall.west, hall.front) / 2 + 2);
   }
@@ -1097,7 +1237,7 @@ export function createWalk(ctx) {
     if (!here) return false;
     let busy = false;
     if (ride) { advance(dt); busy = true; }
-    if (!ride && ctx.version() !== seen && now - surveyed > 1500) { look(); placeSpots(); free(); drawNeeds(); }
+    if (!ride && ctx.version() !== seen && now - surveyed > 1500) { look(); placeSpots(); free(); planBaseOf(); drawNeeds(); }
 
     // Turning: smooth, whether by drag, keys or walking somewhere.
     const turn = (keys.has('ArrowLeft') ? 1 : 0) - (keys.has('ArrowRight') ? 1 : 0);
@@ -1246,6 +1386,7 @@ export function createWalk(ctx) {
     }
     lastYaw = camera.rotation.y;
     lastPitch = camera.rotation.x;
+    drawPlan();
     return busy;
   }
 
@@ -1320,6 +1461,8 @@ export function createWalk(ctx) {
   }
 
   function dispose() {
+    remember();
+    planWatch.disconnect();
     gone = true;
     listeners.abort();
     clearTimeout(cardTimer);
@@ -1344,7 +1487,7 @@ export function createWalk(ctx) {
     ringGeo.dispose();
     ringIdle.dispose();
     ringLit.dispose();
-    for (const node of [hud, picker, card, help, stickEl, loading]) node.remove();
+    for (const node of [hud, picker, card, help, stickEl, loading, planBox]) node.remove();
     stage.classList.remove('arnheim-walking');
     here = null;
   }
@@ -1352,12 +1495,52 @@ export function createWalk(ctx) {
   /* ---------- start: at the reception's door, or at the lift of the floor in view ---------- */
 
   // with no lobby, the floor nearest the ground, and above it rather than the basement below
+  // Where you were when you last left, in this browser, for this company: the next walk starts there, unless
+  // another floor is in view. A few hours on, it starts afresh.
+  const WHERE = `arnheim-walk-where:${ctx.org.company || ''}:${ctx.hallFor ? 'photo' : 'drawn'}`;
+  const lastTime = (() => {
+    try {
+      const w = JSON.parse(localStorage.getItem(WHERE) || 'null');
+      if (!w || typeof w.floor !== 'string' || !(Date.now() - w.at < 4 * 3600 * 1000)) return null;
+      return { floor: w.floor, spot: [w.x, w.z, w.yaw].every(Number.isFinite) ? w : null };
+    } catch { return null; }
+  })();
+  // left mid-ride: the floor it was going to, at its lift
+  function remember() {
+    if (!here) return;
+    const saved = ride ? { floor: (ride.to || here).id } : { floor: here.id, x: me.x, z: me.z, yaw: me.yawGoal };
+    try { localStorage.setItem(WHERE, JSON.stringify({ ...saved, at: Date.now() })); } catch { /* a private window: the next walk starts afresh */ }
+  }
+  window.addEventListener('pagehide', remember, { signal });
+
   const ground = [...storeys].sort((a, b) => Math.abs(a.y) - Math.abs(b.y) || b.y - a.y)[0];
-  const first = storeys.find((s) => s.id === ctx.start) || storeys.find((s) => s.role === 'lobby') || ground;
+  const back = lastTime && (!ctx.start || ctx.start === lastTime.floor) ? order.find((s) => s.id === lastTime.floor) : null;
+  const fresh = storeys.find((s) => s.id === ctx.start) || storeys.find((s) => s.role === 'lobby') || ground;
+  const first = back || fresh;
   for (const s of storeys) s.group.visible = false; // one floor at a time
-  enter(first, first.role === 'lobby' ? 'entrance' : 'lift');
+  enter(first, back ? 'lift' : first.role === 'lobby' ? 'entrance' : 'lift');
+  const spot = back && lastTime.spot;
+  let fellBack = false;
+  if (spot) {
+    const at = { x: me.x, z: me.z, yaw: me.yaw };
+    me.x = spot.x;
+    me.z = spot.z;
+    me.yaw = me.yawGoal = spot.yaw;
+    free();
+    // somewhere you can stand and walk from, or the floor's lift as on any arrival (the floor may have changed)
+    // (a pocket a few squares across, walled off from the rest of the floor, counts as nowhere)
+    const room = blocked(me.x, me.z) ? 0 : reach().reduce((n, v) => n + v, 0);
+    if (room < 60) { me.x = at.x; me.z = at.z; me.yaw = me.yawGoal = at.yaw; fellBack = true; }
+    placeSpots();
+    findDoors();
+    planBaseOf();
+    inLift = hall.inLift(me.x, me.z);
+    heldOff = spots.some((s) => Math.hypot(me.x - s.x, me.z - s.z) < 0.42); // back in a ring: no talk until you step off it
+  }
+  resumed = !!back && !fellBack;
   drawNeeds();
   openPicker(); // where you are and what is here, from the first step
+  setPlan((() => { try { return localStorage.getItem('arnheim-walk-plan') !== 'off'; } catch { return true; } })());
   needsTimer = setInterval(drawNeeds, 2000);
   // No effect on arrival: the walk simply opens on the finished rooms.
 
