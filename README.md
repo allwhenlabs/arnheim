@@ -1,5 +1,21 @@
 # Arnheim
 
+Arnheim shows which of your AI coding agents is waiting on you, and whether the work each one calls
+done really passes its checks, as a building you can walk through.
+
+![A 20-second tour of Fernhollow, the made-up sample company: the building with a floor for each project; floors lit amber where something waits, beside one list of what waits on you; a room turning green when an agent's work passes its tests; then walking in to the receptionist, who says what needs you](docs/tour.gif)
+
+```bash
+git clone https://github.com/allwhenlabs/arnheim && cd arnheim && python3 serve.py
+```
+
+Then open http://127.0.0.1:8740. It needs Python 3.7 or newer and a current browser, with nothing
+to install, and shows a made-up company until you add your own ([Start](#start) has the details).
+
+Watch [the tour](https://youtu.be/bl7eY4f8u2M), or [a talk with the receptionist](https://youtu.be/jA8PU7aNmJo).
+
+## What it is
+
 ![Fernhollow, the made-up sample company, as a building: four floors of projects above the lobby and the shared machines, rooms lit warm and amber, and the panel beside it listing what needs you and what is working now](docs/building.jpg)
 
 Your company as a building you can walk through and talk to. Each project is a floor, each kind of
