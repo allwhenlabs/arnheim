@@ -59,7 +59,11 @@ const brain = createBrain();
 let starting = null; // an agent the receptionist was asked to start, waiting for your word
 let controlNote = ''; // what came of the last thing done from the panel
 let noteUsed = false; // it shows once a page, in the first place that has room for it (render resets this)
-const noteOnce = (cls = '') => { if (!controlNote || noteUsed) return null; noteUsed = true; return h(`p.small.muted${cls}`, { role: 'status' }, controlNote); };
+const noteOnce = (cls = '') => {
+  if (!controlNote || noteUsed) return null;
+  noteUsed = true;
+  return h(`p.small.muted${cls}${cls && /^Allowed/.test(controlNote) ? '.ok' : ''}`, { role: 'status' }, controlNote);
+};
 const lastFeed = new Map();
 let workSig = ''; // the work as last read, to tell when it has changed
 const mine = []; // tasks the receptionist took down in this tab, kept through each fresh read
@@ -1007,20 +1011,6 @@ function proofPart(c, pr) {
       btn('Check it again', () => controlDone(control.prove(c.id), (r) => `Running ${inner(r.check)} on its work now.`), '', 'rotate-ccw')));
 }
 
-// Everything waiting on you (queue.js), each with its answer: Allow and Deny for a permission, a reply for
-// an agent that asked something or finished (with control on), and a link to look closer. Reads waiting
-// together can be allowed together.
-function waitingList(items) {
-  if (!items.length) return [waitMeter(items), empty('Nothing is waiting on you right now.')];
-  const reads = control.on ? together(items) : null;
-  const allowAll = (ids) => controlDone(allowReads(ids), (said) => said);
-  return h('div.waiting',
-    waitMeter(items),
-    reads && h('div.control-row', btn(reads.label, () => allowAll(reads.ids), '.primary')),
-    h('ul.list', items.map(waitingItem)),
-    noteOnce());
-}
-
 // The agents held up waiting on you now (a permission or a question), by conversation.
 const heldNow = (items = waitingNow()) => new Set(items.filter((i) => i.kind === 'permission' || i.kind === 'question').map((i) => i.key).filter(Boolean));
 
@@ -1111,11 +1101,10 @@ function waitingItem(i) {
 function waitingActions(i, { keys = false } = {}) {
   const out = [];
   if (canAnswer(i)) {
-    // green only when it only looks: a command or a change gets a plain button, so yes is never the easy reflex
-    const safe = riskOf(i)?.mood === 'ok';
+    // never green: every request that asks reaches outside the project or changes something, so yes is never the easy reflex
     const label = (text, key) => (keys ? [text, h('span.kbd', key)] : text);
     out.push(h('div.control-row.waiting-do',
-      h(`button.btn${safe ? '.go' : '.primary'}`, { type: 'button', onclick: () => controlDone(answerAsk(i.ask.id, 'allow'), answeredSaid('allow', i)) }, label('Allow', 'A')),
+      h('button.btn.primary', { type: 'button', onclick: () => controlDone(answerAsk(i.ask.id, 'allow'), answeredSaid('allow', i)) }, label('Allow', 'A')),
       h('button.btn', { type: 'button', onclick: () => controlDone(answerAsk(i.ask.id, 'deny'), answeredSaid('deny', i)) }, label('Deny', 'D'))));
   }
   if (i.kind === 'task' && i.task?.routine && control.on && dir === 'data') {
@@ -1186,7 +1175,9 @@ function crumbsFor(floor, room, last) {
 // The one waiting item the home view puts first, with everything needed to answer it where it is: what it
 // wants exactly, how careful to be, what it means in plain words, and its answers.
 const later = new Set(); // items put off with Later, for this visit: they go to the end of the list
-let focusNow = null; // the item the home view shows first, for the A, D and L keys
+let focusNow = null; // the item the home view shows first, for the A, D and L keys (null on any other view)
+let focusId = null; // which item that was, across renders
+let focusSince = 0; // when it became first: keys wait a second after it changes, so a press meant for one never answers the next
 function focusCard(i, { open = true } = {}) {
   const k = kindWord(i);
   const risk = riskOf(i);
@@ -1220,6 +1211,7 @@ function viewOverview() {
   const talking = byProject(work.conversations.filter((c) => c.working));
   const jobs = work.jobs.filter((j) => j.state === 'running');
   const first = waiting[0] || null;
+  if ((first?.id ?? null) !== focusId) { focusId = first?.id ?? null; focusSince = Date.now(); }
   focusNow = first;
   const rest = waiting.slice(1);
   const now = Date.now() / 1000;
@@ -1245,7 +1237,7 @@ function viewOverview() {
         reads && h('div.control-row', { style: 'margin-bottom: 8px' }, btn(reads.label, () => controlDone(allowReads(reads.ids), (said) => said), '.go')),
         h('ul.list', rest.map(waitingItem)),
         waitMeter(waiting)),
-      rest.length === 0 && first && waitMeter(waiting) && h('section.panel-card', waitMeter(waiting)),
+      rest.length === 0 && waitMeter(waiting) && h('section.panel-card', waitMeter(waiting)),
       h('section.panel-card',
         sectHead('zap', 'Working now'),
         talking.length || jobs.length
@@ -1269,7 +1261,7 @@ function viewOverview() {
         h('p', h('strong', madeUp() ? `${org.company} is made up. ` : `${org.company}. `), madeUp() ? sampleLine() : org.about || ''),
         h('p', `Each floor of the building is a project and each room holds one kind of thing. Tap a floor to bring it out. Press Walk to go in and talk to the people at work, and to ${deskName() || 'the receptionist'} at the front desk.`),
         h('p', dir === 'data'
-          ? 'Everything here comes from data/company.json (the building), and from data/work.json and any tools connected to it (what is going on in it).'
+          ? 'Everything here comes from data/company.json (the building), and from data/work.json and any tools connected to it (what is going on in it). A change to the work shows within a few seconds; reload after changing the building.'
           : 'Everything here comes from two files: sample/company.json (the building) and sample/work.json (what is going on in it). To show your own company, copy them into a folder called data beside them, change them and reload.')),
     ],
   };
@@ -1441,6 +1433,7 @@ function convoPage(c) {
   return [
     title(c.title),
     h('p.muted', { style: 'margin-top: -4px' }, [state, agent, floorOf(c.project)?.label || c.project].filter(Boolean).join(' · ')),
+    noteOnce('.done-note'),
     asking && h('div', { style: 'margin: 14px 0' }, focusCard(asking, { open: false })),
     short.length > 0 && h('dl.short', short.flatMap(([k, v]) => [h('dt', k), h('dd', v)])),
     verdict && h('section.panel-card', sectHead('shield-check', 'Is it proven?'),
@@ -1530,6 +1523,7 @@ function renderTabs() {
 
 function render({ nav = false } = {}) {
   noteUsed = false;
+  focusNow = null; // viewOverview sets it again when it is the view showing
   const panel = $('content');
   const active = document.activeElement;
   // Never redraw under someone's typing: wait until they leave the box.
@@ -2092,8 +2086,10 @@ async function boot() {
     } else if (TAB_KEYS[event.key] && free) {
       event.preventDefault();
       location.hash = TAB_KEYS[event.key];
-    } else if (free && !route.floor && focusNow && /^[adl]$/i.test(event.key)) {
-      // the home view's first item: A allows it, D denies it, L puts it off till later
+    } else if (free && focusNow && /^[adl]$/i.test(event.key)) {
+      // the home view's first item: A allows it, D denies it, L puts it off till later. A held key or a press
+      // just as the first item changes does nothing, so it can't answer one you haven't seen.
+      if (event.repeat || Date.now() - focusSince < 1000) { event.preventDefault(); return; }
       const i = focusNow;
       const key = event.key.toLowerCase();
       if (key === 'l') { event.preventDefault(); later.add(i.id); render(); return; }

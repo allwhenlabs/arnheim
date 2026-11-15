@@ -357,7 +357,8 @@ a.floor-card:hover, a.room-tile:hover { transform: translateY(-1px); }
   .home-head h2 { font-size: 21px; }
   #content { padding: 16px 14px 32px; }
 }
-.home-head .done-note { display: inline-block; margin: -6px 0 14px; padding: 5px 10px; border-radius: 8px; background: var(--ok-bg); color: var(--ok); font-weight: 600; }
+.done-note { display: inline-block; margin: -6px 0 14px; padding: 5px 10px; border-radius: 8px; background: var(--surface-2); color: var(--text); font-weight: 600; }
+.done-note.ok { background: var(--ok-bg); color: var(--ok); }
 @media (max-width: 820px) {
   .focus-do .control-row { flex: 1 1 100%; }
   .focus-do .control-row .btn { flex: 1 1 0; }

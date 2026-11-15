@@ -27,6 +27,10 @@ const cases = {
   web: r.riskOf(ask('WebFetch', 'WebFetch: https://example.com')),
   command: r.riskOf(ask('Bash', 'Bash: npm test')),
   unknown: r.riskOf(ask('Mystery', 'Mystery')),
+  proto: r.riskOf(ask('__proto__', '__proto__')),
+  secretSearch: r.riskOf(ask('Grep', 'Grep: password in ~/.aws')),
+  hiddenWrite: r.riskOf(ask('Write', 'Write: ~/.zshrc')),
+  secretCommand: r.riskOf(ask('Bash', 'Bash: cat ~/.ssh/id_rsa')),
   notPermission: r.riskOf({ kind: 'task' }),
   exact: r.exactOf(ask('Bash', 'Bash: npm test -- reader')),
   exactBare: r.exactOf(ask('Read', 'Read')),
@@ -39,6 +43,12 @@ const cases = {
     { id: 'b', title: 'B', says: { needs: 'Not yet.' } },
     { id: 'c', title: 'C', says: { needs: 'Should the badge be gold or silver?' } },
     { id: 'd', title: 'D', says: { needs: 'Now: pick a colour.' } },
+    { id: 'e', title: 'E', says: { needs: 'No, but should the badge be gold or silver?' } },
+    { id: 'f', title: 'F', says: { needs: 'None of these fit. Which one should I use?' } },
+    { id: 'g', title: 'G', says: { needs: 'Nothing works yet: can you check the key' } },
+    { id: 'h', title: 'H', says: { needs: 'Not yet sure which colour you want.' } },
+    { id: 'i', title: 'I', says: { needs: 'None.' } },
+    { id: 'j', title: 'J', says: { needs: 'Not yet. Is the spare sensor ready?' } },
   ] }).map((i) => i.key),
 };
 console.log(JSON.stringify(cases));
@@ -56,10 +66,15 @@ class RiskTest(unittest.TestCase):
 
     def test_how_careful_to_be(self):
         r = self.r
-        self.assertEqual([r[k]["word"] for k in ("read", "search", "privateRead", "edit", "web", "command", "unknown")],
-                         ["Low risk", "Low risk", "Look first", "Changes files", "Goes online", "Read it first", "Read it first"])
-        self.assertEqual([r[k]["mood"] for k in ("read", "privateRead", "edit", "command")], ["ok", "failed", "needs", "needs"])
+        # every read or search that asks reaches outside the project, so none is ever called low risk
+        self.assertEqual([r[k]["word"] for k in ("read", "search", "privateRead", "edit", "web", "command", "unknown", "proto")],
+                         ["Reads outside", "Searches outside", "Look first", "Changes files", "Goes online", "Read it first", "Read it first", "Read it first"])
+        self.assertNotIn("ok", [r[k]["mood"] for k in ("read", "search", "edit", "web", "command", "unknown")])
+        self.assertIn("AI service", r["read"]["line"])
         self.assertIsNone(r["notPermission"])
+
+    def test_private_places_always_say_look_first(self):
+        self.assertEqual([self.r[k]["word"] for k in ("secretSearch", "hiddenWrite", "secretCommand")], ["Look first"] * 3)
 
     def test_the_exact_thing(self):
         self.assertEqual(self.r["exact"], "npm test -- reader")
@@ -71,7 +86,8 @@ class RiskTest(unittest.TestCase):
         self.assertEqual(self.r["meanings"], [True, True, True, True, False])
 
     def test_needing_nothing_is_not_asking(self):
-        self.assertEqual(self.r["asking"], ["c", "d"])
+        # a whole "Nothing yet." or "None." is not a question; anything with a question in it still is
+        self.assertEqual(self.r["asking"], ["c", "d", "e", "f", "g", "h", "j"])
 
 
 if __name__ == "__main__":
