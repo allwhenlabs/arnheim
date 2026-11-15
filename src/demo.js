@@ -741,6 +741,10 @@ const talk = {
     if (item && control.on && isConvo(item)) return agentReply(control, item, text, () => convoNow(item.id));
     return item ? sampleReply(item, text) : "I've finished here, so there's nothing new to tell.";
   },
+  // What waits on you, for the walk's "Needs you": each item's conversation (key) or title, and its kind.
+  waiting() {
+    return waitingNow().map((i) => ({ key: i.key || null, title: i.title, kind: i.kind }));
+  },
   // With control on: Allow and Deny, or Stop, on an agent's card; Start at the front desk.
   controls(who) {
     if (!control.on) return null;

@@ -21,6 +21,8 @@
 //   controls(who)            optional: buttons for the card while you stand with them, as
 //                            { note, buttons: [{ label, run }] }, or null for none. `run` gives what
 //                            they say about it after (control.js: Allow, Deny, Stop, Start)
+//   waiting()                optional, for the walk: what waits on you, as [{ key, title, kind }], where
+//                            key is a conversation's id and kind permission, question, turn or task
 
 import { icon } from './icons.js';
 

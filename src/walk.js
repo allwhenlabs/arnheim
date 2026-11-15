@@ -171,7 +171,12 @@ export function createWalk(ctx) {
   const floorBox = el('div', 'aw-floor');
   const helpButton = button('?', () => showHelp(help.classList.contains('aw-faded')), 'Show how to walk');
   floorBox.append(button('▼', () => stepFloor(-1), 'Take the lift down a floor'), floorName, button('▲', () => stepFloor(1), 'Take the lift up a floor'), helpButton);
-  hud.append(button('Leave', () => ctx.leave(), 'Leave the walk'), floorBox);
+  // Take me to what needs me: shown while anything in the building needs you, with how many. Each press
+  // goes to the next one, by the lift if it is on another floor.
+  const needsButton = button('', () => goToNeeds(), 'Take me to what needs me');
+  needsButton.classList.add('aw-needs');
+  needsButton.hidden = true;
+  hud.append(button('Leave', () => ctx.leave(), 'Leave the walk'), needsButton, floorBox);
   const picker = el('div', 'aw-picker');
   picker.hidden = true;
   picker.setAttribute('role', 'dialog');
@@ -224,19 +229,168 @@ export function createWalk(ctx) {
 
   function openPicker() {
     if (ride) return;
+    const pick = (text, run, label) => {
+      const b = el('button', 'aw-btn', text);
+      b.type = 'button';
+      b.setAttribute('aria-label', label);
+      b.onclick = run;
+      return b;
+    };
     const list = el('ul');
     for (const s of order) {
-      const b = button(s.label, () => rideTo(s), s === here ? `${s.label}, you are here` : `Take the lift to ${s.label}`);
+      const b = pick(s.label, () => rideTo(s), s === here ? `${s.label}, you are here` : `Take the lift to ${s.label}`);
       if (s === here) { b.setAttribute('aria-current', 'true'); b.disabled = true; }
       const item = el('li');
       item.append(b);
       list.append(item);
     }
-    picker.replaceChildren(el('p', null, 'Take the lift to'), list);
+    // what is on this floor first, a tap walking you there
+    const guide = el('ul', 'aw-guide');
+    for (const g of onThisFloor()) {
+      const b = pick('', () => { closePicker(); g.go(); }, `Walk to ${g.title}`);
+      b.classList.add('aw-go', `aw-go-${g.kind}`);
+      b.append(el('b', null, g.title));
+      if (g.sub) b.append(el('span', null, g.sub));
+      const item = el('li');
+      item.append(b);
+      guide.append(item);
+    }
+    picker.replaceChildren(...(guide.children.length ? [el('p', null, `On ${here.label}`), guide] : []), el('p', null, 'Take the lift to'), list);
     picker.hidden = false;
     card.hidden = true;
   }
   function closePicker() { picker.hidden = true; }
+
+  /* ---------- finding your way: what is on this floor, and what needs you ---------- */
+
+  const keyOfThing = (o) => o.href || o.title;
+  // What waits on you: a thing whose own state says so (a task, a budget), or one the page lists as waiting
+  // for you (talk.waiting: an agent's permission request or question, which the building shows as at work).
+  const WAIT_WORDS = { permission: 'Wants your permission', question: 'Asks you', turn: 'Your turn' };
+  function waitingOn() {
+    let list = [];
+    try { list = ctx.talk?.waiting?.() || []; } catch (error) { console.warn('Arnheim: no waiting list.', error); }
+    // its conversation's id decides when it has one (two seats can share a title); the title only when it hasn't
+    const at = (o) => list.findIndex((i) => (i.key ? !!o.href?.endsWith(`/${i.key}`) : !!i.title && i.title === o.title));
+    const waits = (o) => {
+      const i = at(o);
+      return i >= 0 ? WAIT_WORDS[list[i].kind] || 'Needs you' : o.mood === 'needs' ? 'Needs you' : null;
+    };
+    waits.rank = (o) => { const i = at(o); return i >= 0 ? i : list.length; }; // the page's own order: its first is ours
+    return waits;
+  }
+  const roomAround = (room) => room.g?.position || { x: 0, z: 0 }; // a baked floor's rooms are in the floor's own coordinates
+
+  // Walks to a spot on this floor, round whatever is in the way, turning to face `face` on arrival.
+  function walkTo(x, z, face) {
+    const goal = roomAt(x, z);
+    const way = goal && wayTo(goal.x, goal.z);
+    if (!way) return false;
+    me.target = { ...way.shift(), next: way, face };
+    input();
+    return true;
+  }
+
+  // A thing that needs you: someone with a ring is walked to and talked to; anything else is walked up to
+  // and opened in the panel, so it can be answered there.
+  function goToThing(o, room) {
+    const hit = o.hit?.userData || o; // what a tap on it gives: its title, page and place
+    if (o.figure && ringOf(hit) && walkToTalk(hit)) return true;
+    const r = roomAround(room);
+    const x = r.x + o.x;
+    const z = r.z + o.z;
+    if (!walkTo(x, z, [x, z])) return false;
+    showCard(hit);
+    if (!hit.stay) ctx.onPick?.({ ...hit, walk: true });
+    return true;
+  }
+
+  // A room: a drawn one just inside its open front, a baked one just inside its doorway (or its middle).
+  function goToRoom(room) {
+    if (room.g) {
+      const p = room.g.position;
+      return walkTo(p.x + W / 2, p.z + D - 0.9, [p.x + W / 2, p.z + D / 2]);
+    }
+    const c = room.centre;
+    const door = doors.get(room.key);
+    if (c && walkTo(c[0], c[1], null)) return true;
+    return !!door && walkTo(door[0], door[1], c || null);
+  }
+
+  // Who and what is on this floor, for the guide: what needs you first, then the people you can talk to,
+  // then the rooms you can reach.
+  function onThisFloor() {
+    if (!here || !map) return [];
+    const out = [];
+    const seen = new Set();
+    const waits = waitingOn();
+    for (const room of here.rooms) {
+      for (const o of room.objects) {
+        const why = waits(o);
+        if (!why || seen.has(keyOfThing(o))) continue;
+        seen.add(keyOfThing(o));
+        out.push({ kind: 'needs', title: o.title, sub: `${why}, in ${room.label}`, go: () => goToThing(o, room) });
+      }
+    }
+    for (const spot of spots.slice(0, 8)) {
+      if (seen.has(keyOfThing(spot.who))) continue;
+      seen.add(keyOfThing(spot.who));
+      out.push({ kind: 'person', title: spot.who.title, sub: spot.who.sub || '', go: () => walkToTalk(spot.who) });
+    }
+    for (const room of here.rooms) {
+      if (!room.label || (!room.g && !room.centre && !doors.has(room.key))) continue;
+      out.push({ kind: 'room', title: room.label, sub: ctx.infoText(room.info) || '', go: () => goToRoom(room) });
+    }
+    return out;
+  }
+
+  // Everything in the building that waits on you, in the page's own order (so the first is the home view's
+  // first), then the rest: this floor's first, then the floors in the lift's order.
+  function needsAll() {
+    const out = [];
+    const seen = new Set();
+    const waits = waitingOn();
+    for (const s of [here, ...order.filter((f) => f !== here)]) {
+      if (!s) continue;
+      for (const room of s.rooms || []) {
+        for (const o of room.objects || []) {
+          if (!waits(o) || seen.has(keyOfThing(o))) continue;
+          seen.add(keyOfThing(o));
+          out.push({ s, room, o, rank: waits.rank(o) });
+        }
+      }
+    }
+    return out.sort((a, b) => a.rank - b.rank); // stable: what the page doesn't list keeps this floor first
+  }
+
+  let needsTimer = 0; // started once the walk is open (at the end of createWalk)
+  let needsGone = new Set(); // the ones this walk has taken you to, so the next press goes on to the next
+  let afterRide = null; // what to do once the lift has brought you to another floor
+  function drawNeeds() {
+    const n = needsAll().length;
+    needsButton.hidden = !n;
+    needsButton.replaceChildren(el('span', 'aw-needs-word', 'Needs you'), el('b', null, String(n)));
+    needsButton.setAttribute('aria-label', `Take me to what needs me: ${n} waiting`);
+  }
+  function goToNeeds() {
+    if (ride) return;
+    const all = needsAll();
+    if (!all.length) { drawNeeds(); return; }
+    let next = all.find((n) => !needsGone.has(keyOfThing(n.o)));
+    if (!next) { needsGone = new Set(); next = all[0]; } // been to each: round again
+    needsGone.add(keyOfThing(next.o));
+    closePicker();
+    if (next.s === here) { goToThing(next.o, next.room); return; }
+    afterRide = () => goToThing(next.o, next.room);
+    rideTo(next.s);
+  }
+  // A ride has ended on the floor it was for: whatever was waiting for it, or the guide to the floor.
+  function arrived() {
+    const then = afterRide;
+    afterRide = null;
+    if (then) then();
+    else openPicker();
+  }
 
   // A card naming what was tapped, for a few seconds; or, while someone stands in a talking ring,
   // naming who they are with, for as long as they stay.
@@ -697,14 +851,14 @@ export function createWalk(ctx) {
 
   // Goes to another floor, or (at a point) burns this floor away and rebuilds it.
   function rideTo(to, at = null) {
-    if (ride || !to || (to === here && !at)) return;
+    if (ride || !to || (to === here && !at)) { if (!ride) afterRide = null; return; }
     closePicker();
     card.hidden = true;
     me.target = null;
     input();
     // In the real lift's car, the ride is a lift's: the doors close, it travels, and they open onto the new floor.
     const inCar = !!hall.car && !at && to !== here && hall.inLift(me.x, me.z);
-    if (still()) { if (to !== here) enter(to, inCar ? 'car' : 'lift'); return; }
+    if (still()) { if (to !== here) { enter(to, inCar ? 'car' : 'lift'); arrived(); } return; }
     ride = { to, same: to === here, at, phase: 'close', t: 0, car: inCar, trip: inCar ? Math.min(4, 1.4 + 0.35 * Math.abs(order.indexOf(to) - order.indexOf(here))) : 0 };
     if (ride.same || !hall.inLift(me.x, me.z)) burnOut();
   }
@@ -727,6 +881,7 @@ export function createWalk(ctx) {
       enter(ride.to, 'car'); // the same car, now at the new floor; its doors open as it stops
       me.dipV += 0.12;
       ride = null;
+      arrived();
     } else if (ride.phase === 'out') {
       if (burn.running) return;
       if (!ride.same) enter(ride.to, 'lift');
@@ -736,7 +891,9 @@ export function createWalk(ctx) {
       burn.start({ root: here.group, origin: ride.same ? ride.at : eye, inward: true, eye });
     } else if (ride.phase === 'in' && !burn.running) {
       here.group.visible = true;
+      const moved = !ride.same;
       ride = null;
+      if (moved) arrived(); else afterRide = null;
     }
   }
 
@@ -760,6 +917,7 @@ export function createWalk(ctx) {
       event.preventDefault();
       keys.add(event.code);
       me.target = null;
+      if (!inLift) closePicker();
       input();
     }
   }, { signal });
@@ -827,6 +985,7 @@ export function createWalk(ctx) {
     const start = square(me.x, me.z);
     const goal = square(tx, tz);
     if (start < 0 || goal < 0) return null;
+    const goalBlocked = blocked(tx, tz, true); // the spot itself, which may be off its square's middle
     const from = new Int32Array(cols * rows).fill(-1);
     from[start] = start;
     const queue = [start];
@@ -837,7 +996,7 @@ export function createWalk(ctx) {
       for (const [nq, nr] of [[q + 1, r], [q - 1, r], [q, r + 1], [q, r - 1]]) {
         const j = nr * cols + nq;
         if (nq < 0 || nr < 0 || nq >= cols || nr >= rows || from[j] >= 0) continue;
-        if (blocked(x0 + (nq + 0.5) * CELL, z0 + (nr + 0.5) * CELL, true)) continue;
+        if (j === goal ? goalBlocked : blocked(x0 + (nq + 0.5) * CELL, z0 + (nr + 0.5) * CELL, true)) continue;
         from[j] = i;
         queue.push(j);
       }
@@ -882,6 +1041,7 @@ export function createWalk(ctx) {
     if (thing && (!surface || thing.distance <= surface.distance + 0.3)) {
       const hit = thing.object.userData;
       if (hit.lift) { openPicker(); return; }
+      closePicker();
       if ((hit.talk || ringOf(hit)) && walkToTalk(hit)) return;
       showCard(hit);
       if (!hit.stay) ctx.onPick?.({ ...hit, walk: true });
@@ -893,6 +1053,7 @@ export function createWalk(ctx) {
     const goal = roomAt(spot.x, spot.z);
     const way = goal && wayTo(goal.x, goal.z);
     if (!way) return; // nowhere to stand there, or no way to it: you stay where you are
+    closePicker();
     me.target = { ...way.shift(), next: way, open: true };
     ctx.wake(2);
   }
@@ -909,6 +1070,7 @@ export function createWalk(ctx) {
     stick.y = dy / max;
     knob.style.transform = `translate(${dx}px, ${dy}px)`;
     me.target = null;
+    if (!inLift) closePicker();
     input();
   }
   stickEl.addEventListener('pointerdown', (event) => {
@@ -935,7 +1097,7 @@ export function createWalk(ctx) {
     if (!here) return false;
     let busy = false;
     if (ride) { advance(dt); busy = true; }
-    if (!ride && ctx.version() !== seen && now - surveyed > 1500) { look(); placeSpots(); free(); }
+    if (!ride && ctx.version() !== seen && now - surveyed > 1500) { look(); placeSpots(); free(); drawNeeds(); }
 
     // Turning: smooth, whether by drag, keys or walking somewhere.
     const turn = (keys.has('ArrowLeft') ? 1 : 0) - (keys.has('ArrowRight') ? 1 : 0);
@@ -1049,8 +1211,10 @@ export function createWalk(ctx) {
       else if (!inside && inLift) closePicker();
       inLift = inside;
       const ring = spots.find((s) => Math.hypot(me.x - s.x, me.z - s.z) < 0.42) || null;
+      // on the way somewhere else (a tap, the guide, Needs you), a ring passed over is only passed over
+      const passing = !!ring && !!me.target && (me.target.next?.length > 0 || Math.hypot(me.target.x - ring.x, me.target.z - ring.z) > 0.5);
       if (!ring) heldOff = false;
-      if (!heldOff) setTalk(ring);
+      if (!heldOff) setTalk(passing ? null : ring);
     }
     if (notes.update(dt, me, here === penthouse && !ride, still())) busy = true;
     if (burn.update(dt, camera, renderer)) busy = true;
@@ -1161,6 +1325,7 @@ export function createWalk(ctx) {
     clearTimeout(cardTimer);
     clearTimeout(helpTimer);
     clearTimeout(loadTimer);
+    clearInterval(needsTimer);
     voice.dispose();
     if (here) { placeReceptionist(false); setWalls(here, false); }
     for (const entry of halls.values()) {
@@ -1191,6 +1356,9 @@ export function createWalk(ctx) {
   const first = storeys.find((s) => s.id === ctx.start) || storeys.find((s) => s.role === 'lobby') || ground;
   for (const s of storeys) s.group.visible = false; // one floor at a time
   enter(first, first.role === 'lobby' ? 'entrance' : 'lift');
+  drawNeeds();
+  openPicker(); // where you are and what is here, from the first step
+  needsTimer = setInterval(drawNeeds, 2000);
   // No effect on arrival: the walk simply opens on the finished rooms.
 
   if (photoState === 'loading') {
@@ -1222,6 +1390,12 @@ export function createWalk(ctx) {
     go(x, z) { const way = wayTo(x, z); if (way) { me.target = { ...way.shift(), next: way }; ctx.wake(2); } return !!way; },
     // what a tap on the floor at (x, z) does: where you would end up standing, and whether there is a way
     tapTo(x, z) { const goal = roomAt(x, z); const way = goal && wayTo(goal.x, goal.z); if (way) { me.target = { ...way.shift(), next: way, open: true }; ctx.wake(2); } return way ? goal : null; },
-    yaw: () => me.yawGoal, openAhead: (yaw) => openAhead(yaw ?? me.yawGoal) };
+    yaw: () => me.yawGoal, openAhead: (yaw) => openAhead(yaw ?? me.yawGoal),
+    // the guide to this floor and what needs you (for tests)
+    guide: () => onThisFloor().map(({ kind, title, sub }) => ({ kind, title, sub })),
+    rings: () => spots.map((s) => ({ title: s.who.title, x: s.x, z: s.z, way: !!wayTo(s.x, s.z) })),
+    roomAt: (x, z) => { const g = roomAt(x, z); return g && { ...g, way: !!wayTo(g.x, g.z) }; },
+    target: () => (me.target ? { x: me.target.x, z: me.target.z, left: me.target.next?.length || 0 } : null),
+    needs: () => needsAll().map((n) => ({ floor: n.s.id, title: n.o.title })) };
   return { update, labels, info, dispose, setNotes: notes.set, debug };
 }

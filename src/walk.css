@@ -16,6 +16,21 @@
 .aw-picker ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .aw-picker .aw-btn { width: 100%; justify-content: flex-start; }
 .aw-picker .aw-btn[aria-current] { border-color: #ffcf8f; color: #ffd9a8; }
+/* The guide to this floor (On ...): two lines a row, what needs you marked amber, people with a ring's dot. */
+.aw-picker .aw-guide { margin-bottom: 12px; }
+.aw-picker .aw-go { flex-direction: column; align-items: flex-start; gap: 2px; padding: 7px 12px 7px 26px; position: relative; text-align: left; line-height: 1.25; }
+.aw-go b { font-weight: 600; overflow-wrap: anywhere; }
+.aw-go span { font-weight: 400; font-size: 12px; color: #d6dbe6; overflow-wrap: anywhere; }
+.aw-go::before { content: ''; position: absolute; left: 11px; top: 50%; width: 7px; height: 7px; margin-top: -3.5px; border-radius: 2px; background: rgba(255, 255, 255, .4); }
+.aw-go-person::before { border-radius: 50%; background: none; box-shadow: inset 0 0 0 2px #ffc985; width: 9px; height: 9px; left: 10px; margin-top: -4.5px; }
+.aw-go-needs { border-color: rgba(255, 190, 110, .55); }
+.aw-go-needs::before { border-radius: 50%; background: #ffb35c; box-shadow: 0 0 8px rgba(255, 170, 80, .9); }
+.aw-go-needs span { color: #ffd9a8; }
+/* Take me to what needs me */
+.aw-needs { border-color: rgba(255, 190, 110, .6); color: #ffd9a8; white-space: nowrap; }
+.aw-needs::before { content: ''; flex: none; width: 8px; height: 8px; border-radius: 50%; background: #ffb35c; box-shadow: 0 0 8px rgba(255, 170, 80, .9); }
+.aw-needs b { font-weight: 700; }
+.aw-needs[hidden] { display: none; }
 .aw-card { position: absolute; z-index: 5; top: 60px; left: 50%; transform: translateX(-50%); width: min(380px, calc(100% - 24px)); display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 14px; border-radius: 14px; background: rgba(14, 16, 24, .84); border: 1px solid rgba(255, 255, 255, .2); color: #f7f2ea; box-shadow: 0 10px 30px rgba(0, 0, 0, .4); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); font: 14px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", "Helvetica Neue", Arial, sans-serif; }
 .aw-card > div { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .aw-card span { font-size: 13px; color: #d6dbe6; overflow-wrap: anywhere; }
@@ -33,7 +48,7 @@
 /* Talking (voice.js): the Voice button beside Leave, and the conversation inside the talking card. */
 .aw-voice { margin-right: auto; white-space: nowrap; }
 .aw-voice .icon { display: none; }
-@media (max-width: 420px) { .aw-voice { padding: 0; } .aw-voice .icon { display: block; } .aw-voice-word { display: none; } .aw-name { padding: 0 11px; } }
+@media (max-width: 420px) { .aw-voice { padding: 0; } .aw-voice .icon { display: block; } .aw-voice-word, .aw-needs-word { display: none; } .aw-name { padding: 0 11px; } .aw-needs { padding: 0 11px; } }
 .aw-voice[aria-pressed="true"] { border-color: #ffcf8f; color: #ffd9a8; }
 .aw-voice[hidden], .aw-talk[hidden], .aw-said[hidden] { display: none; }
 .aw-card.aw-talking { flex-wrap: wrap; width: min(440px, calc(100% - 24px)); }
@@ -60,7 +75,7 @@
 .aw-act-note { flex: 1 0 100%; margin: 0; font-size: 13px; color: #ffd9a8; overflow-wrap: anywhere; }
 .aw-acts .aw-btn { min-height: 34px; padding: 0 14px; }
 /* 16px text in the talk box: an iPhone zooms the whole walk into any smaller field it is typed in */
-@media (pointer: coarse) { .aw-stick { display: block; } .aw-help { left: 156px; bottom: 28px; } .aw-ask input { font-size: 16px; } }
+@media (pointer: coarse) { .aw-stick { display: block; } .aw-help { left: 156px; bottom: 28px; } .aw-ask input { font-size: 16px; } .aw-picker { max-height: min(calc(100% - 72px), 58%); } }
 /* full screen on a narrow window, and on a phone turned on its side, which is wider than that but short */
 @media (max-width: 820px), (pointer: coarse) and (max-height: 500px) { .arnheim-walking { position: fixed !important; inset: 0 !important; width: auto !important; height: auto !important; min-height: 0 !important; z-index: 50; } }
 @media (prefers-reduced-motion: reduce) { .aw-help, .aw-load, .aw-load b { transition: none; } .aw-mic::before { animation: none; } }
