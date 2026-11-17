@@ -3,7 +3,7 @@
 Arnheim shows which of your AI coding agents is waiting on you, and whether the work each one calls
 done really passes its checks, as a building you can walk through.
 
-![A 20-second tour of Fernhollow, the made-up sample company: the building with a floor for each project; floors lit amber where something waits, beside one list of what waits on you; a room turning green when an agent's work passes its tests; then walking in to the receptionist, who says what needs you](docs/tour.gif)
+![A 20-second tour of Fernhollow, the made-up sample company: the building with a floor for each project, lit amber where something waits on you; allowing an agent's request from the list beside it; a room turning green when an agent's work passes its tests; then walking in to the receptionist, who says what needs you](docs/tour.gif)
 
 ```bash
 git clone https://github.com/allwhenlabs/arnheim && cd arnheim && python3 serve.py
@@ -16,7 +16,7 @@ Watch [the tour](https://youtu.be/bl7eY4f8u2M), or [a talk with the receptionist
 
 ## What it is
 
-![Fernhollow, the made-up sample company, as a building: four floors of projects above the lobby and the shared machines, rooms lit warm and amber, and the panel beside it listing what needs you and what is working now](docs/building.jpg)
+![Fernhollow, the made-up sample company, as a building: four floors of projects above the lobby and the shared machines, each labelled with what is happening there and its token budget for the day, and the panel beside it listing what needs you, first an agent asking permission to run a command, with Allow and Deny](docs/building.jpg)
 
 Your company as a building you can walk through and talk to. Each project is a floor, each kind of
 work is a room, and the work lights up as it happens. The people inside are your agents at work:
