@@ -257,8 +257,27 @@ export function createWalk(ctx) {
     remap() { if (here === penthouse && !ride) look(); },
   });
 
+  let pickerWhere = ''; // the line over what is on this floor, kept while the list is open
+  let pickerSig = ''; // what the list showed, so a live change redraws it only when that changes
+  const sigOf = (things) => [here?.id, ...things.map((g) => `${g.kind}|${g.title}|${g.sub}`)].join('\n');
   function openPicker() {
     if (ride) return;
+    pickerWhere = resumed ? `Back on ${here.label}, where you left off` : `On ${here.label}`;
+    resumed = false; // said once, as the walk opens
+    drawPicker();
+    picker.hidden = false;
+    card.hidden = true;
+  }
+  // The lift's floors and what is on this one. Drawn when it opens, and again while it is open whenever what is
+  // on the floor changes (someone finished, a goal was set), keeping the keyboard on the same button.
+  function drawPicker() {
+    const things = onThisFloor();
+    pickerSig = sigOf(things);
+    // where the keyboard was: the button's label, and which of the buttons with that label (two seats can share one)
+    const was = picker.contains(document.activeElement) ? document.activeElement : null;
+    const label = was?.getAttribute('aria-label');
+    const nth = was ? [...picker.querySelectorAll('button')].filter((b) => b.getAttribute('aria-label') === label).indexOf(was) : -1;
+    const scrolled = picker.scrollTop;
     const pick = (text, run, label) => {
       const b = el('button', 'aw-btn', text);
       b.type = 'button';
@@ -276,7 +295,7 @@ export function createWalk(ctx) {
     }
     // what is on this floor first, a tap walking you there
     const guide = el('ul', 'aw-guide');
-    for (const g of onThisFloor()) {
+    for (const g of things) {
       const b = pick('', () => { closePicker(); g.go(); }, `Walk to ${g.title}`);
       b.classList.add('aw-go', `aw-go-${g.kind}`);
       b.append(el('b', null, g.title));
@@ -285,11 +304,22 @@ export function createWalk(ctx) {
       item.append(b);
       guide.append(item);
     }
-    const where = resumed ? `Back on ${here.label}, where you left off` : `On ${here.label}`;
-    resumed = false; // said once, as the walk opens
-    picker.replaceChildren(...(guide.children.length ? [el('p', null, where), guide] : []), el('p', null, 'Take the lift to'), list);
-    picker.hidden = false;
-    card.hidden = true;
+    picker.replaceChildren(...(guide.children.length ? [el('p', null, pickerWhere), guide] : []), el('p', null, 'Take the lift to'), list);
+    picker.scrollTop = scrolled;
+    if (was) {
+      const same = [...picker.querySelectorAll('button')].filter((b) => b.getAttribute('aria-label') === label && !b.disabled);
+      // gone from the list (a goal was set at its flagpole, say): the first thing on the floor, so the keyboard stays here
+      (same[Math.max(0, nth)] || same[0] || picker.querySelector('button:not([disabled])'))?.focus({ preventScroll: true });
+    }
+  }
+  // Not while a finger or the mouse is down on the list, so a tap never lands on a button that has just been
+  // replaced or moved; the Needs button's two-second look catches up after.
+  let pressing = false;
+  picker.addEventListener('pointerdown', () => { pressing = true; }, { signal });
+  for (const type of ['pointerup', 'pointercancel']) window.addEventListener(type, () => { pressing = false; }, { signal });
+  function freshPicker() {
+    if (picker.hidden || ride || pressing) return;
+    if (sigOf(onThisFloor()) !== pickerSig) drawPicker();
   }
   function closePicker() { picker.hidden = true; }
 
@@ -1400,7 +1430,7 @@ export function createWalk(ctx) {
     if (!here) return false;
     let busy = false;
     if (ride) { advance(dt); busy = true; }
-    if (!ride && ctx.version() !== seen && now - surveyed > 1500) { look(true); placeSpots(); free(); planBaseOf(); drawNeeds(); }
+    if (!ride && ctx.version() !== seen && now - surveyed > 1500) { look(true); placeSpots(); free(); planBaseOf(); drawNeeds(); freshPicker(); }
 
     // Turning: smooth, whether by drag, keys or walking somewhere.
     const turn = (keys.has('ArrowLeft') ? 1 : 0) - (keys.has('ArrowRight') ? 1 : 0);
@@ -1713,7 +1743,7 @@ export function createWalk(ctx) {
   drawNeeds();
   openPicker(); // where you are and what is here, from the first step
   setPlan((() => { try { return localStorage.getItem('arnheim-walk-plan') !== 'off'; } catch { return true; } })());
-  needsTimer = setInterval(drawNeeds, 2000);
+  needsTimer = setInterval(() => { drawNeeds(); freshPicker(); }, 2000); // the guide too: what waits on you can change without the building's work changing
   // No effect on arrival: the walk simply opens on the finished rooms.
 
   if (photoState === 'loading') {
