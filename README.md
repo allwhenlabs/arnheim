@@ -95,7 +95,9 @@ answer aloud ("Voice", below).
   into their ring and ask.
 - **Your assistant**, at their own desk in your office, if you have one. In the sample they answer
   as the receptionist does; your own page can give them their own answers.
-- **Each floor's lead**, standing by the lift on every project floor. They know that one project in
+- **Each floor's lead**, standing a few steps from the lift on every project floor, clear of the
+  doorways and the ways people walk. Walking across their ring on your way somewhere else starts
+  nothing: stop on it, or walk up to them, to talk. They know that one project in
   depth: who is working on it and what each last said, what waits on you there, its goals, open
   work, checks and spending. Ask **"where are we?"**, **"what's new?"** (since you last asked them,
   with how the agents answered what you passed on) or **"who's working?"**. Say **"tell them to test
@@ -290,9 +292,11 @@ Everything stays on your computer.
 
 ## Talk about anything
 
-Switch on the brain, and the receptionist and your assistant answer with Claude. Ask them anything,
-out loud on a walk or typed at the front desk, and follow up as you would with a person. About your
-company they still say only what your files say, and when the files don't say, they say so.
+Switch on the brain, and everyone you can talk to answers with Claude: the receptionist, your
+assistant, each floor's lead and each agent at work, who talks about their own work in the first
+person, like an employee. Ask them anything, out loud on a walk or typed at the front desk, and follow
+up as you would with a person. About your company they still say only what your files say, and when
+the files don't say, they say so.
 
 ```bash
 python3 serve.py --brain
@@ -303,7 +307,7 @@ own Claude plan: Sonnet, unless `ARNHEIM_BRAIN_MODEL` names another, such as `ha
 facts and what you say to them go to Claude, through your Claude Code, and nothing is kept on disk.
 Greetings, refusals and "remind me to ..." stay with the building's own rules, and they still never
 merge, publish, run jobs or sign in. With `--control` too, your assistant can pass a clear
-instruction of yours on to an agent at work. It is off unless you switch it on: start Arnheim again
+instruction of yours on to an agent at work, and an agent at work takes one for its own work. It is off unless you switch it on: start Arnheim again
 without `--brain` and it is off, with nothing to undo. It never works with `--lan`
 ([docs/brain.md](docs/brain.md)).
 

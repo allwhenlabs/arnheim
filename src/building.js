@@ -1339,7 +1339,7 @@ function createDrawnBuilding(canvas, org, { onPick, onHover, onStatus, onWalk, o
 
   return {
     setLive, setScene, setTheme, focus, highlight, zoomBy, turn, resetView, wake, where, dispose,
-    walk, walking: () => !!walker, walkInfo: () => walker?.info() || null, setNotes,
+    walk, walking: () => !!walker, walkInfo: () => walker?.info() || null, walkDebug: () => walker?.debug || null, setNotes,
     // One picture of the model as it stands now, without waiting for a frame.
     // It does a whole frame's work: a model that has never drawn (a hidden page) has no shadow maps
     // or lamp values yet, and WebGL refuses to draw lit materials without them, leaving only the decals.

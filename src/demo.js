@@ -4,7 +4,7 @@
 // sample's work moves on a loop (the story at the end of its work.json), so there is always
 // something to see. Nothing is saved anywhere: a reload reads the files again.
 import { createBrain } from './brain.js';
-import { agentControls, agentReply, createControl, deskControls, deskStart } from './control.js';
+import { agentControls, agentQuick, agentReply, createControl, deskControls, deskStart } from './control.js';
 import { FEATURES, createFeatures } from './features.js';
 import { createTalkDock } from './talk-dock.js';
 import { hasLead, isLeadHref, leadUpdate, voiceAnswer } from './leads.js';
@@ -633,11 +633,78 @@ function primeBrain(role) {
 /* ---------- talking in the walk (voice.js) ---------- */
 
 // The receptionist answers as at the desk. The people at work answer from their own lines in work.json ("says"),
-// with no AI; in the sample they are made up, and so is what they say. A page with real agents
-// passes its own answers, and there what you say reaches the agent doing the work.
+// with no AI, unless the brain is on (below); in the sample they are made up, and so is what they say. With
+// control on, what you tell an agent reaches the agent doing the work.
 const talkItem = (who) => work.conversations.find((c) => convoHref(c) === who.href) || work.tasks.find((t) => taskHref(t) === who.href) || null;
 const isConvo = (item) => work.conversations.includes(item);
 const convoNow = (id) => work.conversations.find((c) => c.id === id) || null;
+
+// With the brain on (serve.py --brain), someone at work answers through Claude, in the first person, like an
+// employee about their own work: from what the building knows of it, and of their floor. With control on, an
+// agent's conversation can also pass an instruction about its work to its own working session, and the floor's
+// lead reports back on it as on their own.
+const agentBrainWho = (item) => ({
+  role: 'agent', company: org.company, floor: floorOf(item.project)?.label || item.project, title: item.title,
+  key: control.on && isConvo(item) ? item.id : '',
+});
+function agentFacts(item) {
+  const floor = floorOf(item.project);
+  const label = floor?.label || item.project;
+  const keep = new Set(['Company', 'The building', `Floor: ${label}`, `Agents on ${label}`, 'Company memory: what every agent is told as it starts']);
+  const out = brainFacts().filter(([name]) => keep.has(name));
+  const clock = (at) => new Date(at < 1e12 ? at * 1000 : at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const convo = isConvo(item);
+  const now = (convo ? convoNow(item.id) : work.tasks.find((t) => t.id === item.id)) || item;
+  const says = now.says || {};
+  const ask = convo && control.on ? control.state().asks.find((a) => a.key === item.id) : null;
+  const proof = convo ? proofOf(now) : null;
+  const review = convo ? reviewOf(now) : null;
+  const state = convo
+    ? [now.working ? 'You are working right now.' : 'You are not working right now.', now.check && 'You have finished, with something for the person to check.']
+    : [`This is a task in ${label}'s Work room, and you are the one doing it. Its status: ${(STATUS[now.status] || now.status || 'open').toLowerCase()}.`, now.note && `Its note: ${now.note}`];
+  const lines = [
+    `You are the ${item.project} agent on "${item.title}"${convo && control.on ? ` (your conversation is ${item.id})` : ''}.`,
+    ...state,
+    ask && `You are waiting for the person's permission: ${ask.what}. They answer it on your card, or by saying allow or deny.`,
+    says.needs && `What you need from the person: ${says.needs}`,
+    says.now && `What you last said: "${says.now}"`,
+    says.next && `What is next: ${says.next}`,
+    says.when && `When: ${says.when}`,
+    now.at && `Last heard from you at ${clock(now.at)}.`,
+    proof && `Your work: ${proof.word.toLowerCase()}. ${proof.line}`,
+    review && `The review line on your work: ${review.line}`,
+    now.spent?.tokens && `You have used ${Math.round(now.spent.tokens).toLocaleString()} tokens.`,
+  ].filter(Boolean);
+  out.unshift(['You', lines.join('\n')]);
+  const asked = floor ? leads.passed(floor).filter((x) => x.key === item.id) : [];
+  if (asked.length) out.push(['What the person asked you to do from here', asked.map((x) => `- At ${clock(x.at)}: ${x.text}`).join('\n')]);
+  return out;
+}
+function primeAgent(item) {
+  const id = `agent:${item.id}`;
+  if (!brain.on || Date.now() - (primed[id] || 0) < 3000) return;
+  primed[id] = Date.now();
+  brain.prime(agentBrainWho(item), agentFacts(item));
+}
+// Their answer through Claude, or if Claude gives none at all, the building's own (`otherwise`).
+function agentThinks(item, said, otherwise) {
+  return (async function* thought() {
+    let given = false;
+    try {
+      const floor = floorOf(item.project) || null;
+      for await (const piece of brain.ask(agentBrainWho(item), said, agentFacts(item), { passed: (sent) => leads.remember(floor, sent) })) {
+        given = true;
+        yield piece;
+      }
+    } catch (error) {
+      if (given) throw error; // voice.js says the answer was cut off
+      console.warn('Arnheim: no answer from Claude for an agent.', error.message);
+      const plain = otherwise();
+      if (plain && typeof plain[Symbol.asyncIterator] === 'function') yield* plain;
+      else yield await plain;
+    }
+  })();
+}
 
 const TOUR = ['tour', 'show me round', 'show me around', 'look around'];
 
@@ -725,7 +792,8 @@ const talk = {
       return madeUp() ? `${hello} This company is made up, and so am I. Ask me anything${brain.on ? '' : ' about it'}.` : `${hello} Ask me anything${brain.on ? '' : ` about ${org.company}`}.`;
     }
     const item = talkItem(who);
-    return item ? `Hi. I'm on "${item.title}". Ask me how it's going.` : null;
+    if (item) primeAgent(item); // walked up to: read Claude their facts now
+    return item ? `Hi. I'm on "${item.title}". Ask me how it's going${brain.on ? ', or anything about it' : ''}.` : null;
   },
   answer(who, text, _before, { spoken = false } = {}) {
     const lead = leads.floorOf(who);
@@ -774,7 +842,14 @@ const talk = {
         return v.act ? answerSaid(v.act) : v.reply;
       }
     }
-    if (item && control.on && isConvo(item)) return agentReply(control, item, text, () => convoNow(item.id));
+    if (item && control.on && isConvo(item)) {
+      // allow, deny and stop at once; anything else through their brain, if it is on, or straight to the agent
+      const quick = agentQuick(control, item, text, () => convoNow(item.id));
+      if (quick != null) return quick;
+      const relay = () => agentReply(control, item, text, () => convoNow(item.id));
+      return brain.on ? agentThinks(item, text, relay) : relay();
+    }
+    if (item && brain.on) return agentThinks(item, text, () => sampleReply(item, text));
     return item ? sampleReply(item, text) : "I've finished here, so there's nothing new to tell.";
   },
   // What waits on you, for the walk's "Needs you": each item's conversation (key) or title, and its kind.

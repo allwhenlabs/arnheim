@@ -1,9 +1,9 @@
 # Talk about anything
 
-Switch on the brain, and the receptionist and your assistant answer with Claude. Ask them anything,
-out loud on a walk or typed at the front desk, and follow up as you would with a person: they keep
-the conversation going. About your company they still say only what the building shows, and when it
-doesn't say, they say so.
+Switch on the brain, and everyone you can talk to answers with Claude: the receptionist, your
+assistant, each floor's lead and each agent at work. Ask them anything, out loud on a walk or typed at
+the front desk, and follow up as you would with a person: they keep the conversation going. About your
+company they still say only what the building shows, and when it doesn't say, they say so.
 
 The brain uses Claude Code on the computer that runs `serve.py`, and your own Claude plan. Arnheim
 stays free: it costs nothing more than your plan's own use.
@@ -63,6 +63,20 @@ That's all: the brain changes no settings, adds nothing to your Claude Code and 
 disk, and its Claude stops when Arnheim does. With the brain off, the receptionist and your
 assistant answer from the building's files alone, as before.
 
+## Agents at work
+
+Step into the ring beside an agent at work and they answer as the person doing the job would: in the
+first person, about their own work. "How's it going?" gets what they are doing now, how far along they
+are, what comes next and what they need from you, from what their conversation last said and whether it
+is working or waiting for you. They never make up progress: when their conversation doesn't say, they
+say they don't know yet. Each has a Claude of their own, counted in the same six as the leads.
+
+With control on too (below), ask them to do something, such as "try the strongest gust next", and they
+say they will. Your words go to their own Claude Code conversation, the one they stand for, and never
+to any other. If it isn't working just now, they say they'll read it when it next starts. Without
+control, they say they can't take instructions from here, and that you can tell them in Claude Code
+itself; from a phone, only when this computer lets that phone control agents ([phone.md](phone.md)).
+
 ## Pass something on to an agent
 
 With control on too (`python3 serve.py --brain --control`, with the hooks from
@@ -88,7 +102,7 @@ control on, they can start a new agent instead.
 ## What is sent, and what is kept
 
 What goes to Claude, through your Claude Code: the building's facts and what you say to the
-receptionist or the assistant. The facts are what the building shows: the company's name and
+receptionist, the assistant, a lead or an agent at work. The facts are what the building shows: the company's name and
 whether it is made up, its floors, tasks, goals and pull requests, each conversation's agent and
 what it last said, the websites and email written down in the lobby, the machines and jobs, and
 the company's notes. With control on, the facts also give each conversation's id, so your

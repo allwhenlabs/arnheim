@@ -1,4 +1,4 @@
-// The receptionist's and the assistant's brain (connect/brain.py; docs/brain.md). It is off unless
+// The brain of the receptionist, the assistant, the leads and the agents at work (connect/brain.py; docs/brain.md). It is off unless
 // the server was started with --brain, and only for the page on that computer. Then what you ask
 // them goes to Claude, through the Claude Code on that computer, with the building's facts, and the
 // answer comes back a piece at a time, for voice.js to speak a sentence at a time.
@@ -6,8 +6,9 @@
 // createBrain({ base, headers }) talks to the server: `base` is where /brain/ is (by default
 // ../brain/ beside src), `headers()` adds a page token for a server of its own. check() asks once
 // whether it is on, and `on` says so after. `who` is { role, name, company }, where role is
-// 'receptionist', 'assistant' or 'lead' (a floor's lead, leads.js, who also gives `floor`, the floor's
-// name; the server works out which agents are theirs); `facts` is a list
+// 'receptionist', 'assistant', 'lead' (a floor's lead, leads.js, who also gives `floor`, the floor's
+// name; the server works out which agents are theirs) or 'agent' (someone at work, who also gives `floor`,
+// `title`, what they are on, and with control on `key`, their own conversation); `facts` is a list
 // of [section, text]. The server gives Claude all
 // of them the first time, and after that only the sections that changed.
 
@@ -52,7 +53,12 @@ export function createBrain({ base = BASE, headers = () => ({}) } = {}) {
     }
   }
 
-  const said = (who, facts, text) => ({ who: who.role, name: who.name || '', company: who.company || '', ...(who.role === 'lead' ? { floor: who.floor || '' } : {}), facts, ...(text == null ? {} : { text }) });
+  const said = (who, facts, text) => ({
+    who: who.role, name: who.name || '', company: who.company || '',
+    ...(who.role === 'lead' ? { floor: who.floor || '' } : {}),
+    ...(who.role === 'agent' ? { floor: who.floor || '', title: who.title || '', ...(who.key ? { key: who.key } : {}) } : {}),
+    facts, ...(text == null ? {} : { text }),
+  });
 
   return {
     check,

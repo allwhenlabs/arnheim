@@ -433,6 +433,63 @@ class PassOnTest(unittest.TestCase):
         self.assertEqual((code, lines[-1]), (200, {"done": True}), lines)
         return "".join(x.get("text", "") for x in lines[:-1])
 
+    def agent(self, text, key=None, title="Fix the login page", floor="Lantern", to=None, **given):
+        to = to or self.brain
+        body = {"who": "agent", "floor": floor, "title": title, "company": "Example Studio", "facts": FACTS, "text": text}
+        if key is not None:
+            body["key"] = key
+        code, _, data, _ = to.handle("POST", "ask", json.dumps(body).encode(), to.token, **given)
+        if isinstance(data, bytes):
+            return code, json.loads(data)
+        lines = [json.loads(raw) for raw in data]
+        self.assertEqual((code, lines[-1]), (200, {"done": True}), lines)
+        return code, "".join(x.get("text", "") for x in lines[:-1]), [x["passed"] for x in lines if "passed" in x]
+
+    def test_an_agent_talks_about_its_own_work_and_passes_on_only_to_itself(self):
+        code, said, went = self.agent(f"please tell {self.WORKING} to use the blue button", key=self.WORKING)
+        self.assertEqual((code, said), (200, "I'll pass that on.\n"))
+        self.assertEqual(went, [{"key": self.WORKING, "text": "use the blue button"}])
+        self.assertEqual([row["text"] for row in self.control.box.take(self.WORKING)], ["use the blue button"])
+        me = self.persona()
+        self.assertIn('You are the agent at Example Studio working on "Fix the login page", in Lantern', me)
+        self.assertIn(f"PASS ON {self.WORKING}: <instruction>", me)
+        self.assertIn("Never invent progress", me)
+        # never to another agent, on its floor or not, whatever its claude says
+        for other in (self.RESTING, self.ELSEWHERE):
+            code, said, went = self.agent(f"please tell {other} to tidy up", key=self.WORKING)
+            self.assertEqual((said, went), ("I'll pass that on.\n I couldn't send that to my working session, though.", []))
+            self.assertEqual(self.control.box.take(other), [])
+        # never around a refusal, and what can't be taken back only after a lead's read-back
+        self.assertIn("I can't pass that on", self.agent(f"please tell {self.WORKING} to deploy the shop", key=self.WORKING)[1])
+        self.assertIn("can't be taken back", self.agent(f"please tell {self.WORKING} to delete the old branches", key=self.WORKING)[1])
+        self.assertEqual(self.control.box.take(self.WORKING), [])
+
+    def test_an_agent_not_at_work_reads_it_when_it_next_starts(self):
+        code, said, went = self.agent(f"please tell {self.RESTING} to tidy the notes", key=self.RESTING, title="Plan the week")
+        self.assertEqual(said, "I'll pass that on.\n I'm not at work right now, though, so I'll read it when I next start.")
+        self.assertEqual(went, [{"key": self.RESTING, "text": "tidy the notes"}])
+        self.assertEqual([row["text"] for row in self.control.box.take(self.RESTING)], ["tidy the notes"])
+
+    def test_an_agent_without_its_conversation_or_control_passes_nothing(self):
+        # a task in a Work room has no conversation: it talks, and passes nothing on
+        code, said, went = self.agent(f"please tell {self.WORKING} to use the blue button", title="Calibrate the sensor")
+        self.assertEqual((said, went), ("I'll pass that on.\n I can't pass that on from here, though.", []))
+        self.assertNotIn("PASS ON", self.persona())
+        self.assertIn("You can't take new instructions from here", self.persona())
+        alone = self.make()
+        code, said, went = self.agent(f"please tell {self.WORKING} to use the blue button", key=self.WORKING, to=alone)
+        self.assertEqual(went, [])
+        self.assertNotIn("PASS ON", self.persona())
+        self.assertEqual(self.control.box.take(self.WORKING), [])
+
+    def test_each_agent_has_their_own_claude_and_says_who_they_are(self):
+        self.agent("hello", key=self.WORKING)
+        self.agent("hello", title="Calibrate the sensor", floor="Tidepool")
+        self.assertEqual(sorted(self.brain.running()), [f"agent:{self.WORKING}", "agent:tidepool calibrate the sensor"])
+        self.assertEqual(self.agent("hello", title=""), (400, {"error": "Say which agent: its floor and what it is working on."}))
+        self.assertEqual(self.agent("hello", floor=""), (400, {"error": "Say which agent: its floor and what it is working on."}))
+        self.assertEqual(self.agent("hello", key="not-a-key"), (400, {"error": "That isn't a conversation."}))
+
     def test_each_lead_has_their_own_claude_and_needs_a_floor(self):
         self.lead("hello", floor="Lantern")
         self.lead("hello", floor="Tidepool")
