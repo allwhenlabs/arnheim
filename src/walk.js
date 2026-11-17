@@ -879,7 +879,8 @@ export function createWalk(ctx) {
   // that is nearest a good spot to talk from, not too close to them and not on another ring.
   // Placing them again (the page's work changed and people moved seats) never hands you to someone
   // else while you stand still: the talk goes on if the same person's ring is still where you stand,
-  // and otherwise ends, with no new one until you step off the ring you are on.
+  // and otherwise ends, with no new one until you step off the ring you are on: at once if they moved,
+  // or, if they went altogether, once they have finished what they were saying (lingering, below).
   function placeSpots() {
     const was = talking;
     for (const s of spots) s.ring.removeFromParent();
@@ -930,10 +931,31 @@ export function createWalk(ctx) {
     if (same) {
       talking = same;
       same.ring.material = ringLit;
+    } else if (was.who.floorId === here.id && Math.hypot(me.x - was.x, me.z - was.z) < 0.42
+      && !spots.some((s) => (s.who.href || s.who.title) === (was.who.href || was.who.title))) {
+      // Gone altogether from where you stand (a goal set at its flagpole puts the flag up in its place): they finish
+      // what they are saying, and the card stays a few seconds after, unless you walk off.
+      const t = performance.now();
+      talking = { ...was, gone: true, until: t + LINGER_MS, last: t + LINGER_MAX_MS };
+      heldOff = true;
     } else {
       setTalk(null);
       heldOff = true;
     }
+  }
+
+  // A talk whose ring went while you stood in it ends a few seconds after the last word either of you said, and
+  // 20 seconds after the ring went at the latest, or as soon as you step away. True while it lasts (the frames keep
+  // coming meanwhile, so it ends on time in a still room).
+  const LINGER_MS = 4000;
+  const LINGER_MAX_MS = 20000;
+  function lingering(now) {
+    if (!talking?.gone) return false;
+    const mode = voice.info().mode;
+    if (mode === 'thinking' || mode === 'speaking' || mode === 'hearing') talking.until = Math.max(talking.until, now + LINGER_MS);
+    if (Math.hypot(me.x - talking.x, me.z - talking.z) < 0.42 && now < Math.min(talking.until, talking.last)) return true;
+    setTalk(null);
+    return false;
   }
 
   // Each project floor's lead (leads.js): a few steps from where the lift lets you out, in sight of it but clear of
@@ -1498,7 +1520,9 @@ export function createWalk(ctx) {
       // nothing. Stop on it, or walk on it towards them (within 40 degrees), and it does.
       const across = !!ring && ring.who.roomId === 'lead' && talking !== ring && !me.target && crossingOnly(me.x, me.z, me.vx, me.vz, ring.ax, ring.az);
       if (!ring) heldOff = false;
-      if (!heldOff) setTalk(passing || across ? null : ring);
+      const stay = lingering(now);
+      if (stay) busy = true;
+      else if (!heldOff) setTalk(passing || across ? null : ring);
     }
     if (notes.update(dt, me, here === penthouse && !ride, still())) busy = true;
     if (burn.update(dt, camera, renderer)) busy = true;

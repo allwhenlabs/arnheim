@@ -755,7 +755,7 @@ export function createVoice({ hud, card, ctx, el, button, signal, early = true, 
     if (who && talk.controls) actsTimer = setInterval(drawActs, 1000);
     if (who && talk.speakUp) upTimer = setInterval(speakUp, 4000);
     if (!who) { mode = 'idle'; return; }
-    input.placeholder = `Type to ${nameOf(who)}`;
+    input.placeholder = (() => { try { return talk?.placeholder?.(who); } catch { return null; } })() || `Type to ${nameOf(who)}`; // the page may word it, as for a goal
     input.setAttribute('aria-label', `Say something to ${nameOf(who)}`);
     mode = 'listening';
     drawLog();

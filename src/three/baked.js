@@ -207,6 +207,25 @@ function canvasPlane(w, h, draw, px = 512) {
   return new THREE.Mesh(new THREE.PlaneGeometry(w, h), standard(0xffffff, { map: tex }));
 }
 
+// a card with a title and a line under it, for a room with nothing in it yet
+function notice(w, h, title, sub, paper) {
+  return canvasPlane(w, h, (c, cw, ch) => {
+    c.fillStyle = paper;
+    c.fillRect(0, 0, cw, ch);
+    c.fillStyle = '#2b2a28';
+    c.textAlign = 'center';
+    const fit = (text, px, face) => { // as big as fits across the card
+      let n = px;
+      do { c.font = face(n); n -= 2; } while (c.measureText(text).width > cw * 0.88 && n > 8);
+    };
+    fit(String(title || ''), Math.round(ch * 0.2), (n) => `600 ${n}px Georgia, serif`);
+    c.fillText(String(title || ''), cw / 2, ch * 0.45);
+    fit(String(sub || ''), Math.round(ch * 0.12), (n) => `${n}px -apple-system, "Helvetica Neue", Arial, sans-serif`);
+    c.fillStyle = '#5b5852';
+    c.fillText(String(sub || ''), cw / 2, ch * 0.72);
+  });
+}
+
 // a soft shadow or a pool of light on the floor under a piece
 let softTexture = null;
 function soft() {
@@ -316,6 +335,16 @@ export const FILL = {
       ctx.object({ x: p[0], y: p[1] - 0.2, z: p[2] + 0.1, w: 0.34, h: 0.42, d: 0.2, title: goal.title, sub: goal.sub, href: goal.href });
     });
     if (list.length > goals.length) ctx.more(list.length - goals.length, ...along(s, s.w / 2 - 0.1, -0.5, 0.1));
+    // No goals yet: a blank card on the board, with a ring in front of it, to set one where you stand (goal-stand.js)
+    if (!list.length && info.add) {
+      const card = notice(0.62, 0.42, info.add.title, info.add.sub, '#f4f1ea');
+      const p = along(s, 0, 0, 0.025);
+      placed(card, s, p);
+      g.add(card);
+      const f = along(s, 0, 0, 0.3);
+      const stand = along(s, 0, 0, 1.45);
+      ctx.object({ x: p[0], y: p[1] - 0.3, z: p[2] + 0.1, w: 0.66, h: 0.6, d: 0.25, title: info.add.title, sub: info.add.sub, href: info.add.href, figure: { x: f[0], z: f[2], stand: [stand[0], stand[2]] } });
+    }
   },
 
   work({ g, slots, info, ctx, kit }) {
@@ -433,6 +462,16 @@ export const FILL = {
       ctx.object({ x, y: i >= 3 ? 0.29 : 0, z: crateRow.at[2], w: 0.5, h: 0.32, d: 0.36, title: c.title, sub: c.sub, href: c.href });
     });
     if (crateRow && copies.length > kept.length) ctx.more(copies.length - kept.length, crateRow.row[1], 0.8, crateRow.at[2]);
+    // Nothing here, for a good reason: a line saying so, on the front of the shelves
+    const shelf = slots.find((x) => x.kind === 'shelves');
+    if (!prs.length && !copies.length && info.empty && shelf) {
+      const card = notice(0.7, 0.32, info.empty.title, info.empty.sub, '#eef1ec');
+      const p = along(shelf, 0, 1.2, -(shelf.d / 2) - 0.04);
+      placed(card, shelf, p);
+      card.rotation.y += Math.PI; // the shelves face the other way
+      g.add(card);
+      ctx.object({ x: p[0], y: p[1] - 0.2, z: p[2], w: 0.74, h: 0.4, d: 0.25, title: info.empty.title, sub: info.empty.sub, href: info.empty.href });
+    }
   },
 
   websites({ g, slots, info, ctx, kit, company }) {

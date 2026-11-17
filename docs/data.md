@@ -226,6 +226,8 @@ is the fullest example. One plain object, keyed:
 | `working` | `true` while something in it is working, for the Working now scene. |
 | `items` | What stands in it: `{ id, title, sub, href, mood }` each, where `mood` is a state. A goal adds `reached: true` once reached; a conversation `working` or `check`; a lobby entry `up` or `live`. |
 | `prs`, `copies` | A Code room's books (`{ id, title, sub, href, draft }`) and crates (`{ id, title, sub, href }`). |
+| `add` | A Goals room with no goals: `{ title, sub, href }` puts up a bare flagpole (a card, in the photo look) with a ring to stand in, to set the first goal there. Give `href` as `standHref(floor id)` from `src/goal-stand.js`, so the talk knows it. |
+| `empty` | A Code room with nothing in it for a good reason: `{ title, sub, href }`, a line saying so, such as "Nothing to review". |
 | `sections` | A Company room's cabinets: `{ id, title, sub, href, count }`. |
 | `running`, `online` | A machine room's running jobs (a number) and whether it is on. |
 

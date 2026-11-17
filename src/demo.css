@@ -224,6 +224,10 @@ a.floor-card:hover, a.room-tile:hover { transform: translateY(-1px); }
 .poe-say { margin: 8px 0 10px; font-size: 15px; line-height: 1.45; }
 .poe-ask { display: flex; gap: 8px; margin-top: 14px; }
 .poe-ask input { flex: 1; min-width: 0; padding: 9px 11px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--text); }
+.goal-form { display: flex; gap: 8px; margin: 14px 0 8px; max-width: 560px; }
+.goal-list { margin: 10px 0 4px; padding-left: 20px; }
+.goal-list li { margin: 4px 0; }
+.goal-form input { flex: 1; min-width: 0; padding: 9px 11px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font-size: 16px; }
 .poe-hints, .poe-tools, .poe-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .poe-hints { margin: 10px 0 6px; }
 .poe-hints .btn { font-size: 13px; padding: 5px 10px; min-height: 28px; }

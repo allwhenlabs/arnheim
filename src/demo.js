@@ -27,6 +27,7 @@ import { blocks, howtoFor, howtosOf, runs, sayShelf, shelfAsked } from './howto.
 import { icon } from './icons.js';
 import { exactOf, kindWord, meaningOf, riskOf } from './risk.js';
 import { createPoe, has, insertAfter, needWord, norm, poeBadge } from './poe-desk.js';
+import { createGoalStand, isStandHref, standFloor, standHref } from './goal-stand.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -220,6 +221,8 @@ function roomModel(floor, room) {
     return {
       state: 'quiet', big: list.length ? open : null, detail: list.length ? (reached ? `open, ${reached} reached` : 'open') : 'None set yet',
       items: list.map((g) => ({ id: g.id, title: g.title, reached: g.status === 'reached', sub: g.status === 'reached' ? 'Reached' : 'Open', href: goalHref(g) })),
+      // none yet: a flagpole to set one where you stand (goal-stand.js)
+      add: list.length ? null : { title: `No goal yet for ${floor.label}`, sub: 'Say it, or tap to type it', href: standHref(floor.id) },
     };
   }
   if (kind === 'work') {
@@ -260,6 +263,7 @@ function roomModel(floor, room) {
       state: 'quiet', big: null, detail: `${count(prs.length, 'pull request', 'pull requests')}, ${copies.length ? `${copies.length} unsaved` : 'all saved'}`,
       prs: prs.map((p) => ({ id: p.number, title: `#${p.number} ${p.title}`, draft: !!p.draft, sub: p.draft ? 'Draft' : 'Ready for review', href: `${base}/pr/${p.number}` })),
       copies: copies.map((c) => ({ id: c.id, title: c.name, sub: count(c.changes, 'unsaved change', 'unsaved changes'), href: `${base}/copy/${enc(c.id)}` })),
+      empty: prs.length || copies.length ? null : { title: 'Nothing to review', sub: 'No pull requests, and all the work is saved', href: base },
     };
   }
   if (kind === 'company') {
@@ -335,6 +339,23 @@ function poeFacts() {
     goals: work.goals.filter((g) => g.status !== 'reached').map((g) => ({ title: g.title, sub: g.project, project: g.project, href: goalHref(g) })),
     prs: Object.fromEntries(org.floors.filter((f) => work.pullRequests.some((p) => p.project === f.project)).map((f) => [f.project, work.pullRequests.filter((p) => p.project === f.project).length])),
   };
+}
+
+// A goal set at a Goals room's flagpole (goal-stand.js), in this tab only, like the receptionist's tasks.
+const myGoals = [];
+const stands = new Map(); // each floor's flagpole conversation
+function addGoal(project, title) {
+  const goal = { id: `mine${myGoals.length + 1}`, project, title, status: 'open', note: 'Set at the Goals room\'s flagpole. It lives in this tab only: nothing is saved.' };
+  myGoals.push(goal);
+  work.goals.push(goal);
+  refresh();
+  return goal;
+}
+function standOf(who) {
+  const floor = org.floors.find((f) => f.id === standFloor(who?.href));
+  if (!floor?.project) return null;
+  if (!stands.has(floor.id)) stands.set(floor.id, createGoalStand({ label: floor.label, save: (title) => { addGoal(floor.project, title); }, kept: 'It lasts while this tab is open.' }));
+  return stands.get(floor.id);
 }
 
 // The receptionist can add a task and drop it again, in this tab only.
@@ -768,7 +789,9 @@ function sampleReply(item, text) {
 const isAide = (who) => !!org.assistant && who.href === (org.assistant.href || '#/assistant');
 
 const talk = {
+  placeholder: (who) => (isStandHref(who?.href) ? `Type the goal for ${org.floors.find((f) => f.id === standFloor(who.href))?.label || 'this project'}` : null),
   name(who) {
+    if (isStandHref(who.href)) return 'Goals room';
     if (who.href === DESK) return deskName() || 'Receptionist';
     if (isLeadHref(who.href)) return who.name || who.title;
     if (isAide(who)) return org.assistant.name;
@@ -779,6 +802,8 @@ const talk = {
     if (who.href === DESK || isAide(who)) primeBrain(who.href === DESK ? 'receptionist' : 'assistant'); // walked up to: read Claude the facts now
     const lead = leads.floorOf(who);
     if (lead) return leads.greet(lead, who);
+    const stand = standOf(who);
+    if (stand) return stand.greet();
     if (who.href === DESK) {
       const hr = new Date().getHours();
       const hello = hr >= 5 && hr < 12 ? 'Good morning' : hr >= 12 && hr < 18 ? 'Good afternoon' : hr >= 18 && hr < 23 ? 'Good evening' : 'Hello';
@@ -798,6 +823,8 @@ const talk = {
   answer(who, text, _before, { spoken = false } = {}) {
     const lead = leads.floorOf(who);
     if (lead) return leads.says(lead, text, { spoken });
+    const stand = standOf(who);
+    if (stand) return stand.answer(text);
     if (who.href === DESK || isAide(who)) {
       const round = leads.round(text); // "give me the round": every lead in turn, a line each
       if (round) { deskVoice = null; starting = null; return round; }
@@ -858,7 +885,7 @@ const talk = {
   },
   // The receptionist, a floor's lead (a question for one of them goes to them: "how's Tidepool doing?"), for
   // the Talk panel (talk-dock.js).
-  through: (who, text) => leads.through(who, text, deskWho()),
+  through: (who, text) => (isStandHref(who?.href) ? null : leads.through(who, text, deskWho())), // a goal said at a flagpole stays a goal, whatever floor it names
   get desk() { return deskWho(); },
   // The lead by the lift on a floor, for the walk: null where there is none, or leads are switched off.
   lead: (floorId) => leads.lead(floorId),
@@ -1825,6 +1852,24 @@ function viewItem(floor, room, id) {
     const t = work.tasks.find((x) => x.id === id && x.project === floor.project);
     return t ? show(t.title, [['Status', STATUS[t.status]], ['Project', t.project], ['Note', t.note]]) : gone();
   }
+  if (kind === 'goals' && id === 'new' && !work.goals.some((g) => g.id === 'new' && g.project === floor.project)) {
+    // the flagpole, tapped or stood by: type the goal. Once there is one (set by voice, say), the floor's goals, and room for another.
+    const have = work.goals.filter((g) => g.project === floor.project);
+    const input = h('input.goal-input', { type: 'text', maxLength: 200, placeholder: 'The goal, in a few words', 'aria-label': `The goal for ${floor.label}` });
+    const set = () => {
+      const title = input.value.trim().replace(/\s+/g, ' ');
+      if (title.length < 3) { input.focus(); return; }
+      location.hash = goalHref(addGoal(floor.project, title.slice(0, 200)));
+    };
+    return { crumbs: crumbsFor(floor, room, 'New goal'), body: [
+      title(have.length ? `${floor.label}'s goals` : `No goal yet for ${floor.label}`),
+      have.length
+        ? [h('ul.goal-list', have.map((g) => h('li', h('a', { href: goalHref(g) }, g.title), g.status === 'reached' ? ' (reached)' : null))), h('p.muted', 'Add another:')]
+        : h('p.muted', 'What is this project for? Write it in a few words, such as "the reader app in the App Store by spring". On a walk, you can say it at the flagpole instead.'),
+      h('form.goal-form', { onsubmit: (event) => { event.preventDefault(); set(); } }, input, h('button.btn', { type: 'submit' }, 'Set the goal')),
+      h('p.small.muted', 'It lives in this tab only: nothing is saved.'),
+    ] };
+  }
   if (kind === 'goals') {
     const g = work.goals.find((x) => x.id === id && x.project === floor.project);
     return g ? show(g.title, [['Status', g.status === 'reached' ? 'Reached' : 'Open'], ['Project', g.project]]) : gone();
@@ -2480,6 +2525,7 @@ async function followWork() {
     if (sig === workSig) return;
     workSig = sig;
     now.tasks.push(...mine);
+    now.goals.push(...myGoals);
     for (const task of now.tasks) if (dropped.has(task.id)) task.status = 'dropped';
     work = now;
     if (replayAt != null) replayed();

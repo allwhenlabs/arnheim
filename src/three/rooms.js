@@ -185,6 +185,17 @@ export const ROOMS = {
         ctx.object({ x: x + 0.1, y, z: 0.5, w: 0.5, h: 0.5, d: 0.2, title: goal.title, sub: goal.sub, href: goal.href });
       });
       if (list.length > shown.length) ctx.more(list.length - shown.length, W / 2 + 1.05, 0.9, 0.5);
+      // No goals yet: a bare flagpole, with a ring in front of it, to set one where you stand (goal-stand.js)
+      if (!list.length && info.add) {
+        const pole = at(cyl(0.012, 0.012, 0.9, mat(DARK), 6), W / 2, 0.3, 0.55);
+        const flag = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.2, 0.012, 3), mat('#f4f1ea', { rough: 0.8 }));
+        flag.rotation.set(Math.PI / 2, Math.PI / 2, 0);
+        flag.position.set(W / 2 + 0.15, 1.02, 0.55);
+        const sign = label('No goal yet', 0.9, 0.16, { glow: 0.8 });
+        sign.position.set(W / 2, 1.42, 0.47);
+        g.add(pole, flag, sign);
+        ctx.object({ x: W / 2, y: 0.3, z: 0.55, w: 0.6, h: 1.3, d: 0.3, title: info.add.title, sub: info.add.sub, href: info.add.href, figure: { x: W / 2, z: 0.55, stand: [W / 2, 1.75] } });
+      }
     },
   },
 
@@ -298,6 +309,13 @@ export const ROOMS = {
         ctx.object({ x, y: copyLevels[row], z: 0.38, w: 0.7, h: 0.34, d: 0.34, title: c.title, sub: c.sub, href: c.href });
       });
       if (copies.length > shown.length) ctx.more(copies.length - shown.length, 3.95, 1.2, 0.4);
+      // Nothing here, for a good reason: a line saying so, on the shelves
+      if (!prs.length && !copies.length && info.empty) {
+        const sign = label(info.empty.title, 1.5, 0.2, { glow: 0.8 });
+        sign.position.set(1.55, 1.15, 0.5);
+        g.add(sign);
+        ctx.object({ x: 1.55, y: 0.95, z: 0.5, w: 1.5, h: 0.45, d: 0.2, title: info.empty.title, sub: info.empty.sub, href: info.empty.href });
+      }
     },
   },
 

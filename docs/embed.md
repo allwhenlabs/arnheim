@@ -75,6 +75,7 @@ more). Only `answer` is needed:
   is meant for them ("how's Tidepool doing?"), as `{ who, then }`, where `then` is the question for
   them to answer, or null to just greet them.
 - `desk`: the receptionist as talk knows them, `{ href, title }`, for the Talk panel.
+- `placeholder(who)`: the words in their empty typing box, or null for "Type to" and their name.
 - `speakUp(who)`: what they say without being asked, looked at every few seconds while you are with
   them and nobody is talking or typing: words, or null. Arnheim's leads use it to report back.
 - `cutIn()`: false when talking over someone shouldn't stop them (a switch). Otherwise, speaking
@@ -86,6 +87,16 @@ typed, so a page can keep some answers off the voice, as Arnheim's keeps allowin
 be private. Instead of words, `answer` may give `{ turns: [{ who, text }] }`: several people speaking
 in turn, each named in the captions and in their own voice (`who: null` for the one you are with), as
 in the leads' round.
+
+### The flagpole
+
+`createGoalStand({ label, save, kept })` in `src/goal-stand.js` is the conversation at an empty
+Goals room's flagpole (the room's `add`, in [data.md](data.md)): say "the goal is ..." or type it,
+hear it read back, and only a yes calls `save(goal)`, which sets it wherever your goals live. A new
+goal said before the yes ("ok, the goal is ...") replaces the one read back. If `save` throws or
+rejects, they say it didn't set and why. `kept`, if given, is said after "Done", such as where it is
+kept. `isStandHref(who.href)` tells you the person you are with is a flagpole; Arnheim's page answers
+for them with `name` "Goals room", and never puts what is said there through to a lead.
 
 ### The leads
 

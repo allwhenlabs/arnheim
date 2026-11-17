@@ -116,6 +116,13 @@ answer aloud ("Voice", below).
 Your office also holds your notes: the newest eight hang in its library. Tap one, or stand in its
 light, to read it.
 
+A Goals room with no goals yet has a bare flagpole (a blank card, in the photo look). Stand by it
+and say **"the goal is ..."**, or type it in the talk box: it is read back, and a yes puts the flag
+up. Changed your mind? Say the new goal instead, and that one is read back. Or tap the flagpole and
+write it in the form. Arnheim's own site keeps a goal set this way only while the tab is open: to
+keep it, add it to your `work.json` ([docs/data.md](docs/data.md)). A Code room with nothing to
+review says so.
+
 ## Talk from any screen
 
 **Talk**, at the top of every screen, opens a small panel where you talk, out loud or typed, without
