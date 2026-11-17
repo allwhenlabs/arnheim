@@ -2121,6 +2121,17 @@ function restartModel() {
 function onModelStatus(status) {
   clearTimeout(modelTimer);
   clearTimeout(steadyTimer);
+  if (status === 'blank' && look?.look === 'photo' && !building?.ready?.()) {
+    // the photo-real pictures never arrived whole (a baked/ folder from another version, or half of one): the
+    // drawn building instead, at once, saying why
+    look = { look: 'drawn', why: PHOTO_FAILED };
+    building?.dispose();
+    building = null;
+    opening(false);
+    setWalking(false);
+    startBuilding();
+    return;
+  }
   if (status === 'lost') {
     stageMessage('The 3D building dropped out. Bringing it back.');
     modelTimer = setTimeout(restartModel, MODEL_HANDBACK_MS);
@@ -2130,6 +2141,32 @@ function onModelStatus(status) {
     stageMessage('');
     steadyTimer = setTimeout(() => { modelTries = 0; }, MODEL_STEADY_MS);
   }
+}
+
+// Which look the building opens in (README, "The photo-real look"): the one the address asks for (?look=photo or
+// ?look=drawn), else the photo-real one when serve.py has its pictures (/look), and the drawn one, with a line saying
+// why, when it hasn't. Served some other way, the photo-real one when baked/ is there, as an embedding page does.
+// Decided once a page; a photo-real building whose pictures don't load gives way to the drawn one (onModelStatus).
+let look = null; // { look: 'photo' | 'drawn', why }
+const PHOTO_FAILED = "Showing the drawn look: the photo-real pictures didn't load. To get them again, delete the baked folder and start serve.py again.";
+
+async function chooseLook() {
+  const asked = params.get('look');
+  if (asked === 'photo' || asked === 'drawn') return { look: asked };
+  try {
+    const res = await fetch('look', { cache: 'no-store' });
+    if (res.ok && (res.headers.get('content-type') || '').includes('json')) {
+      const said = await res.json();
+      return said.look === 'photo' ? { look: 'photo' } : { look: 'drawn', why: typeof said.why === 'string' ? said.why : '' };
+    }
+  } catch { /* not serve.py */ }
+  const there = await fetch('baked/building.json', { cache: 'no-store' }).then((r) => r.ok, () => false);
+  return { look: there ? 'photo' : 'drawn' };
+}
+
+function lookNote(text) {
+  $('look-note').textContent = text || '';
+  $('look-note').hidden = !text;
 }
 
 // three.js needs WebGL 2. A browser or machine without it gets the list on its own, said once.
@@ -2149,6 +2186,8 @@ async function startBuilding() {
     return;
   }
   try {
+    look ||= await chooseLook();
+    lookNote(look.why);
     const { createBuilding } = await import('./building.js');
     modelLoaded = true;
     const tip = $('tip');
@@ -2156,7 +2195,7 @@ async function startBuilding() {
     const canvas = $('scene').cloneNode(false);
     $('scene').replaceWith(canvas);
     building = createBuilding(canvas, org, {
-      look: params.get('look') || undefined, // ?look=photo: the photo-real building
+      look: look.look === 'photo' ? 'photo' : undefined,
       talk,
       labels: $('labels'),
       onStatus: onModelStatus,
@@ -2184,7 +2223,7 @@ async function startBuilding() {
     showNotes();
     applyScene();
     focusBuilding();
-    window.__arnheim = { building, model: liveModel, poe, control, brain, talk, facts: brainFacts, dock, features };
+    window.__arnheim = { building, model: liveModel, poe, control, brain, talk, facts: brainFacts, dock, features, look: look.look };
   } catch (error) {
     console.error(error);
     building = null;

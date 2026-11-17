@@ -11,3 +11,5 @@ __pycache__/
 
 # The photo-real floors as the live building loads them: made from studio/out by studio/publish.py
 /baked/
+# what serve.py downloads them into before they are whole (serve.py, fetch_pictures)
+/.baked-*

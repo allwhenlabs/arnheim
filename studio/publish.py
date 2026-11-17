@@ -2,10 +2,15 @@
 index (building.json): which floor serves which part of the building, the kit, and the sun they were baked in.
 
 python3 studio/publish.py
+
+serve.py opens the photo-real look by default only with the pictures its PICTURES names, which it downloads
+from a release. To send out a new bake: zip it (zip -r baked.zip baked), put the zip on a new release, and
+give PICTURES its address, size and sha256 and the files line this prints, in the same commit.
 """
 import json
 import os
 import shutil
+import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "out")
@@ -44,6 +49,12 @@ def main():
     json.dump(index, open(os.path.join(DEST, "building.json"), "w"), indent=1)
     total = sum(os.path.getsize(os.path.join(dp, f)) for dp, _, fs in os.walk(DEST) for f in fs)
     print("published", shells, f"{total / 1e6:.1f} MB to", DEST)
+    sys.path.insert(0, os.path.dirname(HERE))
+    from serve import PICTURES, files_print, folder_files  # noqa: E402  (beside this folder)
+    files = files_print(folder_files(DEST))
+    print("serve.py's PICTURES already names these" if files == PICTURES["files"] else
+          f"New pictures: serve.py opens them only with ?look=photo until a release has them and its PICTURES "
+          f"says \"files\": \"{files}\" (see the top of this file)")
 
 
 main()

@@ -20,7 +20,8 @@ on a canvas. Its options:
 - `onNotes()`: someone walked into the founder's office, so the page can answer with fresh notes.
 - `talk`: lets the people in the walk talk back (below).
 - `look: 'photo'`: the photo-real building, from the `baked/` folder beside `src/` (the README says
-  where to get it). Everything else here works the same.
+  where to get it). Everything else here works the same. Without it, `createBuilding` draws the
+  building; Arnheim's own page chooses for itself (Address options, below).
 - `people`: with the photo-real look, the address of a folder made by
   `studio/blender/people_export.py -- --company your-company.json --out that-folder`: your own
   receptionist and assistant, photo-real. Each is used only when made from the very `look` your
@@ -159,5 +160,10 @@ short of memory, or a browser with data saver on, keeps the drawn materials inst
 - `?list` shows the panel alone, with no 3D.
 - `?live=off` starts with the sample's story paused.
 - `?theme=light` or `?theme=dark` picks the look.
+- `?look=drawn` or `?look=photo` picks the drawn or the photo-real building. Without it, the page
+  asks `serve.py` (`/look`), and opens photo-real when the pictures in `baked/` are the ones this
+  version is made for; otherwise drawn, with a line saying why. Served some other way, it opens
+  photo-real when `baked/building.json` is there. Photo-real pictures that fail to load give way to
+  the drawn building.
 - `?scene=needs`, `?scene=working`, or `?scene=` and a floor's `id`, lights only part of the
   building.

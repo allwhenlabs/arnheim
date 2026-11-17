@@ -11,6 +11,8 @@ git clone https://github.com/allwhenlabs/arnheim && cd arnheim && python3 serve.
 
 Then open http://127.0.0.1:8740. It needs Python 3.7 or newer and a current browser, with nothing
 to install, and shows a made-up company until you add your own ([Start](#start) has the details).
+The first start downloads the pictures for the photo-real look (52 MB) once; `python3 serve.py
+--drawn` skips that and keeps the drawn look ([The photo-real look](#the-photo-real-look)).
 
 Watch [the tour](https://youtu.be/6ixe4wkPmHE), or [a talk with the receptionist](https://youtu.be/jA8PU7aNmJo).
 
@@ -36,6 +38,8 @@ python3 serve.py
 ```
 
 Then open http://127.0.0.1:8740. It shows Fernhollow, a made-up company, until you add your own.
+The first time, it downloads the photo-real look's pictures before it opens ([The photo-real
+look](#the-photo-real-look)).
 
 On Windows, run `py serve.py`. For another port, `python3 serve.py 8741`. On a Mac, the first
 `python3` may offer to install Apple's command line tools, which bring Python: say yes. Arnheim has
@@ -65,19 +69,34 @@ phone, add `?lite` to the address.
 
 ## The photo-real look
 
-Arnheim can also draw the building as if photographed: the floors, the lobby, the basement, your
-office and the street outside, in the light of a measured sun. Its pictures (about 95 MB) are made
-from the code in `studio/` with Blender, and are kept out of this repository so it stays small.
-Download them once, in this folder:
+The building opens as if photographed: the floors, the lobby, the basement, your office and the
+street outside, in the light of a measured sun. Its pictures (a 52 MB download, about 95 MB
+unpacked) are made from the code in `studio/` with Blender, and are kept out of this repository so
+it stays small. The first time `serve.py` starts, it downloads them once, from the release made for
+this version of Arnheim, into a `baked/` folder here. It says how big they are before it starts and
+shows how far it has got, then opens. The sample's receptionist and assistant are photo-real;
+people you name and dress yourself are drawn in their own look.
+
+With no internet, or if the download fails, the page opens in the drawn look and says why in one
+line, under the building and in the terminal. `serve.py` tries again the next time it starts. A
+download cut short never leaves half a `baked/` folder behind.
+
+The drawn look is one switch away:
+
+- add `?look=drawn` to the address: http://127.0.0.1:8740/?look=drawn
+- or start with `python3 serve.py --drawn`, which opens in the drawn look and downloads nothing.
+
+`?look=photo` asks for the photo-real look even when `serve.py` wouldn't choose it, for example
+with floors you baked yourself (`studio/publish.py`).
+
+To download the pictures yourself instead, in this folder:
 
 ```bash
-curl -LO https://github.com/allwhenlabs/arnheim/releases/latest/download/baked.zip
+curl -LO https://github.com/allwhenlabs/arnheim/releases/download/photo-real-3/baked.zip
 unzip baked.zip
 ```
 
-(On Windows: `curl.exe -LO` with the same address, then `tar -xf baked.zip`.) That makes a `baked/`
-folder. Then open http://127.0.0.1:8740/?look=photo. The sample's receptionist and assistant are
-photo-real; people you name and dress yourself are drawn in their own look.
+(On Windows: `curl.exe -LO` with the same address, then `tar -xf baked.zip`.)
 
 ## Talk to the people
 
@@ -384,8 +403,10 @@ serve.py 8741 --share`.
   `python3 serve.py 8741`.
 - **The sample shows, not your company:** the page looks for `data/company.json` beside
   `serve.py`. `?sample` in the address shows the sample anyway.
-- **`?look=photo` shows nothing:** the `baked/` folder is missing, or is from another version of
-  Arnheim. Download it again (The photo-real look, above).
+- **The building is drawn, not photo-real:** the line under the building says why. Without
+  internet, start `serve.py` again once you are online. If the `baked/` folder is from another
+  version of Arnheim (after a `git pull`, say), delete it and start `serve.py` again to download the
+  right one (The photo-real look, above).
 - **The building stays blank:** the browser has no WebGL 2. Everything is still in the panel, and
   `?list` shows the panel alone.
 - **The voice doesn't start:** http://127.0.0.1:8740/voice/status names the problem. Check that the

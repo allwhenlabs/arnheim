@@ -5,6 +5,7 @@
   python3 serve.py 8741     on another port
   python3 serve.py --lan    on phones and other computers on this network too (README, "Phones")
   python3 serve.py --share  the same, but only for those you give its view-only link (README, "A view-only link")
+  python3 serve.py --drawn  in the drawn look, without downloading the photo-real look's pictures
   python3 serve.py --control  and let the page talk to your Claude Code agents, answer their
                             permission requests, and start and stop them (docs/connect.md)
   python3 serve.py --brain  and let the receptionist and your assistant talk about anything, with
@@ -15,7 +16,10 @@
 
 It serves the page and its files from this folder, and nothing else: no other folders, no
 listings, nothing cached, so a change shows on the next reload. Your own company goes in data/
-(README, "Make it yours"); without it, the page shows the made-up sample. It answers only to the
+(README, "Make it yours"); without it, the page shows the made-up sample. The page opens in the photo-real
+look, whose pictures (baked/) it downloads the first time, once, from this version's release on GitHub; with no
+connection, or with pictures from another version, it shows the drawn look and says why (README, "The photo-real
+look"). It answers only to the
 names it was opened by (127.0.0.1 and localhost, and with --lan an IP address or a name ending
 .local), so a web page elsewhere can't read it by pointing a name of its own here.
 It also answers /voice/, the voice the walk's people speak with, if this computer has one
@@ -29,7 +33,9 @@ Tailscale Serve) is never taken for this computer, and needs a paired phone (con
 """
 import argparse
 import errno
+import hashlib
 import hmac
+import http.client
 import http.server
 import io
 import ipaddress
@@ -37,12 +43,18 @@ import json
 import os
 import re
 import secrets
+import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
+import urllib.error
+import urllib.request
+import zipfile
 from html import escape as html_escape
 from urllib.parse import parse_qs, unquote
 
@@ -73,6 +85,23 @@ FORWARDED = ("X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "Forwar
              "Tailscale-User-Login", "Tailscale-User-Name", "Tailscale-Headers-Info")
 # Both are checked by spelling in lower case, and again by what the file is on disk: a Mac's disk takes
 # /data/Notes.json for /data/notes.json.
+BAKED = os.path.join(ROOT, "baked")
+# The photo-real look's pictures this version of Arnheim is made for: baked/, from a release's baked.zip (README,
+# "The photo-real look"). A new bake goes out as a new release, and these four change with it (studio/publish.py).
+PICTURES = {
+    "url": "https://github.com/allwhenlabs/arnheim/releases/download/photo-real-3/baked.zip",
+    "bytes": 52337228,  # the zip
+    "sha256": "aa09c0863f47062658d64fe9853181af05b80052b671387bf7a8fa619a290b0b",  # the zip's
+    "files": "c234a46095c053ee032289b8a03f42f6177ef5a2c9bed0eb235c3b7c0849c5bc",  # baked/'s files, by name and size (files_print)
+}
+CLUTTER = ("Thumbs.db", "desktop.ini")  # what a file browser leaves in a folder it has shown; hidden files are left out too
+WHY_MISSING = ("Showing the drawn look: the photo-real pictures aren't here. Start serve.py again to download them "
+               "(README, \"The photo-real look\").")
+WHY_FAILED = "Showing the drawn look: the photo-real pictures couldn't be downloaded ({}). serve.py tries again the next time it starts."
+WHY_OTHER = ("Showing the drawn look: the pictures in the baked folder are from another version of Arnheim. To get the "
+             "right ones, delete the baked folder and start serve.py again.")
+WHY_AWAY = ("Showing the drawn look: the baked folder links to somewhere outside this folder, which serve.py doesn't show. "
+            "Delete the link and start serve.py again to download the pictures.")
 
 
 def same_file(a, b):
@@ -377,6 +406,22 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             data.close()
         return None
 
+    def look(self):
+        """/look: which look the page opens in, and, when it is the drawn one but wasn't asked for, why in one line."""
+        if self.server.drawn:
+            said = {"look": "drawn"}
+        else:
+            look, why = pictures_state()
+            if look == "drawn" and self.server.fetched and not os.path.lexists(BAKED):
+                why = self.server.fetched  # why the download at the start didn't work
+            said = {"look": look, "why": why} if why else {"look": look}
+        data = json.dumps(said).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        return io.BytesIO(data)
+
     def phone_controls(self):
         """Whether this request is from a paired phone that this computer has let control agents, for now."""
         phone = self.phone()
@@ -490,6 +535,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.brain(path)
         if path.startswith("/remote/"):
             return self.remote_route(path)
+        if path == "/look":
+            return self.look()
         if path in ("/", "/index.html"):
             path = "/index.html"
         else:
@@ -526,6 +573,8 @@ class Server(http.server.ThreadingHTTPServer):
     control = None  # connect/control.py's Control, with --control
     brain = None  # connect/brain.py's Brain, with --brain
     remote = None  # connect/remote.py's Remote, with --remote
+    drawn = False  # --drawn: the page opens in the drawn look, and nothing is downloaded
+    fetched = None  # why the photo-real pictures couldn't be downloaded at the start, if they couldn't
 
 
 def network_address():
@@ -592,6 +641,164 @@ def floors_have_folders():
     except (OSError, ValueError, AttributeError):
         return False
 
+def files_print(entries):
+    """A set of pictures in one line: its files' names and sizes, hidden files and a file browser's clutter left
+    out. A baked/ folder from another version of Arnheim, or one half unpacked, comes out different."""
+    lines = sorted(f"{name}\t{size}" for name, size in entries
+                   if not any(part.startswith(".") or part in CLUTTER for part in name.split("/")))
+    return hashlib.sha256("\n".join(lines).encode("utf-8")).hexdigest()
+
+
+def folder_files(folder):
+    """A folder's files as (name, size), with / between a name's parts, as in a zip."""
+    for top, _folders, names in os.walk(folder):
+        for name in names:
+            full = os.path.join(top, name)
+            yield os.path.relpath(full, folder).replace(os.sep, "/"), os.path.getsize(full)
+
+
+def pictures_state(folder=None, expected=None):
+    """Which look the page opens in: ("photo", None) when baked/ holds the pictures this version of Arnheim is made
+    for, else ("drawn", why), why in one plain line. Nothing is downloaded here."""
+    folder = folder or BAKED
+    if not os.path.lexists(folder):
+        return "drawn", WHY_MISSING
+    if not os.path.realpath(folder).startswith(os.path.realpath(os.path.dirname(folder)) + os.sep):
+        return "drawn", WHY_AWAY
+    try:
+        same = files_print(folder_files(folder)) == (expected or PICTURES["files"])
+    except OSError:
+        same = False
+    return ("photo", None) if same else ("drawn", WHY_OTHER)
+
+
+def safe_unzip(path, into, top="baked", most=1 << 30):
+    """Unpacks a zip into the folder `into`, but only if every entry stays under top/: no absolute paths, drive
+    letters, backslashes or `..`, no links, and no more than `most` bytes in all. Otherwise raises ValueError
+    and unpacks nothing."""
+    with zipfile.ZipFile(path) as zipped:
+        entries = zipped.infolist()
+        total = 0
+        for entry in entries:
+            name = entry.filename
+            parts = name.rstrip("/").split("/")
+            if (name.startswith("/") or any(c in name for c in "\\:\0") or parts[0] != top
+                    or any(p in ("", ".", "..") for p in parts) or (len(parts) < 2 and not entry.is_dir())
+                    or stat.S_ISLNK(entry.external_attr >> 16)):
+                raise ValueError(f"the download had a file outside {top}/ ({name!r}), so nothing was unpacked")
+            total += entry.file_size
+        if total > most:
+            raise ValueError("the download unpacks to far more than it should, so nothing was unpacked")
+        for entry in entries:
+            target = os.path.join(into, *entry.filename.rstrip("/").split("/"))
+            if entry.is_dir():
+                os.makedirs(target, exist_ok=True)
+                continue
+            os.makedirs(os.path.dirname(target), exist_ok=True)
+            with zipped.open(entry) as source, open(target, "wb") as out:
+                shutil.copyfileobj(source, out, 1 << 20)
+
+
+def download_trouble(error):
+    """What went wrong with a download, in a few plain words."""
+    if isinstance(error, urllib.error.HTTPError):
+        return f"GitHub answered {error.code} {error.reason}"
+    text = str(getattr(error, "reason", "") or error)
+    if "CERTIFICATE_VERIFY_FAILED" in text:
+        return ("this Python can't check GitHub's certificate; with Python from python.org on a Mac, "
+                "run Install Certificates in its folder")
+    if isinstance(error, socket.timeout) or "timed out" in text:
+        return "the connection stalled"
+    if isinstance(error, (urllib.error.URLError, ConnectionError, http.client.HTTPException)):
+        return "no connection to GitHub"
+    if isinstance(error, zipfile.BadZipFile):
+        return "the download wasn't a whole zip"
+    return f"they couldn't be saved here: {getattr(error, 'strerror', None) or error}"
+
+
+def fetch_pictures(say, folder=None, url=None, size=None, sha256=None, opener=urllib.request.urlopen):
+    """Downloads the photo-real look's pictures into baked/, once and unattended. Returns None when they are in
+    place, or why not in a few plain words. The zip goes to a hidden file beside baked/ and must be the very one
+    this version is made for; it is unpacked into a hidden folder, and that is moved into place in one step, so a
+    download cut short never leaves a half-made baked/."""
+    folder = folder or BAKED
+    url, size, sha256 = url or PICTURES["url"], size or PICTURES["bytes"], sha256 or PICTURES["sha256"]
+    parent = os.path.dirname(folder)
+    for name in os.listdir(parent):  # what a download that was stopped dead left, an hour or more ago
+        old = os.path.join(parent, name)
+        try:
+            if name.startswith(".baked-") and time.time() - os.lstat(old).st_mtime > 3600:
+                shutil.rmtree(old) if os.path.isdir(old) and not os.path.islink(old) else os.remove(old)
+        except OSError:
+            pass
+    need = size * 3  # the zip, and what it unpacks to
+    try:
+        if shutil.disk_usage(parent).free < need:
+            return f"this disk needs about {need // 1_000_000} MB free for them"
+    except OSError:
+        pass
+    say(f"Downloading the photo-real look's pictures, once: {round(size / 1e6)} MB from GitHub into baked/. "
+        "python3 serve.py --drawn skips this.")
+    tty = sys.stdout.isatty()
+    part = unpack = None
+    try:
+        handle, part = tempfile.mkstemp(prefix=".baked-", suffix=".zip", dir=parent)
+        digest, got, shown = hashlib.sha256(), 0, 0.0
+        with os.fdopen(handle, "wb") as out:
+            request = urllib.request.Request(url, headers={"User-Agent": "Arnheim serve.py"})
+            with opener(request, timeout=30) as reply:  # 30 seconds with nothing coming, and it gives up
+                while True:
+                    chunk = reply.read(1 << 20)
+                    if not chunk:
+                        break
+                    got += len(chunk)
+                    if got > size:
+                        break
+                    digest.update(chunk)
+                    out.write(chunk)
+                    if tty and (time.monotonic() - shown > 0.5 or got == size):
+                        shown = time.monotonic()
+                        print(f"\r  {got // 1_000_000} of {size // 1_000_000} MB", end="", flush=True)
+        if tty and got:
+            print(flush=True)
+        if got != size or digest.hexdigest() != sha256:
+            return "the download wasn't the file this version of Arnheim expects"
+        unpack = tempfile.mkdtemp(prefix=".baked-", dir=parent)
+        safe_unzip(part, unpack)
+        if not os.path.lexists(folder):  # else another copy of serve.py got there first
+            os.rename(os.path.join(unpack, "baked"), folder)
+        return None
+    except ValueError as error:
+        return str(error)
+    except (OSError, http.client.HTTPException, zipfile.BadZipFile) as error:
+        if tty and got:
+            print(flush=True)
+        if isinstance(error, urllib.error.HTTPError):
+            error.close()  # GitHub's answer, unread
+        return download_trouble(error)
+    finally:
+        if part and os.path.exists(part):
+            os.remove(part)
+        if unpack:
+            shutil.rmtree(unpack, ignore_errors=True)
+
+
+def pictures_at_start(drawn, say, fetch=None):
+    """At the start: the photo-real look's pictures, downloaded if baked/ isn't there yet (never with --drawn).
+    Returns why the page shows the drawn look, in one plain line, or None when it shows the photo-real look or
+    --drawn asked for the drawn one."""
+    if drawn:
+        return None
+    trouble = None
+    if not os.path.lexists(BAKED):
+        trouble = (fetch or fetch_pictures)(say)
+        if trouble is None:
+            say("The pictures are in baked/, so the page shows the photo-real look.")
+    look, why = pictures_state()
+    if look == "photo":
+        return None
+    return WHY_FAILED.format(trouble) if trouble else why
+
 
 def main():
     parser = argparse.ArgumentParser(description="Shows Arnheim in a browser.")
@@ -610,6 +817,8 @@ def main():
                         help="don't look at your floors' folders for unsaved changes and open pull requests (connect/projects.py)")
     parser.add_argument("--brain", action="store_true",
                         help="let the receptionist and your assistant talk about anything, with Claude through your own Claude Code")
+    parser.add_argument("--drawn", action="store_true",
+                        help="open in the drawn look, and don't download the photo-real look's pictures (README, \"The photo-real look\")")
     parser.add_argument("--remote", metavar="NAME",
                         help="let your own paired phone in from anywhere, through a private https way in such as Tailscale Serve "
                              "that answers at NAME (docs/phone.md)")
@@ -652,7 +861,18 @@ def main():
     server.share = share_key(new=args.new_link) if args.share else None
     server.control = control
     server.brain = brain
+    server.drawn = args.drawn
+    try:
+        looks = pictures_at_start(args.drawn, lambda line: print(line, flush=True))
+    except KeyboardInterrupt:
+        server.server_close()
+        if brain:
+            brain.close()
+        sys.exit("\nStopped before the pictures were in place. Nothing was kept.")
+    server.fetched = looks
     print(f"Arnheim is at http://127.0.0.1:{args.port}", flush=True)
+    if looks:
+        print(looks, flush=True)
     if remote:
         print(f"Phones are on: a phone paired with this computer can open https://{remote.name}/ from anywhere your "
               f"private way in reaches. With Tailscale, run once: tailscale serve --bg {args.port}. To pair a phone, open "
