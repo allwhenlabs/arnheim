@@ -14,7 +14,7 @@ to install, and shows a made-up company until you add your own ([Start](#start) 
 The first start downloads the pictures for the photo-real look (52 MB) once; `python3 serve.py
 --drawn` skips that and keeps the drawn look ([The photo-real look](#the-photo-real-look)).
 
-Watch [the tour](https://youtu.be/6ixe4wkPmHE), or [a talk with the receptionist](https://youtu.be/jA8PU7aNmJo).
+Watch [the tour](https://youtu.be/kDVVfwxVc88), or [a talk with the receptionist](https://youtu.be/jA8PU7aNmJo).
 
 ## What it is
 
