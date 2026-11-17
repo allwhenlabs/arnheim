@@ -12,7 +12,7 @@ git clone https://github.com/allwhenlabs/arnheim && cd arnheim && python3 serve.
 Then open http://127.0.0.1:8740. It needs Python 3.7 or newer and a current browser, with nothing
 to install, and shows a made-up company until you add your own ([Start](#start) has the details).
 
-Watch [the tour](https://youtu.be/bl7eY4f8u2M), or [a talk with the receptionist](https://youtu.be/jA8PU7aNmJo).
+Watch [the tour](https://youtu.be/6ixe4wkPmHE), or [a talk with the receptionist](https://youtu.be/jA8PU7aNmJo).
 
 ## What it is
 
