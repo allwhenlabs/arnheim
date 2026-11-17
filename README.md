@@ -104,6 +104,13 @@ answer aloud ("Voice", below).
   publishing, deleting, paying) is read back first and goes only when you say "send it". Name them
   and choose their faces in `company.json` ("Make it yours", below).
 
+  They **report back**. Once what you had them pass on is done, stuck or waiting on you, they tell you
+  the next time you talk, without being asked: "You asked the one on the bookmark fix to test it on
+  the spare laptop. It's done, and proven: the tests passed after its last change." What needs you
+  comes first. Each piece of news is told once; after "done", only news of its checks follows. While
+  you are with them, or with the receptionist (who says whose news it is), they speak up once it
+  happens and nobody is talking. What you passed on is kept in that browser for two days.
+
 Your office also holds your notes: the newest eight hang in its library. Tap one, or stand in its
 light, to read it.
 
@@ -113,6 +120,10 @@ light, to read it.
 walking: to the receptionist, your assistant or any floor's lead. On a floor's page it starts with
 that floor's lead, whose card at the top of the page says where the project stands.
 
+- **"Give me the round"**: every floor's lead in turn, a line each in their own voice, those with
+  something waiting on you first: what came of what you asked, what finished, who is at work and what
+  waits on you. The quiet floors are named together at the end. Then say a project's name, or **"more
+  on Tidepool"**, to talk to its lead.
 - **"How's Tidepool doing?"** puts you through to Tidepool's lead, who answers. **"Talk to the
   receptionist"** takes you back.
 - **"Take me to Lantern"**, **"show me the work room on Kitefield"**, **"go home"** or **"back"**:
@@ -122,9 +133,14 @@ that floor's lead, whose card at the top of the page says where the project stan
   the next. Anything that may touch something private (a key, a login, a hidden file) is never
   answered by voice: it opens on the screen for you.
 
+**Cut in by talking**: start speaking while someone is talking and they stop at once and listen to
+what you say. It knows how loud each word it plays is, and listens for a voice well above what comes
+back from your speakers, held for about a word, so their own voice (soft or loud) or a cough shouldn't
+stop them. If a noisy room does, switch it off.
+
 Each of these is a switch, in the panel (the sliders button) and on the Company page under
-Talking: talk from any screen, a lead on each floor, and answering requests by voice. They're kept
-in that browser. A company can set its own starting point in `company.json`, such as `"features":
+Talking: talk from any screen, a lead on each floor, answering requests by voice, leads reporting
+back, and cutting in by talking. They're kept in that browser. A company can set its own starting point in `company.json`, such as `"features":
 { "leads": false }`.
 
 ### What the receptionist knows, and what they can do

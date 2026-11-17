@@ -1,5 +1,6 @@
 // The talking features, each switched on or off by whoever uses the page, in this browser: talking from any
-// screen, a lead on each project floor, and answering requests by voice. A company can set its own defaults in
+// screen, a lead on each project floor, answering requests by voice, leads reporting back unasked, and cutting
+// in by talking. A company can set its own defaults in
 // company.json ("features": { "leads": false }); what someone switches here wins in their browser.
 // Plain module: talk-dock.js shows the switches, the page reads them.
 
@@ -9,6 +10,8 @@ export const FEATURES = [
   { id: 'talk', label: 'Talk from any screen', about: 'A Talk button at the top of every screen: ask what you want to know, go somewhere or answer by voice, without walking.' },
   { id: 'leads', label: 'A lead on each floor', about: 'Someone on every project floor who knows it in depth, says where it stands, and passes what you want done to its agents.' },
   { id: 'answers', label: 'Answer requests by voice', about: 'Say "allow" or "deny" to a permission request once it has been read back to you. Anything that may be private is always answered on the screen.' },
+  { id: 'reports', label: 'Leads report back', about: 'When something you asked a lead to pass on is done, stuck or needs you, they tell you the next time you talk, without being asked.' },
+  { id: 'cutin', label: 'Cut in by talking', about: 'Start speaking while someone is talking and they stop and listen. Switch it off if a noisy room keeps cutting them off.' },
 ];
 
 export function createFeatures(defaults = {}) {

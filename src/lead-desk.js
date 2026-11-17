@@ -23,10 +23,15 @@
 
    leads.lead(floorId), leads.who(floor), leads.floorOf(who), leads.greet(floor, who), leads.says(floor, text,
    { spoken }), leads.controls(floor), leads.update(floor), leads.passed(floor), leads.through(who, text, desk),
-   leads.go(text): what talk.js asks of a page (docs/embed.md), for the leads. */
+   leads.go(text): what talk.js asks of a page (docs/embed.md), for the leads. And:
+   leads.round(text)        "give me the round": every lead in turn, a line each ({ turns }, voice.js), or null
+   leads.speakUp(floor)     what a lead (or, with null, the front desk) tells you unasked: what came of what you
+                            asked them to pass on, once it is done, stuck or needs you; or null
+   leads.remember(floor, { key, text })   an instruction the brain passed on, so it is reported back too (floor:
+                            null for the assistant's, whose agent may be on any floor) */
 
 import { deskControls, deskStart, handedOut } from './control.js';
-import { goAsked, hasLead, isLeadHref, leadAsked, leadHelp, leadNews, leadOf, leadUpdate, leadWho, needsSaying, noSaid, passTarget, pickFrom, throughAsked, voiceAnswer, yesSaid } from './leads.js';
+import { floorNamed, goAsked, hasLead, isLeadHref, leadAsked, leadHelp, leadNews, leadOf, leadRoundLine, leadUpdate, leadWho, needsSaying, noSaid, passTarget, pickFrom, reportOf, roundAsked, throughAsked, voiceAnswer, yesSaid } from './leads.js';
 import { sayWaiting } from './queue.js';
 import { sinceSaid } from './brief.js';
 import { riskOf } from './risk.js';
@@ -45,6 +50,7 @@ export function createLeadDesk(env) {
   const on = () => !!env.control?.on;
   const leadsOn = () => env.features?.get('leads') !== false;
   const answersOn = () => env.features?.get('answers') !== false;
+  const reportingOn = () => env.features?.get('reports') !== false;
   const floorsWith = () => env.floors().filter(hasLead);
   const whoOf = (floor) => ({ ...leadOf(floor), sub: `${floor.label}'s lead` });
   const floorOf = (who) => (isLeadHref(who?.href) && leadsOn() ? floorsWith().find((f) => leadOf(f).href === who.href) || null : null);
@@ -61,6 +67,7 @@ export function createLeadDesk(env) {
   const company = () => (typeof env.company === 'function' ? env.company() : env.company) || '';
   const PASSED = () => `arnheim-passed:${company()}`;
   const SEEN = () => `arnheim-lead-seen:${company()}`;
+  const ROUND = () => `arnheim-round:${company()}`;
   let passedMem = null;
   let passedKey = null;
   const passedAll = () => {
@@ -72,7 +79,33 @@ export function createLeadDesk(env) {
     passedMem = [...passedAll().filter((p) => now - p.at < 2 * 86400), entry].slice(-40);
     store(passedKey, passedMem);
   }
-  const passedOn = (floor) => passedAll().filter((p) => p.project === floor.project);
+  const passedOn = (floor) => { const now = Date.now() / 1000; return passedAll().filter((p) => p.project === floor.project && now - p.at < 2 * 86400); };
+  const keepPassed = () => store(passedKey, passedMem);
+
+  // What came of each instruction passed on from this floor (leads.js reportOf), and those a lead hasn't told
+  // you yet: done, stuck or needing you. Telling one marks it, so each is said once (a new one is told, such as
+  // its checks passing after it said it was done; one already told is not told again).
+  function reportsOn(floor) {
+    const mine = passedOn(floor);
+    if (!mine.length) return [];
+    const now = Date.now() / 1000;
+    const ctx = { moments: env.moments(floor), conversations: env.view(floor).conversations, waiting: waitingOn(floor), agents: env.agents(floor), now };
+    return mine.map((p) => ({ p, r: reportOf(p, ctx) }));
+  }
+  // Only instructions passed on since this was built are told unasked (they carry `told`); once one was told it
+  // is done or stopped, only news of its checks follows (done, then proven), never a "stuck" or a "needs you" for
+  // work that already ended. What needs you comes first, then what may be stuck, then the rest.
+  const FIRST = (state) => (state.startsWith('needs') ? 0 : state === 'stuck' ? 1 : state === 'stopped' ? 2 : 3);
+  const ended = (p) => p.told.some((t) => t.startsWith('done') || t === 'stopped');
+  const untold = (floor) => (reportsOn(floor) || [])
+    .filter(({ p, r }) => Array.isArray(p.told) && r.final && !p.told.includes(r.state) && (!ended(p) || r.state.startsWith('done')))
+    .sort((a, b) => FIRST(a.r.state) - FIRST(b.r.state) || a.p.at - b.p.at);
+  // Marks as told only what was said.
+  function told(list) {
+    if (!list.length) return;
+    for (const { p, r } of list) p.told = [...p.told, r.state].slice(-8);
+    keepPassed();
+  }
   const seenAt = (floor) => Number(stored(SEEN(), {})?.[floor.id]) || 0;
   const seenNow = (floor) => store(SEEN(), { ...(stored(SEEN(), {}) || {}), [floor.id]: Math.round(Date.now() / 1000) });
   const waitingOn = (floor) => env.waiting().filter((i) => i.project === floor.project);
@@ -82,7 +115,62 @@ export function createLeadDesk(env) {
     const v = env.view(floor);
     const at = v.conversations.filter((c) => c.working).length;
     const head = `${floor.label}: ${at ? `${at === 1 ? 'one agent' : `${at} agents`} at work` : 'nobody at work right now'}${v.waiting.length ? `, and ${v.waiting.length === 1 ? 'one thing waits' : `${v.waiting.length} things wait`} on you` : ''}.`;
-    return `Hi. I'm ${who?.name ? `${who.name}, ` : ''}${floor.label}'s lead. ${head} Ask me where we are or what's new, or tell me what you want done.`;
+    // what came of what you asked, first, without being asked (the rest the next time, or when you ask what's new)
+    const news = reportingOn() ? untold(floor).slice(0, 3) : [];
+    told(news);
+    const first = news.length ? ` ${news.map(({ r }) => r.line).join(' ')}` : '';
+    return `Hi. I'm ${who?.name ? `${who.name}, ` : ''}${floor.label}'s lead.${first} ${head} Ask me where we are or what's new, or tell me what you want done.`;
+  }
+
+  // The round: each lead with something to say, a line each in their own voice, those with something waiting on
+  // you first; the quiet ones in one line at the end. Since the last round (within a day), or the last 12 hours.
+  let roundAt = 0; // when the last round ended, so a lone floor name just after it puts you through
+  function round(text, { loose = true } = {}) {
+    if (!roundAsked(text, { loose })) return null;
+    if (!leadsOn()) return 'The leads are switched off, so there is no round. Switch them on under Talking.';
+    const all = floorsWith();
+    if (!all.length) return 'There are no project floors with a lead, so there is no round.';
+    const now = Date.now() / 1000;
+    const last = Number(stored(ROUND(), 0)) || 0;
+    const since = last && now - last < 86400 ? last : now - 12 * 3600;
+    store(ROUND(), Math.round(now));
+    const lines = all.map((floor) => {
+      const news = reportingOn() ? untold(floor).slice(0, 2) : []; // two each; the rest when you talk to that lead
+      const v = env.view(floor);
+      const line = leadRoundLine({ ...v, label: floor.label, moments: env.moments(floor), since, now,
+        reports: news.map(({ r }) => r.line), reported: news.map(({ p }) => p.key) });
+      return { floor, news, line };
+    });
+    const needsYou = (x) => x.line.waits + x.news.filter(({ r }) => r.state.startsWith('needs')).length > 0;
+    const said = lines.filter((x) => !x.line.quiet).sort((a, b) => needsYou(b) - needsYou(a) || b.news.length - a.news.length);
+    const quiet = lines.filter((x) => x.line.quiet).map((x) => x.floor.label);
+    const from = lowerFirst(sinceSaid(since, now));
+    const and = (names) => (names.length < 2 ? names.join('') : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`);
+    roundAt = Date.now();
+    if (!said.length) return `Here's the round: all quiet. Nothing new on ${and(quiet)} ${from}, and nothing waits on you.`;
+    return { turns: [
+      { who: null, text: `Here's the round, ${from}.` },
+      // each lead's news is marked as told once their line is heard (voice.js calls `heard`), so news you cut
+      // in before is told again the next time
+      ...said.map((x) => ({ who: whoOf(x.floor), text: `${x.floor.label}. ${x.line.text}`, heard: () => told(x.news) })),
+      { who: null, text: `${quiet.length ? `Nothing new on ${and(quiet)}. ` : ''}${env.walking() ? 'Take the lift to a floor to talk to its lead.' : "Say a project's name to talk to its lead."}` },
+    ] };
+  }
+
+  // What a lead tells you without being asked, while you are with them: what came of what you asked, once it is
+  // done, stuck or needs you. With no floor, the front desk tells you each lead's, with whose it is.
+  function speakUp(floor) {
+    if (!leadsOn() || !reportingOn()) return null;
+    if (floor) {
+      const news = untold(floor).slice(0, 3);
+      told(news);
+      return news.length ? news.map(({ r }) => r.line).join(' ') : null;
+    }
+    // the front desk: up to three, what needs you first, whichever floor; the rest next time
+    const all = floorsWith().flatMap((f) => untold(f).map((n) => ({ ...n, f })))
+      .sort((a, b) => FIRST(a.r.state) - FIRST(b.r.state) || a.p.at - b.p.at).slice(0, 3);
+    told(all);
+    return all.length ? all.map(({ f, r }) => `News from ${f.label}'s lead. ${r.line}`).join(' ') : null;
   }
 
   // What a lead says. In order: answering a request out loud; what waits for your word from last time; going
@@ -120,6 +208,10 @@ export function createLeadDesk(env) {
     if (went) return went;
     const asked = leadAsked(said);
     if (asked?.kind === 'pass') return passFor(floor, asked);
+    const theRound = round(said, { loose: false }); // "how's everything?" to a lead is about their own floor
+    if (theRound) return theRound;
+    // just this floor's name ("Tidepool", "more on Tidepool"), as after the round: where it stands
+    if (floorNamed(said, [{ ...floor, lead: leadOf(floor) }])) return leadUpdate(env.view(floor));
     const stopping = STOP_THEM.exec(said);
     if (stopping) return stopFor(floor, stopping[1]);
     if (asked?.kind === 'help') return leadHelp(floor.label);
@@ -169,7 +261,7 @@ export function createLeadDesk(env) {
     if (!to.length) return `That agent isn't on ${floor.label} any more, so I haven't passed it on.`;
     return Promise.all(to.map((a) => env.control.say(a.id, text).then((r) => ({ a, r })))).then((sent) => {
       const at = Date.now() / 1000;
-      for (const { a } of sent) rememberPassed({ at, key: a.id, title: a.title, text, project: floor.project });
+      for (const { a } of sent) rememberPassed({ at, key: a.id, title: a.title, text, project: floor.project, working: !!a.working, told: [] });
       const when = sent.some(({ r }) => r?.sent === 'resumed') ? 'It is answering now.' : sent.some(({ a }) => a.working) ? 'It reads it at its next step.' : 'It reads it the next time it starts.';
       return `Passed on to ${targetsSaid(to)}: "${text}" ${when} Ask me what's new and I'll tell you how it answered.`;
     }, (error) => `I couldn't pass it on: ${error.message}`);
@@ -191,11 +283,15 @@ export function createLeadDesk(env) {
     const now = Date.now() / 1000;
     const seen = seenAt(floor);
     const since = seen && now - seen < 86400 ? seen : now - 12 * 3600;
+    const given = [];
     const said = leadNews({
       label: floor.label, moments: env.moments(floor), since, now, passed: passedOn(floor),
-      conversations: env.view(floor).conversations, from: lowerFirst(sinceSaid(since, now)),
+      conversations: env.view(floor).conversations, waiting: waitingOn(floor), agents: env.agents(floor), from: lowerFirst(sinceSaid(since, now)),
+      said: (p, r) => given.push({ p, r }),
     });
     seenNow(floor);
+    // what it said is told now, so not again unasked; anything it left out is still told later
+    told(given.filter(({ p, r }) => Array.isArray(p.told) && r.final && !p.told.includes(r.state)));
     return said;
   }
 
@@ -243,7 +339,11 @@ export function createLeadDesk(env) {
     const said = String(text || '').trim();
     if (desk && who?.href !== desk.href && BACK_TO_DESK.test(said)) return { who: desk, then: null };
     if (!leadsOn()) return null;
-    const to = throughAsked(said, floorsWith().map((f) => ({ id: f.id, label: f.label, project: f.project, lead: leadOf(f) })));
+    const named = floorsWith().map((f) => ({ id: f.id, label: f.label, project: f.project, lead: leadOf(f) }));
+    // "more on Tidepool", any time; a lone "Tidepool" only just after the round, so it never takes the answer to
+    // another question ("which floor?")
+    const more = floorNamed(said, named, { bare: Date.now() - roundAt < 2 * 60_000 });
+    const to = more ? { floor: more, then: said } : throughAsked(said, named);
     const floor = to && env.floors().find((f) => f.id === to.floor.id);
     return floor ? { who: whoOf(floor), then: to.then } : null;
   }
@@ -264,5 +364,18 @@ export function createLeadDesk(env) {
     passed: passedOn,
     through,
     go,
+    round,
+    speakUp,
+    // An instruction the brain passed on (connect/brain.py), so its lead reports back on it too: a lead's only to
+    // its own floor's agents; the assistant's (floor null) to whichever floor's agent it went to.
+    remember(floor, sent) {
+      if (!sent?.key || !sent.text) return;
+      for (const f of floor ? [floor] : floorsWith()) {
+        const a = env.agents(f).find((x) => x.id === sent.key);
+        if (!a) continue;
+        rememberPassed({ at: Date.now() / 1000, key: a.id, title: a.title, text: String(sent.text).slice(0, 300), project: f.project, working: !!a.working, told: [] });
+        return;
+      }
+    },
   };
 }

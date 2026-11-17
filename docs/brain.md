@@ -119,7 +119,9 @@ With control on, the assistant's Claude may end an answer with a line that names
 and an instruction ("PASS ON", then the conversation's id and the words). That line is never said or
 shown. The server checks that the agent is working now and that the instruction is nothing the
 receptionist would refuse, then sends it through control's own message path
-(`connect/control.py`), and otherwise the assistant says why it didn't go.
+(`connect/control.py`), and otherwise the assistant says why it didn't go. Once it has gone, the page
+is told which agent and what (a `{"passed": {"key", "text"}}` line after the words), so the floor's
+lead reports back on it as on anything you had them pass on.
 
 The brain answers only the page on the computer that runs `serve.py`, with the token that page is
 given, as control does. `connect/brain.py` is standard-library Python with one call

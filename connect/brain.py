@@ -386,7 +386,8 @@ class Brain:
 
     def ask(self, given, may_pass=True, passed=None):
         """Their answer, as NDJSON lines for the page: {"text": piece} as each piece comes, then
-        {"done": true}; or {"error": why} if there is none, and the page answers from the
+        {"passed": {"key", "text"}} for an instruction they passed on (so its lead can report back on it),
+        then {"done": true}; or {"error": why} if there is none, and the page answers from the
         building's files instead."""
         who, me, facts, words = self.request(given)
 
@@ -409,10 +410,13 @@ class Brain:
                         if said:
                             yield line({"text": said})
                     rest, held = hold.end()
+                    sent = []
                     if held:
-                        rest += self.pass_on(who, held, may_pass, passed)
+                        rest += self.pass_on(who, held, may_pass, passed, sent)
                     if rest:
                         yield line({"text": rest})
+                    for went in sent:
+                        yield line({"passed": went})
                 except Trouble as why:
                     self.trouble(who, why, mind)
                     yield line({"error": str(why)})
@@ -423,10 +427,11 @@ class Brain:
             yield line({"done": True})
         return lines()
 
-    def pass_on(self, who, held, may_pass=True, passed=None):
+    def pass_on(self, who, held, may_pass=True, passed=None, sent=None):
         """An answer's "PASS ON <conversation>: <instruction>" line, sent to that conversation through
         control's own message path, as a message from the building (connect/control.py, say). Gives
-        what she adds to her answer: nothing once it has gone, or why it didn't."""
+        what she adds to her answer: nothing once it has gone, or why it didn't. Once it has gone, `sent`
+        (a list), if given, gets {"key", "text"}."""
         found = PASS.match(held.strip().splitlines()[0]) if held.strip() else None
         if not found:
             return held  # not an instruction after all: words to say
@@ -460,6 +465,8 @@ class Brain:
             return f" I couldn't pass it on, though: {reason[:1].lower()}{reason[1:]}"
         if passed is not None:
             passed(key, 200)
+        if sent is not None:
+            sent.append({"key": key, "text": words})
         return ""
 
     def request(self, given, words=True):

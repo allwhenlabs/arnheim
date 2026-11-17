@@ -75,10 +75,27 @@ more). Only `answer` is needed:
   is meant for them ("how's Tidepool doing?"), as `{ who, then }`, where `then` is the question for
   them to answer, or null to just greet them.
 - `desk`: the receptionist as talk knows them, `{ href, title }`, for the Talk panel.
+- `speakUp(who)`: what they say without being asked, looked at every few seconds while you are with
+  them and nobody is talking or typing: words, or null. Arnheim's leads use it to report back.
+- `cutIn()`: false when talking over someone shouldn't stop them (a switch). Otherwise, speaking
+  while they talk stops them and what you say is heard (`src/cut-in.js` decides, from how loud the
+  microphone is against the echo of what is being played at that moment).
 
 `answer` is also given a fourth argument, `{ spoken }`, true when the words were heard rather than
 typed, so a page can keep some answers off the voice, as Arnheim's keeps allowing anything that may
-be private.
+be private. Instead of words, `answer` may give `{ turns: [{ who, text }] }`: several people speaking
+in turn, each named in the captions and in their own voice (`who: null` for the one you are with), as
+in the leads' round.
+
+### The leads
+
+`createLeadDesk(env)` in `src/lead-desk.js` is the leads at work, for any page: what each says and in
+what order, their card's buttons, putting you through to them, the round (`round(text)`, which gives
+`{ turns }` for "give me the round", or null), and what they tell you unasked (`speakUp(floor)`, or with
+null what the front desk says for every lead). `remember(floor, { key, text })` notes an instruction
+something else passed on, such as the brain, so its lead reports back on it too. The comment at the top
+of the file lists what `env` gives it. What you passed on, and what each lead has told you of it, is
+kept in that browser.
 
 `who` is the person: `{ title, href }`. The receptionist's `href` is `#/front-desk` and the
 assistant's `#/assistant`, unless the map gives them another; anyone else's is what they are
@@ -89,7 +106,7 @@ working on. Without `talk`, the rings only open what someone is working on.
 `createTalkDock({ talk, features, people, here, place, before })` in `src/talk-dock.js` adds the Talk
 button to `place` (before `before`) and the panel it opens, with the same `talk`. `people()` lists who
 can be talked to, as `[{ who, label }]`; `here()` says who to start with on the screen showing now.
-`features` is `createFeatures()` from `src/features.js`, the three switches, which the panel shows.
+`features` is `createFeatures()` from `src/features.js`, the switches, which the panel shows.
 Call `hide(true)` while a walk is open, which has its own voice.
 
 The voice is a few requests under `/voice/`. `serve.py` answers them, and so can a server of your
@@ -111,8 +128,9 @@ request, as the voice has. Answer it only for the page on this computer.
 `src/brain.js` is the page's side of the brain ([brain.md](brain.md)), which has the receptionist
 and the assistant answer with Claude. `createBrain({ base, headers })` talks to the server, by
 default `../brain/` beside `src`: `check()` asks once whether it is on, `prime(who, facts)` reads
-them the facts before they are asked anything, and `ask(who, text, facts)` gives the answer as an
-async iterable of pieces, for `talk.answer` or `kit.think`. `who` is `{ role, name, company }`, and
+them the facts before they are asked anything, and `ask(who, text, facts, { passed })` gives the
+answer as an async iterable of pieces, for `talk.answer` or `kit.think`; `passed({ key, text })`, if
+given, hears of each instruction they passed on to an agent. `who` is `{ role, name, company }`, and
 `facts` a list of `[section, text]`. On the server, `connect/brain.py` is standard-library Python
 with one call (`Brain.handle`) for every request. Answer it only for the page on this computer.
 

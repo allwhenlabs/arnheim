@@ -136,7 +136,7 @@ class BrainTest(unittest.TestCase):
 
     def answer(self, lines):
         self.assertEqual(lines[-1], {"done": True}, lines)
-        return "".join(x["text"] for x in lines[:-1])
+        return "".join(x.get("text", "") for x in lines[:-1])
 
     # ---------- the page's token ----------
 
@@ -348,7 +348,7 @@ class PassOnTest(unittest.TestCase):
         code, _, data, _ = to.handle("POST", "ask", json.dumps(body).encode(), to.token)
         lines = [json.loads(raw) for raw in data]
         self.assertEqual((code, lines[-1]), (200, {"done": True}), lines)
-        return "".join(x["text"] for x in lines[:-1])
+        return "".join(x.get("text", "") for x in lines[:-1])
 
     def persona(self):
         args = self.fake.starts()[-1]["args"]
@@ -387,7 +387,7 @@ class PassOnTest(unittest.TestCase):
             return code, json.loads(data)
         lines = [json.loads(raw) for raw in data]
         self.assertEqual((code, lines[-1]), (200, {"done": True}), lines)
-        return code, "".join(x["text"] for x in lines[:-1])
+        return code, "".join(x.get("text", "") for x in lines[:-1])
 
     def test_a_lead_passes_on_only_to_their_own_floors_agents(self):
         self.assertEqual(self.lead(f"please tell {self.WORKING} to use the blue button"), (200, "I'll pass that on.\n"))
@@ -405,6 +405,16 @@ class PassOnTest(unittest.TestCase):
         self.assertEqual(self.control.box.take(self.WORKING), [])
         self.assertEqual(self.control.box.take(self.ELSEWHERE), [])
 
+    def test_the_page_hears_what_was_passed_on(self):
+        # so the floor's lead can report back on it: only what went, and only after the words
+        body = {"who": "lead", "name": "Juno", "floor": "Lantern", "company": "Example Studio", "facts": FACTS, "text": f"please tell {self.WORKING} to use the blue button"}
+        code, _, data, _ = self.brain.handle("POST", "ask", json.dumps(body).encode(), self.brain.token)
+        lines = [json.loads(raw) for raw in data]
+        self.assertEqual(lines[-2:], [{"passed": {"key": self.WORKING, "text": "use the blue button"}}, {"done": True}])
+        body["text"] = f"please tell {self.RESTING} to tidy the notes"
+        code, _, data, _ = self.brain.handle("POST", "ask", json.dumps(body).encode(), self.brain.token)
+        self.assertFalse([x for x in map(json.loads, data) if "passed" in x])  # not working: nothing went
+
     def test_a_phone_passes_on_only_while_it_may_control(self):
         # serve.py says whether whoever asks may (this computer, or a phone this computer lets), and counts each one
         said = self.say_as(f"please tell {self.WORKING} to use the blue button", may_pass=False)
@@ -421,7 +431,7 @@ class PassOnTest(unittest.TestCase):
         code, _, data, _ = self.brain.handle("POST", "ask", json.dumps(body).encode(), self.brain.token, **given)
         lines = [json.loads(raw) for raw in data]
         self.assertEqual((code, lines[-1]), (200, {"done": True}), lines)
-        return "".join(x["text"] for x in lines[:-1])
+        return "".join(x.get("text", "") for x in lines[:-1])
 
     def test_each_lead_has_their_own_claude_and_needs_a_floor(self):
         self.lead("hello", floor="Lantern")

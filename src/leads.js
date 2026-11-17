@@ -11,10 +11,27 @@
 
 import { ALLOW, DENY } from './control.js';
 import { riskOf } from './risk.js';
+import { proofOf } from './proof.js';
 
 /* ---------- words ---------- */
 
 const norm = (text) => ` ${String(text ?? '').toLowerCase().replace(/['’]/g, '').replace(/[^a-z0-9]+/g, ' ').trim()} `;
+// A name in what was said, as words, or run together or split apart as speech recognition may write it
+// ("tide pool" for Tidepool, "headoffice" for Head office); a short name only as words.
+const squash = (text) => norm(text).replace(/ /g, '');
+// whole words in a row that, run together, are the name: "tide pool" for Tidepool, never "that last" for Atlas
+const joined = (said, name) => {
+  const want = squash(name);
+  if (want.length < 5) return false;
+  const w = norm(said).trim().split(' ');
+  for (let i = 0; i < w.length; i++) {
+    let run = '';
+    for (let j = i; j < w.length && run.length < want.length; j++) { run += w[j]; if (run === want) return true; }
+  }
+  return false;
+};
+const hasName = (said, name) => !!name && (norm(said).includes(norm(name)) || joined(said, name));
+const sameName = (said, name) => !!name && (norm(said) === norm(name) || (squash(name).length >= 5 && squash(said) === squash(name)));
 const clip = (text, most) => {
   const t = String(text ?? '').replace(/\s+/g, ' ').trim();
   return t.length <= most ? t : `${t.slice(0, most - 1).replace(/\s+\S*$/, '')}…`;
@@ -57,7 +74,7 @@ export function leadOf(floor) {
 
 const waitPhrase = (i) => ({
   permission: () => `${q(i.title)} wants your permission ${i.what}`,
-  question: () => `${q(i.title)} asks: ${clip(i.what, 140).replace(/[.?!]$/, '')}`,
+  question: () => (plain(i.what) ? `${q(i.title)} asks: ${clip(plain(i.what), 140).replace(/[.?!]$/, '')}` : `${q(i.title)} asks you something, on the screen`),
   task: () => `your task ${q(i.title)}`,
   turn: () => `${q(i.title)} has finished${i.proof?.state === 'proven' ? ', proven' : i.proof?.state === 'failed' || i.review?.state === 'failed' ? ', not proven' : ''}`,
 })[i.kind]?.() || q(i.title);
@@ -66,7 +83,9 @@ const waitPhrase = (i) => ({
 // (queue.js items for this floor), goals, tasks (open), prs, health (health.js), spend (budget.js), clashes }.
 // What an agent says, unless it is markup a message brought in (a helper's report, another session's
 // message), which is never read out.
-const says = (c) => (/<\/?[a-z][\w-]*(?:\s[^>]*)?>/i.test(c?.says?.now || '') ? '' : c?.says?.now || '');
+const MARKUP = /<\/?[a-z][\w-]*(?:\s[^>]*)?>/i;
+const plain = (text) => (MARKUP.test(String(text || '')) ? '' : String(text || ''));
+const says = (c) => plain(c?.says?.now);
 
 export function leadUpdate(v) {
   const out = [];
@@ -97,22 +116,84 @@ export function leadUpdate(v) {
   return out.join(' ');
 }
 
-// What changed on the floor since `since` (seconds): its moments (replay.js), and how the agents answered
-// what you passed on. v: { label, moments (this floor's), since, now, conversations, passed: [{ at, key,
-// title, text }], from (words such as "since 14:05") }.
+/* ---------- what came of what you asked ---------- */
+
+// Seconds with no word back from an agent that isn't working before its lead says it may be stuck.
+export const STUCK_AFTER = 20 * 60;
+
+// What came of an instruction you had a lead pass on, p: { at, key, title, text, working (whether the agent was
+// at work when it went) }, from what happened since. ctx: { moments, conversations, waiting, agents, now }.
+// Gives { state, final, line }. A final state is one a lead tells you without being asked, once each (a new
+// state, such as its checks passing after it said it was done, is told again):
+//   needs:<id>        it waits on you: a permission or a question
+//   done:<proof>      it finished; proof: proven, failed, checking, claimed or none (proof.js)
+//   stopped           it stopped
+//   stuck             no word back for a while, and it isn't working
+// and the rest only when you ask what's new: working, unread (it wasn't at work, and hasn't started since),
+// waiting (no word back yet), gone (its conversation is no longer in the building). Its turn has ended (done) on a finished moment, a turn waiting on you, or, where
+// that day's moments aren't at hand, once it did something after you asked and isn't working now.
+export function reportOf(p, { moments = [], conversations = [], waiting = [], agents = [], now = Date.now() / 1000 } = {}) {
+  const at = Number(p.at) || 0;
+  const c = conversations.find((x) => x.id === p.key) || null;
+  const working = !!(c?.working || agents.find((x) => x.id === p.key)?.working);
+  const found = moments.filter((m) => m && m.key === p.key && Number(m.at) > at && m.kind !== 'left').sort((x, y) => y.at - x.at)[0] || null;
+  const after = found && { ...found, what: plain(found.what) }; // never markup a message brought in
+  const known = !!(c || agents.some((x) => x.id === p.key));
+  const asked = `You asked the one on ${q(p.title)} to ${lower(clip(p.text, 120)).replace(/[.!?]$/, '')}.`;
+  const say = (state, final, words) => ({ state, final, line: `${asked} ${words}` });
+  const needs = waiting.find((i) => i.key === p.key && (i.kind === 'permission' || i.kind === 'question'));
+  if (needs) {
+    return say(`needs:${needs.id || needs.ask?.id || needs.kind}`, true, end(needs.kind === 'permission'
+      ? `It needs you: it wants your permission ${needs.what}` : plain(needs.what) ? `It needs you. It asks: ${clip(plain(needs.what), 140).replace(/[.?!]$/, '')}` : 'It needs you: it asks you something, on the screen'));
+  }
+  const turn = waiting.find((i) => i.key === p.key && i.kind === 'turn' && Number(i.at) > at);
+  // its turn ended after what you asked: a finished moment, a turn waiting on you, or (where moments from that
+  // day aren't at hand) it did something after and isn't working now
+  const last = Math.max(after ? Number(after.at) : 0, c ? seconds(c.at) : 0);
+  const ended = after?.kind === 'finished' || turn || (!working && after?.kind !== 'stopped' && after?.kind !== 'asked' && last > at + 2);
+  if (ended) {
+    const proof = turn?.proof || (c ? proofOf(c, now) : null);
+    const said = after?.kind === 'finished' && after.what ? after.what : says(c);
+    const what = said ? `: ${sentence(said)}` : '.';
+    const words = !proof ? `It's done${what}`
+      : proof.state === 'proven' ? `It's done, and proven: ${lower(proof.line)}`
+        : proof.state === 'failed' ? `It says it's done, but it isn't proven: ${lower(proof.line)}`
+          : proof.state === 'checking' ? `It's done. ${proof.line}` : `It says it's done. ${proof.line}`;
+    return say(`done:${proof?.state || 'none'}`, true, end(words));
+  }
+  if (after?.kind === 'stopped') return say('stopped', true, end(`It stopped${after.what ? `: ${sentence(after.what)}` : ' before saying it was done'}`));
+  if (after?.kind === 'asked') return say('working', false, after.what ? end(`It asked you: ${clip(after.what, 140)}`) : 'It asked you something, on the screen.');
+  if (working) {
+    return say('working', false, after ? end(after.kind === 'changed' ? `It is on it, and changed ${after.what}` : `It is on it${after.what ? `: ${sentence(after.what)}` : ''}`)
+      : c && seconds(c.at) > at && says(c) ? `It says: ${end(sentence(says(c)))}` : 'It is on it. No word back yet.');
+  }
+  // gone from the building (its conversation ended long ago): nothing more can be told of it
+  if (!known && !after) return say('gone', false, "It isn't in the building any more, so I can't tell what came of it.");
+  if (p.working === false) return say('unread', false, "It wasn't at work, and hasn't started since, so it hasn't read it yet.");
+  const quiet = now - at;
+  if (quiet >= STUCK_AFTER) {
+    const mins = Math.round(quiet / 60);
+    return say('stuck', true, `No word back for ${mins >= 120 ? `${Math.round(mins / 60)} hours` : `${mins} minutes`}, and it isn't working: it may be stuck.`);
+  }
+  return say('waiting', false, 'No word back yet.');
+}
+
+// What changed on the floor since `since` (seconds): its moments (replay.js), and what came of what you passed
+// on (reportOf). v: { label, moments (this floor's), since, now, conversations, waiting, agents, passed:
+// [{ at, key, title, text }], from (words such as "since 14:05"), said(p, report) (optional: told of each report
+// it gives, so only those are marked as told) }.
 export function leadNews(v) {
   const since = Number(v.since) || 0;
   const now = Number(v.now) || Date.now() / 1000;
   const talks = new Map((v.conversations || []).map((c) => [c.id, c]));
+  const ctx = { moments: v.moments || [], conversations: v.conversations || [], waiting: v.waiting || [], agents: v.agents || [], now };
   const out = [];
   for (const p of (v.passed || []).filter((x) => now - x.at < 86400).slice(-3)) {
     const after = (v.moments || []).filter((m) => m.key === p.key && m.at > p.at).sort((a, b) => b.at - a.at)[0];
-    const c = talks.get(p.key);
-    const reply = after ? (after.kind === 'asked' ? `it asked you: ${clip(after.what, 140)}` : after.kind === 'finished' ? `it finished${after.what ? `: ${sentence(after.what)}` : ''}`
-      : after.kind === 'stopped' ? 'it stopped' : after.kind === 'changed' ? `it is on it, and changed ${after.what}` : `it is on it${after.what ? `: ${sentence(after.what)}` : ''}`)
-      : c && seconds(c.at) > p.at && c.says?.now ? `it says: ${sentence(c.says.now)}` : null;
     if (!(p.at > since || (after && after.at > since))) continue;
-    out.push(end(`You asked the one on ${q(p.title)} to ${lower(clip(p.text, 120)).replace(/[.!?]$/, '')}. ${reply ? cap(reply) : 'No word back yet'}`));
+    const r = reportOf(p, ctx);
+    v.said?.(p, r);
+    out.push(r.line);
   }
   const inside = (v.moments || []).filter((m) => m && m.key && m.at > since && m.at <= now).sort((a, b) => a.at - b.at);
   const last = new Map();
@@ -126,8 +207,9 @@ export function leadNews(v) {
   for (const m of each.slice(0, 4)) {
     const who = q(talks.get(m.key)?.title || m.title || 'A conversation');
     const changed = files.get(m.key)?.size || 0;
-    if (m.kind === 'finished') out.push(end(`${who} finished${m.what ? `: ${sentence(m.what)}` : ''}`));
-    else if (m.kind === 'asked') out.push(end(`${who} asked you: ${clip(m.what, 140)}`));
+    const what = plain(m.what);
+    if (m.kind === 'finished') out.push(end(`${who} finished${what ? `: ${sentence(what)}` : ''}`));
+    else if (m.kind === 'asked') out.push(end(`${who} asked you: ${what ? clip(what, 140) : 'a question, on the screen'}`));
     else if (m.kind === 'stopped') out.push(`${who} stopped.`);
     else out.push(`${who} worked${changed ? `, and changed ${changed === 1 ? [...files.get(m.key)][0] : `${changed} files`}` : ''}.`);
   }
@@ -137,10 +219,76 @@ export function leadNews(v) {
   return `${cap(from)}, on ${v.label}: ${out.join(' ')}`;
 }
 
+/* ---------- the round: every lead in turn, a line each ---------- */
+
+// "Give me the round", "morning round", "do the rounds", "update on every project", "check in with all the leads".
+// ("How are the projects doing?" stays the building's health, health.js; "a round of tests" is never the round.)
+const BEFORE = String.raw`^(?:(?:ok|okay|right|so|please|hi|hello|now|can you|could you|let's|lets)[,\s]+)*`;
+export const ROUND_ASKED = new RegExp([
+  // "give me the round", "do the rounds", "morning round", "the round", "round up please"
+  String.raw`^(?:(?:ok|okay|right|so|please|can you|could you|can i have|can i get|i'd like|id like)[,\s]+)*(?:(?:give me|do|start|run|time for|lets do|let's do|let's have|lets have|go round|go around)\s+)?(?:the |a |my |our )?(?:morning |daily |evening |quick )?(?:rounds?|round\s?-?\s?up)(?:\s+(?:please|now|for me|of (?:the )?(?:leads|projects|floors|building)))?$`,
+  // "update on every project", "give me the news from all the leads"
+  String.raw`${BEFORE}(?:give me |get me |i want |i'd like |id like |can i have |can i get |what's the |whats the )?(?:an |a |the |my )?(?:update|updates|news|status|word|briefing) (?:on|from|across) (?:everything|every (?:project|floor|lead)|all (?:the |my )?(?:projects|floors|leads))(?:\s+please)?$`,
+  // "what's happening everywhere?"
+  String.raw`${BEFORE}what(?:'s| is) (?:new|happening|going on) (?:everywhere|on every (?:floor|project)|across (?:the |all )?(?:projects|floors|building))$`,
+  // "check in with all the leads", "ask every lead" (never "tell them to ask all the leads")
+  String.raw`${BEFORE}(?:check (?:in )?(?:on|with)|hear from|ask) (?:everything|every (?:project|lead)|all (?:the )?(?:projects|leads)|each lead)(?:\s+please)?$`,
+].join('|'), 'i');
+// "How's everything?", only as the whole of what was said, and only to the receptionist or the assistant: to a
+// lead it means their own floor, and "how's everything going on Tidepool?" is Tidepool's.
+export const EVERYTHING_ASKED = /^(?:(?:ok|okay|right|so|and|then|hi|hello)[,\s]+)*how(?:'s| is)\s+everything(?:\s+(?:going|doing|looking))?(?:\s+(?:today|now|then|this morning))?$/i;
+export const roundAsked = (text, { loose = true } = {}) => {
+  const t = String(text || '').trim().replace(/[.!?\s]+$/, '');
+  return ROUND_ASKED.test(t) || (loose && EVERYTHING_ASKED.test(t));
+};
+
+// One lead's line in the round: what came of what you asked (reports, from reportOf), what finished since,
+// who is at work, and what waits on you. v: { label, conversations, waiting, moments, since, now, reports:
+// [lines], reported: [keys the reports were about] }. Gives { text, quiet, waits }.
+export function leadRoundLine(v) {
+  const since = Number(v.since) || 0;
+  const now = Number(v.now) || Date.now() / 1000;
+  const convos = v.conversations || [];
+  const talks = new Map(convos.map((c) => [c.id, c]));
+  const told = new Set(v.reported || []);
+  const parts = (v.reports || []).slice(0, 2).map(end);
+  const last = new Map();
+  for (const m of (v.moments || []).filter((x) => x && x.key && x.at > since && x.at <= now && x.kind !== 'left').sort((a, b) => a.at - b.at)) last.set(m.key, m);
+  const done = [...last.values()].filter((m) => m.kind === 'finished' && !told.has(m.key));
+  const bits = [];
+  if (done.length === 1) {
+    const c = talks.get(done[0].key);
+    const proof = c ? proofOf(c, now) : null;
+    bits.push(`${q(c?.title || done[0].title || 'A conversation')} finished${proof?.state === 'proven' ? ', proven' : proof?.state === 'failed' ? ', not proven' : ''}`);
+  } else if (done.length > 1) bits.push(`${done.length} conversations finished`);
+  const working = convos.filter((c) => c.working).length;
+  if (working) bits.push(`${working === 1 ? 'one agent is' : `${working} agents are`} at work`);
+  if (bits.length) parts.push(end(cap(bits.join(', and '))));
+  const w = (v.waiting || []).filter((i) => !i.key || !told.has(i.key));
+  if (w.length === 1) parts.push(end(`One thing waits on you: ${waitPhrase(w[0])}`));
+  else if (w.length > 1) parts.push(end(`${w.length} things wait on you. First, ${waitPhrase(w[0])}`));
+  return { text: parts.join(' '), quiet: !parts.length, waits: w.length };
+}
+
+// "More on Tidepool", "tell me more about Tidepool", "what about Tidepool", any time; and just "Tidepool" where
+// `bare` (after the round, when a lone name can't be the answer to another question). Gives the floor named
+// ({ id, label, project, lead }) or null.
+const MORE_ON = /^(?:(?:and|so|ok|okay|right|then|now)[,\s]+)*(?:(?:tell me |i(?:'d| would) like |give me )?more (?:on|about|from)|what about|how about|over to)\s+(?:the\s+)?(.+?)[.!?]*$/i;
+export function floorNamed(text, floors, { bare = true } = {}) {
+  const said = String(text || '').trim();
+  const m = MORE_ON.exec(said);
+  if (!m && !bare) return null;
+  const asked = norm((m ? m[1] : said).replace(/['’]s\b/gi, '').replace(/\b(?:the|floor|project|please|lead)\b/gi, ''));
+  if (!m && asked.trim().split(' ').length > 3) return null;
+  return floors.find((f) => [f.label, f.project, f.lead?.name].some((n) => sameName(asked, n))) || null;
+}
+
 /* ---------- what you say to a lead ---------- */
 
 export const NEWS_ASKED = /\b(?:any ?(?:thing)? ?new|any news|news|what(?:'s| has| have)? changed|what(?:'s| is) new|since (?:i|we) (?:last )?(?:spoke|talked|asked|checked)|anything (?:happen(?:ed)?|change(?:d)?)|did (?:they|the agents?|it) (?:answer|reply|say|do it)|what did (?:they|the agents?) (?:say|do))\b/i;
 export const UPDATE_ASKED = /\b(?:where (?:are we|do we stand|are things|is it|are you|is (?:it|this|that) at)|how(?:'s| is| are)(?:\s+[\w' -]{1,40}?)? (?:going|doing|looking|coming along|getting on)|status|update|progress|state of (?:play|things)|sum (?:it )?up|overview|what(?:'s| is) (?:going on|happening|the latest|the situation|the plan)|current position|position|tell me (?:about it|everything|where)|brief me|catch me up)\b/i;
+// "Tell me more", "more detail", on their own: where it stands, in full. With more after them, a question.
+export const MORE_ALONE = /^(?:(?:ok|okay|right|so|and|please)[,\s]+)*(?:tell me more|more|more detail|more details|in detail|the details|full update|go into detail)(?:\s+please)?[.!?]*$/i;
 export const WHO_ASKED = /\b(?:who(?:'s| is)? (?:working|on it|at work|here|busy)|which agents?|what are (?:the )?agents (?:doing|working on|up to)|whos working)\b/i;
 export const HELP_ASKED = /^(?:help|what can (?:you|i) (?:do|say|ask)|how does this work|what do you do)\b/i;
 const YES = /^(?:yes|yeah|yep|ok|okay|sure|go ahead|do it|please do|send it|go on)\b[\s,.!]*(?:please|now|thanks)?[.!]?$/i;
@@ -216,7 +364,7 @@ export function leadAsked(text) {
   if (HELP_ASKED.test(said)) return { kind: 'help' };
   if (NEWS_ASKED.test(said)) return { kind: 'news' };
   if (WHO_ASKED.test(said)) return { kind: 'who' };
-  if (UPDATE_ASKED.test(said)) return { kind: 'update' };
+  if (UPDATE_ASKED.test(said) || MORE_ALONE.test(said)) return { kind: 'update' };
   return null;
 }
 
@@ -246,7 +394,7 @@ export function goAsked(text, places) {
   const asked = norm(m[1].replace(/['\u2019]s\b/gi, 's').replace(/\b(?:floor|project|page|room|please)\b/gi, ''));
   let best = null;
   for (const p of places) {
-    const hit = p.names.filter((n) => n && asked.includes(norm(n))).reduce((a, n) => Math.max(a, norm(n).length), 0);
+    const hit = p.names.filter((n) => hasName(asked, n)).reduce((a, n) => Math.max(a, norm(n).length), 0);
     if (hit && (!best || hit > best.hit || (hit === best.hit && p.room && !best.place.room))) best = { place: p, hit };
   }
   return best ? { href: best.place.href, label: best.place.label } : { unknown: m[1] };
@@ -261,7 +409,7 @@ export function throughAsked(text, floors) {
   const bare = (t) => norm(String(t).replace(/['\u2019]s\b/gi, '')); // "Lantern's lead" names Lantern
   const named = (t) => {
     const n = bare(t);
-    return floors.find((f) => (f.lead?.name && n.includes(norm(f.lead.name))) || n.includes(norm(f.label)) || n.includes(norm(f.project))) || null;
+    return floors.find((f) => hasName(n, f.lead?.name) || hasName(n, f.label) || hasName(n, f.project)) || null;
   };
   const m = PUT_THROUGH.exec(said);
   if (m) {
@@ -273,7 +421,7 @@ export function throughAsked(text, floors) {
     if (f) return { floor: f, then: null };
   }
   if (UPDATE_ASKED.test(said) || NEWS_ASKED.test(said) || WHO_ASKED.test(said) || /\bhow(?:'s| is)\b/i.test(said)) {
-    const hits = floors.filter((f) => bare(said).includes(norm(f.label)) || bare(said).includes(norm(f.project)) || (f.lead?.name && bare(said).includes(norm(f.lead.name))));
+    const hits = floors.filter((f) => hasName(bare(said), f.label) || hasName(bare(said), f.project) || hasName(bare(said), f.lead?.name));
     if (hits.length === 1) return { floor: hits[0], then: said };
   }
   return null;

@@ -613,7 +613,8 @@ const brainWho = (role) => ({ role, name: role === 'assistant' ? org.assistant?.
 // none, so the rules can answer instead.
 async function* claudeSays(role, text) {
   try {
-    yield* brain.ask(brainWho(role), text, brainFacts());
+    // what the assistant passes on to an agent is remembered, so that floor's lead reports back on it
+    yield* brain.ask(brainWho(role), text, brainFacts(), { passed: (sent) => leads.remember(null, sent) });
   } catch (error) {
     console.warn('Arnheim: no answer from Claude.', error.message);
     throw error;
@@ -729,6 +730,10 @@ const talk = {
   answer(who, text, _before, { spoken = false } = {}) {
     const lead = leads.floorOf(who);
     if (lead) return leads.says(lead, text, { spoken });
+    if (who.href === DESK || isAide(who)) {
+      const round = leads.round(text); // "give me the round": every lead in turn, a line each
+      if (round) { deskVoice = null; starting = null; return round; }
+    }
     if (who.href === DESK) {
       const waiting = waitingNow();
       // a permission, answered out loud: read back first, then "allow" or "deny" (leads.js)
@@ -782,6 +787,14 @@ const talk = {
   get desk() { return deskWho(); },
   // The lead by the lift on a floor, for the walk: null where there is none, or leads are switched off.
   lead: (floorId) => leads.lead(floorId),
+  // Unasked: a lead says what came of what you asked them to pass on, once it is done, stuck or needs you; the
+  // receptionist and the assistant say it for whichever lead it is.
+  speakUp(who) {
+    const lead = leads.floorOf(who);
+    if (lead) return leads.speakUp(lead);
+    return who.href === DESK || isAide(who) ? leads.speakUp(null) : null;
+  },
+  cutIn: () => features.get('cutin'),
   // With control on: Allow and Deny, or Stop, on an agent's card; Start at the front desk. A lead's card has
   // what waits for your word (a start, an instruction to send, a stop) or this floor's first permission request.
   controls(who) {
@@ -909,7 +922,8 @@ function leadThinks(floor, said) {
   return (async function* thought() {
     let given = false;
     try {
-      for await (const piece of brain.ask(leadBrainWho(floor), said, leadFacts(floor))) {
+      // what the brain passes on to an agent here is remembered, so this lead reports back on it too
+      for await (const piece of brain.ask(leadBrainWho(floor), said, leadFacts(floor), { passed: (sent) => leads.remember(floor, sent) })) {
         given = true;
         yield piece;
       }

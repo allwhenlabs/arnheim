@@ -65,8 +65,9 @@ export function createBrain({ base = BASE, headers = () => ({}) } = {}) {
       return post('prime', said(who, facts)).then((r) => r.ok, () => false);
     },
     // Their answer, a piece at a time. It throws if there is none (no Claude Code, not signed in, an
-    // error, too slow), so the page can answer from the building's files instead.
-    async* ask(who, text, facts) {
+    // error, too slow), so the page can answer from the building's files instead. passed({ key, text }) hears
+    // of each instruction they passed on to an agent.
+    async* ask(who, text, facts, { passed = null } = {}) {
       if (!status.on) throw new Error('The brain is off.');
       const stop = new AbortController();
       let ended = false;
@@ -86,6 +87,7 @@ export function createBrain({ base = BASE, headers = () => ({}) } = {}) {
             rest = rest.slice(at + 1);
             if (got?.error) throw new Error(got.error);
             if (got?.done) { ended = true; return; }
+            if (got?.passed && typeof passed === 'function') { try { passed(got.passed); } catch (error) { console.warn('Arnheim: could not note what was passed on.', error); } }
             if (got?.text) yield got.text;
           }
         }

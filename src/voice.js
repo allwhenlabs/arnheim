@@ -25,13 +25,22 @@
 //                            key is a conversation's id and kind permission, question, turn or task
 //   lead(floorId)            optional, for the walk: the lead who stands by the lift on that floor, as
 //                            { title, sub, href, voice, look }, or null for none (leads.js)
+//   speakUp(who)             optional: what they say without being asked, looked at every few seconds while
+//                            you are with them and nobody is talking: a string, or null for nothing
+//   cutIn()                  optional: false when talking over someone shouldn't stop them (the switch)
 // answer is also given a fourth argument, { spoken }: true when the words were heard, not typed, so a page
-// can keep some answers (allowing something, say) off the voice.
+// can keep some answers (allowing something, say) off the voice. It may also give { turns: [{ who, text, heard }] }:
+// several people speaking in turn, each in their own voice and named in the captions (who: null for the one
+// you are with), as in the leads' round; heard(), if given, is called once that line starts to sound (or is
+// shown, with the voice off), and never if you cut in before it.
+//
+// Talking over someone while they speak stops them, and what you say is heard (cut-in.js).
 //
 // createVoice gives { talkTo(who, { greet }), ask(text, { spoken }), info(), dispose() }: talkTo puts you with someone
 // (null for no one), and ask says something to them as if it had been typed.
 
 import { icon } from './icons.js';
+import { createCutIn } from './cut-in.js';
 
 const BASE = new URL('../voice/', import.meta.url).href;
 const EAR = new URL('./voice-ear.js', import.meta.url).href;
@@ -62,7 +71,7 @@ const recalled = () => { try { return localStorage.getItem(SAVED); } catch { ret
 const keyOf = (who) => (who ? who.href || who.title || '' : null);
 
 // Words as they are said: no web addresses read out letter by letter, no markup.
-const speakable = (text) => String(text).replace(/https?:\/\/\S+/g, 'the link on screen').replace(/[*_`#>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+const speakable = (text) => String(text).replace(/https?:\/\/\S+/g, 'the link on screen').replace(/<\/?[a-z][^>]*>/gi, ' ').replace(/[*_`#<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
 
 // Hands on each whole sentence as the words come in.
 function splitter(emit) {
@@ -88,6 +97,25 @@ function splitter(emit) {
 }
 
 // The microphone's blocks, down to 16,000 samples a second as 16-bit numbers, for the server.
+const FRAME = 0.01; // seconds: how finely what is played is measured, for cutting in (cut-in.js)
+
+// How loud a sound is every FRAME seconds, in decibels: what the microphone will hear back of it.
+function envelope(buffer) {
+  let data = null;
+  try { data = buffer.getChannelData?.(0); } catch { data = null; }
+  if (!data?.length) return null;
+  const n = Math.max(1, Math.round((buffer.sampleRate || 24000) * FRAME));
+  const env = new Float32Array(Math.ceil(data.length / n));
+  for (let f = 0; f < env.length; f++) {
+    const a = f * n;
+    const b = Math.min(data.length, a + n);
+    let sum = 0;
+    for (let i = a; i < b; i++) sum += data[i] * data[i];
+    env[f] = 10 * Math.log10(sum / (b - a) + 1e-12);
+  }
+  return env;
+}
+
 function to16k(parts, rate, keep) {
   const all = new Float32Array(keep);
   let at = 0;
@@ -146,6 +174,15 @@ export function createVoice({ hud, card, ctx, el, button, signal, early = true, 
   let sounds = 0;
   let heard = '';
   let reply = '';
+  // Each answer, greeting or reply is a run of sound; talking over them marks every run with sound on its way as
+  // cut, so none of the rest of it is said, while anything new (a reply to a button, the next answer) still is.
+  let live = new Set();
+  let asking = 0; // answers on their way: nobody speaks up meanwhile
+  let beingHeard = 0; // what you said, on its way to being heard
+  let cuts = 0; // how many times you cut in, for info()
+  let upTimer = 0;
+  const cut = createCutIn();
+  let sounding = []; // what is playing or about to: {at, end, env}, how loud it is every FRAME seconds
   const times = {};
   const logs = new Map(); // what was said with each person on this walk
 
@@ -252,9 +289,9 @@ export function createVoice({ hud, card, ctx, el, button, signal, early = true, 
 
   function drawLog() {
     const list = logs.get(keyOf(who)) || [];
-    said.replaceChildren(...list.slice(-4).map((e) => {
+    said.replaceChildren(...list.slice(-8).map((e) => {
       const item = el('li', e.you != null ? 'aw-you' : 'aw-them');
-      item.append(el('b', null, e.you != null ? 'You' : nameOf(who)), document.createTextNode(` ${e.you ?? e.them}`));
+      item.append(el('b', null, e.you != null ? 'You' : e.by || nameOf(who)), document.createTextNode(` ${e.you ?? e.them}`));
       return item;
     }));
     said.hidden = !list.length;
@@ -350,6 +387,11 @@ export function createVoice({ hud, card, ctx, el, button, signal, early = true, 
 
   function hush() {
     for (const s of playing) { try { s.onended = null; s.stop(); } catch { /* already stopped */ } }
+    cut.reset();
+    sounding = [];
+    live = new Set();
+    for (const t of starts) clearTimeout(t);
+    starts = new Set();
     playing = [];
     owed = 0;
     until = 0;
@@ -357,20 +399,27 @@ export function createVoice({ hud, card, ctx, el, button, signal, early = true, 
   }
 
   function settle(g) {
-    if (g !== gen || playing.length || owed) return;
+    if (g !== gen || playing.length || owed || talking() || beingHeard) return;
     mode = 'listening';
     deafUntil = performance.now() + 350; // the room's echo of the last word
     drawLine();
   }
 
-  function play(buffer, g, ms) {
+  let starts = new Set(); // timers for when a scheduled sound starts (a round's line, heard)
+  function play(buffer, g, ms, started = null) {
     arm();
     const src = audio.createBufferSource();
     src.buffer = buffer;
     src.connect(audio.destination);
     const at = Math.max(audio.currentTime + 0.03, until);
     src.start(at);
+    if (started) {
+      const timer = setTimeout(() => { starts.delete(timer); started(); }, Math.max(0, (at - audio.currentTime) * 1000));
+      starts.add(timer);
+    }
     until = at + buffer.duration;
+    sounding = sounding.filter((x) => x.end > audio.currentTime - 2);
+    sounding.push({ at, end: until, env: envelope(buffer) });
     playing.push(src);
     sounds += 1;
     if (times.firstSound == null) {
@@ -385,34 +434,37 @@ export function createVoice({ hud, card, ctx, el, button, signal, early = true, 
     };
   }
 
-  function queue(text, voice, g) {
+  function queue(text, voice, g, run, started = null) {
     const words = speakable(text);
-    if (!words || !voice || !audio) return;
+    if (!words || !voice || !audio || run.cut) return;
+    if (talking()) { run.cut = true; return; } // you are talking: whatever they were about to say waits, as if you cut in
+    live.add(run);
     owed += 1;
-    if (mode === 'listening' || mode === 'hearing') { mode = 'speaking'; drawLine(); }
+    if (mode === 'listening') { mode = 'speaking'; drawLine(); }
     const fetching = request('say', { text: words, voice }).catch((error) => {
       console.warn('Arnheim: the voice could not say that.', error);
       return null;
     });
     chain = chain.then(async () => {
       const got = await fetching;
-      if (g !== gen) return;
+      if (g !== gen || run.cut) return;
       owed -= 1;
       let buffer = null;
       if (got) {
         try { buffer = await audio.decodeAudioData(got.data); } catch { buffer = null; }
       }
-      if (g !== gen) return;
-      if (buffer) play(buffer, g, got.ms);
+      if (g !== gen || run.cut) return;
+      if (buffer) play(buffer, g, got.ms, started);
       else settle(g);
     });
   }
 
   function say(text, person = who) {
     const g = gen;
+    const run = { cut: false };
     const voice = on && server?.state === 'ready' ? voiceOf(person) : null;
     if (!voice) return;
-    const split = splitter((s) => queue(s, voice, g));
+    const split = splitter((s) => queue(s, voice, g, run));
     split.feed(text);
     split.end();
   }
@@ -430,9 +482,15 @@ export function createVoice({ hud, card, ctx, el, button, signal, early = true, 
 
   async function ask(text, spokenEnd = null) {
     if (!who || !talk) return;
+    asking += 1;
+    try { await answer(text, spokenEnd); } finally { asking -= 1; }
+  }
+
+  async function answer(text, spokenEnd) {
     const asked = who;
     gen += 1;
     const g = gen;
+    const run = { cut: false };
     hush();
     const before = (logs.get(keyOf(asked)) || []).map((e) => (e.you != null ? { you: e.you } : { them: e.them }));
     add({ you: text });
@@ -451,9 +509,28 @@ export function createVoice({ hud, card, ctx, el, button, signal, early = true, 
       out = null;
     }
     if (g !== gen) return;
+    if (out && typeof out === 'object' && Array.isArray(out.turns)) {
+      // several people in turn (the leads' round): each line named, and in that person's own voice
+      const ready = on && server?.state === 'ready';
+      const lines = out.turns.filter((t) => t && t.text);
+      for (const t of lines) {
+        const by = t.who || null;
+        add({ them: String(t.text), by: by ? nameOf(by) : null });
+        const v = ready ? voiceOf(by || asked) : null;
+        // t.heard: told once their line starts to sound, or at once when it is only shown
+        let told = false;
+        const heard = () => { if (told) return; told = true; try { t.heard?.(); } catch (error) { console.warn('Arnheim: could not mark a turn heard.', error); } };
+        if (v) { const split = splitter((s) => queue(s, v, g, run, heard)); split.feed(String(t.text)); split.end(); } else heard();
+      }
+      reply = lines.map((t) => t.text).join(' ');
+      settle(g);
+      actsSig = null; // draw afresh, even to nothing
+      drawActs();
+      return;
+    }
     const entry = add({ them: '' });
     const voice = on && server?.state === 'ready' ? voiceOf(asked) : null;
-    const split = splitter((s) => { if (voice && g === gen) queue(s, voice, g); });
+    const split = splitter((s) => { if (voice && g === gen) queue(s, voice, g, run); });
     const take = (piece) => {
       entry.them += piece;
       if (keyOf(who) === keyOf(asked)) drawLog();
@@ -481,7 +558,10 @@ export function createVoice({ hud, card, ctx, el, button, signal, early = true, 
 
   /* ---------- listening: the microphone, only while someone is in a ring with the voice on ---------- */
 
-  const vad = { floor: -55, on: false, voiced: 0, quiet: 0, len: 0, pre: [], parts: [] };
+  const vad = { floor: -55, on: false, voiced: 0, quiet: 0, len: 0, pre: [], parts: [], last: 0 };
+  // You are talking: heard starting, and the microphone still sending (a microphone that stops mid-word, such as a
+  // headset that drops, never leaves them waiting for you).
+  const talking = () => vad.on && performance.now() - vad.last < 500;
 
   async function listen() {
     if (ear || !on || !who || !canHear() || !audio || !navigator.mediaDevices?.getUserMedia) { drawLine(); return; }
@@ -529,12 +609,24 @@ export function createVoice({ hud, card, ctx, el, button, signal, early = true, 
   // room's own level. Deaf while they are answering, so they never hear themselves.
   function hearBlock(block) {
     if (!ear?.stream || !who) return;
+    vad.last = performance.now();
     const dur = block.length / ear.rate;
     let sum = 0;
     for (let i = 0; i < block.length; i++) sum += block[i] * block[i];
     const db = 10 * Math.log10(sum / block.length + 1e-12);
     // For a moment after the microphone opens, it settles and the room's level is learned: no one is heard yet.
     const learning = performance.now() - ear.since < 800;
+    // their voice, or a pause between its sentences while the next is on its way
+    if (!vad.on && mode === 'speaking' && (playing.length || owed) && !learning && cutting()) {
+      // talking over them: they stop at once, and what you say is heard from its first sound
+      vad.pre.push(block);
+      while (vad.pre.length * dur > 0.5) vad.pre.shift();
+      const now = audio.currentTime;
+      const late = (audio.outputLatency || 0) + (audio.baseLatency || 0);
+      if (cut.hear(db, dur, vad.floor, playedLevel(now - dur - late, now))) cutIn(dur);
+      return;
+    }
+    if (mode === 'listening') cut.reset(); // the next time they speak, its echo is learned afresh
     if (!vad.on) {
       vad.floor += (db - vad.floor) * (db < vad.floor ? 0.3 : learning ? 0.25 : 0.02);
       if (learning || mode === 'speaking' || mode === 'thinking' || performance.now() < deafUntil) { vad.voiced = 0; vad.pre = []; return; }
@@ -563,18 +655,66 @@ export function createVoice({ hud, card, ctx, el, button, signal, early = true, 
 
   async function finish(parts, rate, quiet) {
     const length = parts.reduce((n, p) => n + p.length, 0);
-    if (length / rate - quiet < 0.3) { mode = 'listening'; drawLine(); return; }
+    if (length / rate - quiet < 0.3) { settle(gen); return; }
     const ended = performance.now() - quiet * 1000; // when they stopped speaking
     mode = 'thinking';
     drawLine();
     const asked = who;
     const g = gen;
     const pcm = to16k(parts, rate, length - Math.floor(quiet * rate * 0.6));
-    const text = await heardWords(wavFile(pcm, 16000));
-    if (keyOf(asked) !== keyOf(who) || g !== gen) return;
+    // meanwhile, an answer you cut off that ends never says it is listening, and nobody speaks up
+    beingHeard += 1;
+    let text = '';
+    try { text = await heardWords(wavFile(pcm, 16000)); } finally { beingHeard -= 1; }
+    if (keyOf(asked) !== keyOf(who) || g !== gen) {
+      // you moved on meanwhile (to someone else, or typed): whoever spoke since, and has finished, now listens
+      if (!asking && who) settle(gen);
+      return;
+    }
     times.hearMs = Math.round(performance.now() - ended);
-    if (!text || FILLER.test(text)) { mode = 'listening'; drawLine(); return; }
+    if (!text || FILLER.test(text)) { settle(g); return; } // nothing to answer: listening again, once any reply has played
     ask(text, ended);
+  }
+
+  // How loud what is playing was, at its loudest, between two moments in audio time: -120 when nothing was.
+  function playedLevel(from, to) {
+    let most = -120;
+    for (const x of sounding) {
+      if (x.end < from || x.at > to) continue;
+      if (!x.env) { most = Math.max(most, 0); continue; } // not measured: counted as loud
+      const a = Math.max(0, Math.floor((from - x.at) / FRAME));
+      const b = Math.min(x.env.length - 1, Math.floor((to - x.at) / FRAME));
+      for (let i = a; i <= b; i++) if (x.env[i] > most) most = x.env[i];
+    }
+    return most;
+  }
+
+  // Whether talking over someone stops them: the page's switch (talk.cutIn), on unless it says no.
+  function cutting() {
+    try { return talk?.cutIn?.() !== false; } catch { return true; }
+  }
+
+  function cutIn(dur) {
+    for (const run of live) run.cut = true; // the rest of what they were saying is never said
+    cuts += 1;
+    hush();
+    Object.assign(vad, { on: true, parts: [...vad.pre], len: vad.pre.length * dur, quiet: 0, voiced: 0 });
+    vad.pre = [];
+    mode = 'hearing';
+    drawLine();
+  }
+
+  // What they say without being asked (talk.speakUp), while you are with them and nobody is talking, typing or
+  // waiting for an answer, and not straight after one.
+  function speakUp() {
+    if (!who || !talk?.speakUp || asking || beingHeard || mode !== 'listening' || talking() || vad.voiced > 0 || document.hidden) return;
+    if (performance.now() < deafUntil + 1500) return;
+    if (document.activeElement === input && input.value.trim()) return;
+    let text = null;
+    try { text = talk.speakUp(who); } catch (error) { console.warn('Arnheim: could not speak up.', error); }
+    if (!text || typeof text !== 'string') return;
+    add({ them: text });
+    say(text);
   }
 
   // A sound heard as only "oh", "um" and the like: nothing to answer.
@@ -609,9 +749,11 @@ export function createVoice({ hud, card, ctx, el, button, signal, early = true, 
     stopEar();
     who = next;
     clearInterval(actsTimer);
+    clearInterval(upTimer);
     actsSig = null; // draw afresh, even to nothing
     drawActs();
     if (who && talk.controls) actsTimer = setInterval(drawActs, 1000);
+    if (who && talk.speakUp) upTimer = setInterval(speakUp, 4000);
     if (!who) { mode = 'idle'; return; }
     input.placeholder = `Type to ${nameOf(who)}`;
     input.setAttribute('aria-label', `Say something to ${nameOf(who)}`);
@@ -630,7 +772,7 @@ export function createVoice({ hud, card, ctx, el, button, signal, early = true, 
     return {
       allowed, on, mode, who: who?.title || null, voice: who ? voiceOf(who) : null,
       server: server && { say: !!server.say, state: server.state, hear: !!server.hear, voices: server.voices?.length || 0 },
-      ear: ear?.stage || false, mic: micTrouble || null, heard, reply, sounds,
+      ear: ear?.stage || false, mic: micTrouble || null, heard, reply, sounds, cuts,
       firstSoundMs: since(times.asked), fromSpeechEndMs: since(times.spokenEnd), hearMs: times.hearMs ?? null, sayMs: times.sayMs ?? null,
       ownEar, heardBy: times.heardBy || null,
     };
@@ -642,6 +784,7 @@ export function createVoice({ hud, card, ctx, el, button, signal, early = true, 
     stopEar();
     clearTimeout(poll);
     clearInterval(actsTimer);
+    clearInterval(upTimer);
     box.remove();
     toggle.remove();
     audio?.close?.().catch(() => {});
