@@ -403,3 +403,65 @@ a.floor-card:hover, a.room-tile:hover { transform: translateY(-1px); }
 .phone-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .phone-list li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .phone-name { display: grid; gap: 2px; }
+
+/* "Answering here" (welcome.js, control.js): while control is on, whether a permission request waits here now. */
+#answering-wrap { position: relative; margin-left: auto; display: inline-flex; }
+#answering-wrap:not([hidden]) ~ #walk { margin-left: 0; }
+#answering { display: inline-flex; align-items: center; gap: 7px; padding: 5px 10px; border-radius: 999px; cursor: pointer; font-size: 13px; font-weight: 600;
+  background: transparent; border: 1px solid var(--line); color: var(--muted); }
+#answering.here { color: var(--ok); border-color: rgba(var(--ok-rgb), .45); background: var(--ok-bg); }
+.answering-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--quiet); flex: none; }
+#answering.here .answering-dot { background: var(--ok); box-shadow: 0 0 0 3px rgba(var(--ok-rgb), .2); }
+#answering-why { position: absolute; z-index: 50; top: calc(100% + 8px); right: 0; width: min(300px, calc(100vw - 32px)); padding: 10px 12px; border-radius: 10px;
+  background: var(--card); color: var(--text); border: 1px solid var(--card-edge); box-shadow: var(--lift); font-size: 13px; font-weight: 400; line-height: 1.45; }
+@media (max-width: 520px) { #answering-why { right: auto; left: 0; } }
+
+/* Connect my agents (welcome.js): the flow in the made-up company's card, and what it did. */
+.setup-go { margin: 2px 0 12px; }
+.setup-or { margin-bottom: 6px !important; }
+.connect-form { display: grid; gap: 14px; }
+.connect-set { margin: 0; padding: 0; border: 0; min-width: 0; display: grid; gap: 10px; }
+.connect-set legend { padding: 0; margin: 0 0 8px; font-weight: 650; font-size: 14px; }
+.connect-set .switch-list .small { overflow-wrap: anywhere; }
+.connect-typed { display: grid; gap: 6px; }
+.connect-typed input { width: 100%; min-width: 0; padding: 9px 11px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: 14px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.connect-found { list-style: none; margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); display: grid; gap: 4px; font-size: 13.5px; }
+.connect-flow:focus { outline: none; }
+.connect-log { margin: 0 0 10px; font-size: 13px; }
+.connect-log summary { cursor: pointer; color: var(--accent); font-weight: 600; }
+.connect-lines { margin: 8px 0 0; padding: 10px 12px; max-height: 260px; overflow: auto; border-radius: 9px; background: var(--code-bg); border: 1px solid var(--card-edge);
+  font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; overflow-wrap: anywhere; }
+.connected-card, .first-card.arrived { border-color: rgba(var(--ok-rgb), .45); }
+.connected-card p, .first-card p, .update-card p, .undone-note p { margin: 0 0 10px; }
+.connect-undo { padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }
+.undone-note { margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; background: var(--ok-bg); }
+.panel-card .note, p.note { color: var(--text); }
+
+/* Your own company's first moment: the folders to open Claude Code in. */
+.first-folders { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 6px; }
+.first-folders code { padding: 2px 7px; border-radius: 6px; background: var(--code-bg); border: 1px solid var(--card-edge); font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
+
+/* A newer Arnheim, and desktop alerts. */
+.update-card code { font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--code-bg); border-radius: 5px; padding: 0 4px; }
+.update-card .control-row { margin-bottom: 8px; }
+.alert-offer { margin: 10px 2px 0; display: grid; gap: 6px; }
+.alert-offer p { margin: 0; color: var(--muted); }
+.linkish { background: none; border: 0; padding: 0; color: var(--accent); font: inherit; font-weight: 600; cursor: pointer; text-decoration: underline; text-underline-offset: 2px; }
+.tour-again { margin-top: 16px; }
+
+/* The first tour (tour.js): a card beside what it points at, and a ring round it. */
+.tour-ring { position: fixed; z-index: 59; pointer-events: none; border-radius: 14px; border: 2px solid var(--accent);
+  box-shadow: 0 0 0 4px rgba(var(--check-rgb), .25), 0 0 0 9999px rgba(10, 12, 18, .28); }
+.tour { position: fixed; z-index: 60; width: min(340px, calc(100vw - 32px)); padding: 14px 16px; border-radius: 14px; background: var(--card); color: var(--text);
+  border: 1px solid var(--card-edge); box-shadow: 0 18px 44px rgba(0, 0, 0, .35); }
+.tour.sheet { left: 16px !important; right: 16px; bottom: 16px; top: auto !important; width: auto; }
+.tour-count { margin: 0 0 4px; font-size: 12px; font-weight: 650; color: var(--muted); letter-spacing: .03em; }
+h2.tour-title { font-size: 18px; margin: 0 0 6px; }
+.tour-text { margin: 0 0 12px; font-size: 14.5px; }
+.tour-do { display: flex; flex-wrap: wrap; gap: 8px; }
+.tour-do .btn.quiet { margin-left: auto; }
+@media (prefers-reduced-motion: no-preference) {
+  .tour:not(.still) { transition: top .18s ease, left .18s ease; }
+  .tour-ring { transition: top .18s ease, left .18s ease, width .18s ease, height .18s ease; }
+}
+@media (max-width: 600px) { .tour-do .btn { min-height: 42px; flex: 1 1 auto; } .tour-do .btn.quiet { margin-left: 0; } }

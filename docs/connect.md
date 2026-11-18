@@ -79,6 +79,17 @@ told; the Company page's Switches change it (step 20), and `python3 serve.py --n
 Arnheim now and each time you log in, so it keeps running when you close the window: that is
 `python3 serve.py --always`, and `python3 serve.py --always off` takes it out again.
 
+**From the page.** On the made-up company's Overview, on the computer that runs `serve.py` (never a
+phone, `--lan` or `--share`), **Connect my agents** does the same without a terminal. It lists the
+projects setup finds, each ticked, takes one more folder you type (it must be there, and not your home
+folder or a whole disk), says whether Claude Code and Codex are here, and asks the one question about
+answering agents from the building, yes unless you say no. Connect runs setup in `serve.py` for those
+folders, with the same copies and words, and switches control on at once if you chose it. It never
+offers to start Arnheim at login: that stays in the terminal. The page then shows your own company,
+what was done, and **Undo**, which takes the hooks and status line out as `--undo` does and moves
+`data/company.json` into `data/backups/`, so the page shows the made-up company again. Until your
+first conversation arrives, the Overview lists the folders to open Claude Code (or Codex) in.
+
 `serve.py` does step 3 itself. The steps below do the same by hand, and say what each piece does.
 
 ## 1. Tell Arnheim where each project lives
@@ -225,6 +236,14 @@ Then start Arnheim with `--control`:
 ```bash
 python3 serve.py --control
 ```
+
+While control is on, a light in the top bar says **Answering here** while the page counts as in use
+(walking, or touched in the last two minutes), so a request waits there for you, and **Agents ask in
+their windows** when it doesn't. Press it to read why; touching the page makes it answer again. With
+**Desktop alerts when an agent needs you** on (on the Overview, or under Switches, for each browser
+apart), a permission request or a question that comes while the page is in the background brings one
+desktop alert, named after its floor; clicking it opens what is asked. Nothing that was already
+waiting when the page opened alerts, nor anything in the made-up company.
 
 Control answers only the page on the computer that runs `serve.py`, with the token that page is
 given, and never works with `--lan`. Starting agents needs Claude Code's `claude` command
@@ -647,10 +666,18 @@ change needs that page's own token.
   next step. Off keeps what was there: the memory, the standing allows and the budgets wait until
   their switch is on again.
 - **While Arnheim runs:** the receptionist and your assistant thinking with Claude (`--brain`),
-  routines (`--routines`, step 13), pings (`--pings`, step 15), and looking in project folders
-  (`--no-git` turns it off, step 3).
-- **On this page:** the Your plan card (step 18), and the talking switches, which are each
-  browser's own.
+  routines (`--routines`, step 13), pings (`--pings`, step 15), looking in project folders
+  (`--no-git` turns it off, step 3), and looking for a newer Arnheim (below).
+- **On this page:** the Your plan card (step 18), and, on this device, desktop alerts (step 4) and
+  the talking switches, which are each browser's own.
+
+**Look for a newer Arnheim** is on unless you switch it off. When Arnheim's folder is a git checkout
+of github.com/allwhenlabs/arnheim, `serve.py` asks GitHub as it starts and once a day whether `main`
+has changes this copy hasn't, sending only this copy's commit. If it has, this computer's Overview says
+"A newer Arnheim is out", with how many changes, and **Update now**: `serve.py` runs `git pull
+--ff-only` in its own folder and starts itself again with the same words, and the page reloads. It says
+why when it can't, such as changes of your own in the folder. By hand: `git pull` in Arnheim's folder,
+then start it again. A copy with commits GitHub doesn't know, or no network, simply gets no notice.
 
 They are kept in `data/serve.json`, beside setup's answer about control, as `true` or `false`, such as
 `{ "control": true, "handovers": false }`; a switch not there is at its usual setting. A word given to
@@ -662,7 +689,8 @@ login (`--always`) are only ever in the terminal.
 ## What is kept, and where
 
 `connect/setup.py` keeps a copy of each file before it changes it: `data/backups/company.before-arnheim-<when>.json`
-for your building, and `settings.before-arnheim-<when>.json` beside Claude Code's settings.
+for your building, and `settings.before-arnheim-<when>.json` beside Claude Code's settings. The page's
+Undo moves your building to `data/backups/company.undone-<when>.json`.
 
 The connectors write `data/feeds/claude-code.json` and `data/feeds/projects.json`. From Claude Code
 they keep, for each conversation: its title, or the first line of your first message; the first

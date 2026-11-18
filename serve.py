@@ -39,6 +39,9 @@ never gets the founder's notes, and nothing it sends is acted on.
 With --remote, it still listens only on this computer; what reaches it forwarded (from your phone, through
 Tailscale Serve) is never taken for this computer, and needs a paired phone (connect/remote.py). Without
 --remote, anything forwarded is refused.
+The page on this computer, and only there, can also connect your agents (/setup/, connect/setup.py run here with
+what you chose on the page) and update Arnheim (/update): once a day, and at the start, a git checkout of Arnheim
+asks GitHub whether a newer one is out, sending only which version it is (the "Look for a newer Arnheim" switch).
 """
 import argparse
 import errno
@@ -69,6 +72,7 @@ from html import escape as html_escape
 from urllib.parse import parse_qs, unquote
 
 from connect import always, switches
+from connect import setup as connect_setup
 from connect.brain import Brain
 from connect.control import Control
 from connect.remote import COOKIE as PHONE_COOKIE, LIFE as PHONE_LIFE, Remote
@@ -454,6 +458,68 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
         return io.BytesIO(out)
 
+    def own_page(self):
+        """The page on this computer, by 127.0.0.1 or localhost, even with --lan: what /switches, /setup/ and /update answer."""
+        return self.server.board is not None and self.here() and host_ok(self.headers.get("Host", ""), self.server.server_address[1])
+
+    def token_ok(self):
+        given = self.headers.get("X-Arnheim-Switches", "").encode("utf-8", "replace")
+        return hmac.compare_digest(given, self.server.board.token.encode())
+
+    def json_answer(self, code, data):
+        out = json.dumps(data).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        return io.BytesIO(out)
+
+    def setup_route(self, path, body=None):
+        """/setup/: connecting your agents from the made-up company's page (connect/setup.py, run here), and Undo.
+        GET here and plan say what there is; POST connect and undo, with the page's token, do it."""
+        name = path[len("/setup/"):]
+        if not self.own_page():
+            return self.json_answer(403, {"error": "Connecting your agents works only on this computer's own page."})
+        data = os.path.dirname(SAVED)
+        if body is None:
+            if name == "here":
+                return self.json_answer(200, {"token": self.server.board.token, **setup_here(data)})
+            if name == "plan":
+                return self.json_answer(200, {"token": self.server.board.token, **setup_plan(data)})
+            return self.json_answer(404, {"error": "No such request."})
+        if not self.token_ok():
+            return self.json_answer(403, {"error": "This page can't connect your agents. Reload it."})
+        try:
+            given = json.loads(body.decode("utf-8") or "{}")
+        except (UnicodeDecodeError, ValueError):
+            given = None
+        if not isinstance(given, dict):
+            return self.json_answer(400, {"error": "That wasn't a JSON object."})
+        if name == "connect":
+            return self.json_answer(*setup_connect(given, data, self.server.board))
+        if name == "undo":
+            return self.json_answer(*setup_undo(data))
+        return self.json_answer(404, {"error": "No such request."})
+
+    def update_route(self, body=None):
+        """/update: whether a newer Arnheim is out (look_for_newer), and Update now, for this computer's page only."""
+        if not self.own_page():
+            return self.json_answer(403, {"error": "Updating works only on this computer's own page."})
+        if body is None:
+            newer = self.server.update
+            return self.json_answer(200, {"token": self.server.board.token, **({"behind": newer["behind"]} if newer else {})})
+        if not self.token_ok():
+            return self.json_answer(403, {"error": "This page can't update Arnheim. Reload it."})
+        done, words = update_now(self.server)
+        if not done:
+            return self.json_answer(409, {"error": words})
+        if words != UP_TO_DATE:
+            self.server.update = None
+            threading.Thread(target=restart_self, args=(self.server,), daemon=True).start()
+            return self.json_answer(200, {"said": words, "restarting": True})
+        self.server.update = None
+        return self.json_answer(200, {"said": words})
+
     def look(self):
         """/look: which look the page opens in, and, when it is the drawn one but wasn't asked for, why in one line."""
         if self.server.drawn:
@@ -554,13 +620,17 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         except ValueError:
             self.send_error(400)
             return
-        known = path.startswith(("/voice/", "/control/", "/brain/", "/remote/")) or path == "/switches"
+        known = path.startswith(("/voice/", "/control/", "/brain/", "/remote/", "/setup/")) or path in ("/switches", "/update")
         if not known or not 0 <= size <= 2_000_000:
             self.send_error(404 if not known else 413)
             return
         body = self.rfile.read(size)
         if path == "/switches":
             reply = self.switches(body)
+        elif path.startswith("/setup/"):
+            reply = self.setup_route(path, body)
+        elif path == "/update":
+            reply = self.update_route(body)
         elif path.startswith("/brain/"):
             reply = self.brain(path, body)
         elif path.startswith("/remote/"):
@@ -589,6 +659,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.look()
         if path == "/switches":
             return self.switches()
+        if path.startswith("/setup/"):
+            return self.setup_route(path)
+        if path == "/update":
+            return self.update_route()
         if path in ("/", "/index.html"):
             path = "/index.html"
         else:
@@ -729,6 +803,255 @@ class Server(http.server.ThreadingHTTPServer):
     board = None  # the switches as this start has them (Switchboard)
     drawn = False  # --drawn: the page opens in the drawn look, and nothing is downloaded
     fetched = None  # why the photo-real pictures couldn't be downloaded at the start, if they couldn't
+    update = None  # {"behind": n} while GitHub has a newer Arnheim than this copy (look_for_newer)
+
+
+# ---------- connecting your agents from the page (connect/setup.py, run here) ----------
+
+SETUP_LOCK = threading.Lock()  # one setup at a time, and setup's data folder set for it
+SETUP_MOST_FOLDERS = 50
+CLAUDE_CODE_URL = "https://claude.com/claude-code"
+
+
+def setup_tool(data):
+    """connect/setup.py, writing to this server's data folder (setup's own is the same unless ARNHEIM_DATA says
+    otherwise). Called with SETUP_LOCK held."""
+    connect_setup.DATA = data
+    return connect_setup
+
+
+def setup_here(data):
+    """What the made-up company's card needs at once: whether Claude Code is on this computer."""
+    tool = connect_setup
+    return {"claude": tool.claude_code_here(), "install": CLAUDE_CODE_URL,
+            "company": os.path.isfile(os.path.join(data, "company.json"))}
+
+
+def setup_plan(data):
+    """What Connect my agents shows before anything changes: the projects setup.py finds, most recent first, with ~
+    for the home folder; whether Claude Code and Codex are here, and Codex's notes as setup gives them; and the
+    answer about control kept from before, if any."""
+    with SETUP_LOCK:
+        tool = setup_tool(data)
+        found = tool.find_projects()[:tool.MOST]
+        codex = tool.codex_here()
+        version = tool.codex_version() if codex else None
+        old = bool(version) and version < tool.CODEX_HOOKS
+        notes = [tool.codex_old_note(version, done=False)] if old else tool.codex_notes() if codex else []
+        try:
+            kept = tool.saved_choices().get("control")
+        except tool.Refused:
+            kept = None
+    return {
+        "claude": tool.claude_code_here(), "install": CLAUDE_CODE_URL,
+        "codex": {"here": codex, "version": f"{version[0]}.{version[1]}" if version else None, "hooks": codex and not old, "notes": notes},
+        "projects": [{"folder": tool.shown(p["folder"]), "label": tool.label_of(p["folder"]), "when": tool.ago(p["at"]),
+                      "git": bool(p["repo"])} for p in found],
+        "control": kept if isinstance(kept, bool) else None,
+        "company": os.path.isfile(os.path.join(data, "company.json")),
+    }
+
+
+def setup_connect(given, data, board=None):
+    """Connect my agents: setup.py for the folders chosen on the page, as `python3 connect/setup.py --folder ... --yes`
+    would, but with the page's answer about control, and never offering to start at login. Only folders setup found
+    (by the name the page showed) and one typed folder that is there and isn't too wide are taken. Control chosen is
+    switched on through the Switchboard, so it works at once. Gives (code, answer)."""
+    folders, typed, control = given.get("folders", []), given.get("typed") or "", given.get("control")
+    if not isinstance(folders, list) or len(folders) > SETUP_MOST_FOLDERS or not all(isinstance(f, str) for f in folders) \
+            or not isinstance(typed, str) or len(typed) > 4096 or not isinstance(control, bool):
+        return 400, {"error": "That request doesn't make sense."}
+    lines = []
+    with SETUP_LOCK:
+        tool = setup_tool(data)
+        found = {}
+        for p in tool.find_projects()[:tool.MOST]:
+            found[tool.shown(p["folder"])] = found[p["folder"]] = p["folder"]
+        chosen = []
+        for name in folders:
+            if name not in found:
+                return 400, {"error": f"{name} isn't one of the projects found. Reload the page and try again."}
+            chosen.append(found[name])
+        said = typed.strip().strip("'\"")
+        if said:
+            full = os.path.expanduser(said)
+            if "\0" in said or not os.path.isabs(full):
+                return 400, {"error": "Give the folder's whole path, starting with / or ~."}
+            full = os.path.realpath(full)
+            if not os.path.isdir(full):
+                return 400, {"error": f"There is no folder at {said}."}
+            if tool.too_wide(full):
+                return 400, {"error": f"{said} holds everything, not one project. Give a project's own folder."}
+            chosen.append(full)
+        chosen = list(dict.fromkeys(chosen))
+        if not chosen:
+            return 400, {"error": "Choose at least one project, or type a project's folder."}
+        args = argparse.Namespace(folder=chosen, yes=True, name=None, no_hooks=False, undo=False)
+        try:
+            tool.setup(args, say=lines.append, control=control, page=True)
+        except tool.Refused as why:
+            return 409, {"error": str(why), "lines": [line for line in lines if line.strip()]}
+        kept = switches.saved(data).get("control")
+    note = None
+    if board is not None and isinstance(kept, bool) and (board.server is None or (board.server.control is not None) != kept):
+        try:
+            board.switch("control", kept)
+        except Refused as why:
+            note = str(why)
+    return 200, {"lines": [line for line in lines if line.strip()], "control": kept if isinstance(kept, bool) else None,
+                 **({"note": note} if note else {})}
+
+
+def setup_undo(data):
+    """Undo: Arnheim's hooks and status line taken out, as `python3 connect/setup.py --undo` does, and data/company.json
+    moved aside into data/backups/, so the page shows the made-up company again. Gives (code, answer)."""
+    lines = []
+    with SETUP_LOCK:
+        tool = setup_tool(data)
+        try:
+            tool.undo(say=lines.append, page=True)
+        except tool.Refused as why:
+            return 409, {"error": str(why), "lines": lines}
+        company = os.path.join(data, "company.json")
+        if os.path.isfile(company):
+            backups = os.path.join(data, "backups")
+            aside = os.path.join(backups, f"company.undone-{tool.stamp()}.json")
+            n = 2
+            while os.path.exists(aside):
+                aside = os.path.join(backups, f"company.undone-{tool.stamp()}-{n}.json")
+                n += 1
+            try:
+                os.makedirs(backups, exist_ok=True)
+                os.replace(company, aside)
+            except OSError as error:
+                return 409, {"error": f"Your building, data/company.json, couldn't be moved aside: {error.strerror or error}.", "lines": lines}
+            lines.append(f"Moved your building to {tool.shown(aside)}, so the page shows the made-up company again. "
+                         "Move it back to data/company.json to have it again.")
+    return 200, {"lines": [line for line in lines if line.strip()]}
+
+
+# ---------- a newer Arnheim (the "Look for a newer Arnheim" switch) ----------
+
+UPSTREAM = re.compile(r"github\.com[:/]allwhenlabs/arnheim(?:\.git)?/?$", re.I)
+COMPARE = "https://api.github.com/repos/allwhenlabs/arnheim/compare/main...{}?per_page=1"
+UP_TO_DATE = "Arnheim is already up to date."
+NO_PROMPT = {"GIT_TERMINAL_PROMPT": "0"}  # git never stops to ask for a password
+
+
+def git_says(words, run=subprocess.run):
+    """What git prints for a fixed list of words, run in this folder, or None when it can't say."""
+    try:
+        done = run(["git", *words], cwd=ROOT, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30,
+                   env={**os.environ, **NO_PROMPT})
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    return done.stdout.strip() if done.returncode == 0 else None
+
+
+def local_head(run=subprocess.run):
+    """This copy's commit, when this folder is a git checkout of Arnheim's own repository on GitHub; else None. A
+    folder with no .git (a download) never runs git at all: on a Mac without Apple's tools, that would offer to
+    install them."""
+    if not os.path.lexists(os.path.join(ROOT, ".git")):
+        return None
+    top = git_says(["rev-parse", "--show-toplevel"], run)
+    if not top or not same_file(top, ROOT):
+        return None
+    remotes = git_says(["remote", "-v"], run) or ""
+    if not any(len(line.split()) >= 2 and UPSTREAM.search(line.split()[1]) for line in remotes.splitlines()):
+        return None
+    sha = git_says(["rev-parse", "HEAD"], run)
+    return sha if sha and re.fullmatch(r"[0-9a-f]{40}", sha) else None
+
+
+def newer_arnheim(run=subprocess.run, opener=urllib.request.urlopen):
+    """How many changes GitHub's main has that this copy hasn't, or None: not a git checkout of Arnheim, commits here
+    that GitHub doesn't know (it answers 404), no network, or nothing newer. GitHub is sent only this copy's commit,
+    with a User-Agent that says Arnheim and nothing else."""
+    sha = local_head(run)
+    if not sha:
+        return None
+    request = urllib.request.Request(COMPARE.format(sha), headers={"User-Agent": "Arnheim", "Accept": "application/vnd.github+json"})
+    try:
+        with opener(request, timeout=20) as reply:
+            said = json.loads(reply.read(1 << 22).decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        error.close()
+        return None
+    except (OSError, ValueError, http.client.HTTPException):
+        return None
+    behind = said.get("behind_by") if isinstance(said, dict) and said.get("status") == "behind" else None
+    return behind if isinstance(behind, int) and not isinstance(behind, bool) and behind > 0 else None
+
+
+def check_newer(server, board, last, ask=newer_arnheim, now=None, every=86400):
+    """One round of look_for_newer: asks GitHub when a day has passed since the last time (or never), while the switch is
+    on; with it off, the notice goes. Gives when it last asked."""
+    now = time.time() if now is None else now
+    if not board.on("updates"):
+        server.update = None
+        return 0  # switched on again, it asks at once
+    if last and now - last < every:
+        return last
+    behind = ask()
+    server.update = {"behind": behind} if behind else None
+    return now
+
+
+def look_for_newer(server, board, every=3600):
+    """At the start and once a day: whether GitHub has a newer Arnheim, for the Overview's notice."""
+    last = 0
+    while True:
+        try:
+            last = check_newer(server, board, last)
+        except Exception:  # whatever went wrong, it asks again later
+            pass
+        time.sleep(every)
+
+
+def update_now(server, run=subprocess.run):
+    """Update now: `git pull --ff-only` in this folder, the same words every time. Gives (whether it worked, what to say)."""
+    control = server.control
+    working = [r for r in list(control.runs.values()) if control.alive(r)] if control is not None else []
+    if working:
+        return False, (f"{len(working)} agent{'s' if len(working) != 1 else ''} started from the building "
+                       f"{'are' if len(working) != 1 else 'is'} still at work, and Arnheim starts again to update. Update once "
+                       f"{'they have' if len(working) != 1 else 'it has'} finished.")
+    try:
+        done = run(["git", "pull", "--ff-only"], cwd=ROOT, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=180,
+                   env={**os.environ, **NO_PROMPT})
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        return False, f"git couldn't run here ({getattr(error, 'strerror', None) or error}). Update by hand: git pull, in Arnheim's folder."
+    said = f"{done.stdout or ''}\n{done.stderr or ''}"
+    if done.returncode != 0:
+        if re.search(r"local changes|commit your changes|stash them|would be overwritten", said, re.I):
+            return False, ("Arnheim's folder has changes of its own that the update would overwrite, so nothing was changed. "
+                           "Save them somewhere else, or put them aside with git stash, then try again.")
+        if re.search(r"not possible to fast-forward|diverg", said, re.I):
+            return False, ("This copy has commits of its own that GitHub's doesn't, so it can't simply move up to the newer one. "
+                           "Nothing was changed. Update it by hand with git pull.")
+        last = [line.strip() for line in said.splitlines() if line.strip()][-1:]
+        return False, f"git pull didn't work{': ' + last[0] if last else ''}. Nothing was changed."
+    if re.search(r"already up[ -]to[ -]date", said, re.I):
+        return True, UP_TO_DATE
+    return True, "Updated. Arnheim is starting again, and the page reloads when it is back."
+
+
+def restart_self(server, wait=0.5):
+    """Starts serve.py again in this same process, with the same words it was started with, once the page has its answer.
+    The listening socket closes as it does (Python's sockets never pass to what replaces them), and the new start takes
+    the port at once. It never opens another browser tab."""
+    time.sleep(wait)
+    for brain in {id(b): b for b in (server.brain,) if b is not None}.values():
+        try:
+            brain.close()
+        except Exception:
+            pass
+    os.environ["ARNHEIM_NO_BROWSER"] = "1"
+    sys.stdout.flush()
+    sys.stderr.flush()
+    words = list(getattr(sys, "orig_argv", None) or [sys.executable, *sys.argv])
+    os.execv(sys.executable, words)
 
 
 def network_address():
@@ -861,8 +1184,8 @@ def company_note():
         if os.path.exists(os.path.join(ROOT, "data", "company.json")):
             return ["data/company.json links to somewhere outside this folder, which serve.py doesn't show, "
                     "so the page shows the made-up sample. Copy the files into data/ instead."]
-        return ["Showing the sample company, which is made up. To show your own projects and agents, run: "
-                f"{'py' if os.name == 'nt' else 'python3'} connect/setup.py"]
+        return ["Showing the sample company, which is made up. To show your own projects and agents, press Connect my "
+                f"agents on the page, or run: {'py' if os.name == 'nt' else 'python3'} connect/setup.py"]
     lines = ["Showing your own company, from data/."]
     then = {"notes.json": "The founder's office has no notes until it is fixed."}
     for name in ("company.json", "work.json", "notes.json"):
@@ -1204,6 +1527,7 @@ def main():
     threading.Thread(target=every_minute, args=("projects.py", lambda: board.on("git") and floors_have_folders()), daemon=True).start()
     threading.Thread(target=every_minute, args=("routines.py", lambda: board.on("routines")), daemon=True).start()
     threading.Thread(target=every_minute, args=("ping.py", lambda: board.on("pings")), daemon=True).start()
+    threading.Thread(target=look_for_newer, args=(server, board), daemon=True).start()  # once a day, while its switch is on
     if board.on("git") and floors_have_folders():
         print("Looking at your floors' folders every minute for unsaved changes and open pull requests "
               "(connect/projects.py).", flush=True)

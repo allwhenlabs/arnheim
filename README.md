@@ -40,8 +40,11 @@ python3 serve.py
 ```
 
 It opens http://127.0.0.1:8740 in your browser (`--no-browser` leaves that to you). It shows
-Fernhollow, a made-up company, until you add your own. The first time, it downloads the photo-real
-look's pictures before it opens ([The photo-real look](#the-photo-real-look)).
+Fernhollow, a made-up company, until you add your own: press **Connect my agents** on its Overview
+([Connect your agents](#connect-your-agents)). The first time, it downloads the photo-real
+look's pictures before it opens ([The photo-real look](#the-photo-real-look)), and a one-minute tour
+points out the floors, what waits on you and Walk (**Show the tour again** brings it back). When a
+newer Arnheim is out on GitHub, the Overview says so, with **Update now**.
 
 To keep it running when you close the terminal, and have it start again each time you log in, run
 `python3 serve.py --always` instead, once (on a Mac or Linux). `python3 serve.py --always off`
@@ -259,7 +262,11 @@ false` leaves a floor without one ([docs/data.md](docs/data.md)).
 
 ## Connect your agents
 
-One command, in Arnheim's folder:
+On the page, on your own computer, press **Connect my agents** on the Overview. It lists the projects
+you have worked on with Claude Code or Codex, each ticked, lets you add a folder, asks whether to
+answer your agents from the building, and connects them when you press Connect. The page then shows
+your own company, what was done, and **Undo**. Until your first agent arrives, the Overview says which
+folders to open Claude Code in. Or run one command, in Arnheim's folder:
 
 ```bash
 python3 connect/setup.py
@@ -286,11 +293,16 @@ With control on (say yes in the setup, switch it on under Switches, or start Arn
 talk to your agents from the building for real, answer their permission requests with Allow or Deny,
 stop them, and start new ones on a project, by typing or out loud. It answers only the page on your
 computer ([docs/connect.md](docs/connect.md), step 4). With it off, a request shows where to answer it.
+While it is on, a light in the top bar says **Answering here** while you use the page, and that agents
+ask in their own windows once you haven't touched it for two minutes. **Desktop alerts**, switched on
+for each browser on the Overview or under Switches, tell you when an agent needs you while the page is
+in the background.
 
 Every feature can be switched on or off on the Company page, under **Switches**: answering your
 agents from the building, hand-overs, the company's memory, how-tos, Always allow, proving the work,
 the review line, the budget brake, restore points, warnings when two agents change one file, the
-receptionist thinking with Claude, routines, pings, looking in project folders, and the Your plan card.
+receptionist thinking with Claude, routines, pings, looking in project folders, looking for a newer
+Arnheim, and the Your plan card.
 A change works at once and holds for every start (`data/serve.json`). A word given to `serve.py` as it
 starts, such as `--routines`, holds its switch for that start. Phones, the network and starting at
 login stay in the terminal (`--remote`, `--lan`, `--share`, `--always`) ([docs/connect.md](docs/connect.md), step 20).

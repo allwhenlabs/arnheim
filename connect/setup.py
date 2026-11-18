@@ -12,6 +12,8 @@ becomes a floor. It writes them to data/company.json, or adds them to the one th
 Arnheim's hooks to Claude Code's settings (docs/connect.md, steps 1, 2 and 4), and to Codex's hooks.json
 if Codex is here (step 9), keeping a copy of each file before it changes it. It asks before it changes anything, never changes your projects' files,
 and running it twice changes nothing the second time. Standard library only, Python 3.7 or newer.
+
+The page's Connect my agents button does the same, through serve.py (/setup/), with what you chose there.
 """
 import argparse
 import json
@@ -658,10 +660,10 @@ def pick(found):
         listing(found)
 
 
-def listing(projects):
+def listing(projects, say=print):
     width = max([len(label_of(p["folder"])) for p in projects] + [4])
     for n, p in enumerate(projects, 1):
-        print(f"  {n:>2}. {label_of(p['folder']):<{width}}  {shown(p['folder'])}  ({ago(p['at'])})")
+        say(f"  {n:>2}. {label_of(p['folder']):<{width}}  {shown(p['folder'])}  ({ago(p['at'])})")
 
 
 def claude_code_here():
@@ -683,6 +685,13 @@ def codex_version():
         return None
     match = re.search(r"(\d+)\.(\d+)", said or "")
     return (int(match.group(1)), int(match.group(2))) if match else None
+
+
+def codex_old_note(version, done=True):
+    """Why a Codex older than the one that brought hooks gets none, in words."""
+    return (f"This Codex is {version[0]}.{version[1]}, older than {CODEX_HOOKS[0]}.{CODEX_HOOKS[1]}, which brought hooks, so "
+            f"none {'were' if done else 'will be'} added for it. Until you update it, it can show each turn's end through its "
+            "notify setting (docs/connect.md, step 9).")
 
 
 def codex_notes():
@@ -743,37 +752,44 @@ def can_always():
     return sys.platform == "darwin" or sys.platform.startswith("linux")
 
 
-def undo():
+def undo(say=print, page=False):
+    """Takes Arnheim's hooks and status line out again. From the page (serve.py's /setup/undo), `say` gets the
+    lines, and the page says itself what becomes of the building."""
     changed = 0
     for path, who, name in ((settings_path(), "Claude Code", "claude_code.py"), (codex_hooks_path(), "Codex", "codex.py")):
         path, settings = read_settings(path, who)
         if settings is None:
             if who == "Claude Code":
-                print(f"There are no Claude Code settings at {shown(path)}, so there is nothing to take out.")
+                say(f"There are no Claude Code settings at {shown(path)}, so there is nothing to take out.")
             continue
         out, taken = take_out(settings, name)
         out, status_back = take_out_status(out) if who == "Claude Code" else (out, False)
         if not taken and not status_back:
-            print(f"{who}'s {'settings' if who == 'Claude Code' else 'hooks'} ({shown(path)}) have none of Arnheim's hooks: nothing changed.")
+            say(f"{who}'s {'settings' if who == 'Claude Code' else 'hooks'} ({shown(path)}) have none of Arnheim's hooks: nothing changed.")
             continue
         copy = write_all([(path, out)], {path: os.path.dirname(os.path.realpath(path))})[path]
         changed += 1
         if taken:
-            print(f"Took Arnheim's hooks out of {shown(path)}:")
+            say(f"Took Arnheim's hooks out of {shown(path)}:")
         commands = {}
         for event, command in taken:
             commands.setdefault(command, []).append(event)
         for command, events in commands.items():
-            print(f"  {command}")
-            print(f"    for {', '.join(events)}")
+            say(f"  {command}")
+            say(f"    for {', '.join(events)}")
         if status_back:
-            print("  Claude Code's status line is " + ("yours again." if out.get("statusLine") else "back to none, as it was."))
-        print(f"Every other setting and hook in it is as it was. The file as it was before is at {shown(copy)}.")
-    print("Your building, data/company.json, is left as it is. Delete the data folder to go back to the made-up company.")
+            say("  Claude Code's status line is " + ("yours again." if out.get("statusLine") else "back to none, as it was."))
+        say(f"Every other setting and hook in it is as it was. The file as it was before is at {shown(copy)}.")
+    if not page:
+        say("Your building, data/company.json, is left as it is. Delete the data folder to go back to the made-up company.")
     return 0
 
 
-def setup(args):
+def setup(args, say=print, control=None, page=False):
+    """Makes the building and connects Claude Code and Codex. From the terminal it asks; from the page (serve.py's
+    /setup/connect) nothing is asked: `args` names the folders and says yes, `control` is the answer about answering
+    agents from the building, `say` gets the lines, and with `page` it leaves out what it will do (the page showed
+    that) and never offers to start Arnheim at login, which stays in the terminal."""
     if args.folder:
         projects = []
         for given in args.folder:
@@ -784,13 +800,13 @@ def setup(args):
                 raise Refused(f"{given} holds everything, not one project. Give a project's own folder. Nothing was changed.")
             projects.append({"folder": folder, "repo": os.path.isdir(os.path.join(folder, ".git")), "at": time.time()})
     else:
-        print("Looking for the projects you have worked on with Claude Code or Codex...")
+        say("Looking for the projects you have worked on with Claude Code or Codex...")
         projects = find_projects()[:MOST]
         if projects:
-            print(f"Found {len(projects)}, the most recent first:")
-            listing(projects)
+            say(f"Found {len(projects)}, the most recent first:")
+            listing(projects, say)
         else:
-            print("Found none: no recent conversation ran in a project folder that is still there.")
+            say("Found none: no recent conversation ran in a project folder that is still there.")
         if not args.yes:
             projects = pick(projects) if projects else []
             while not projects:
@@ -799,11 +815,11 @@ def setup(args):
                     raise Refused("Stopped before changing anything.")
                 folder = os.path.realpath(os.path.expanduser(said.strip("'\"")))
                 if too_wide(folder):
-                    print(f"{said} holds everything, not one project. Give a project's own folder.")
+                    say(f"{said} holds everything, not one project. Give a project's own folder.")
                 elif os.path.isdir(folder):
                     projects.append({"folder": folder, "repo": os.path.isdir(os.path.join(folder, ".git")), "at": time.time()})
                 else:
-                    print(f"There is no folder at {said}. Try again.")
+                    say(f"There is no folder at {said}. Try again.")
     company_path = os.path.join(DATA, "company.json")
     if not projects and not os.path.exists(company_path):
         raise Refused("There is no project to give a floor. Name one: python3 connect/setup.py --folder ~/code/my-project")
@@ -825,54 +841,55 @@ def setup(args):
     codex_file, codex_settings = read_settings(codex_hooks_path(), "Codex") if codex_on else (codex_hooks_path(), None)
     new_codex, codex_events, codex_replaced = plan_hooks(codex_settings, codex=True) if codex_on else (None, [], [])
     serve_file, serve_choice = saved_path(), None
-    if (hooks_on or codex_on) and "control" not in saved_choices():  # answering from the building: asked once, ever
-        answer = True if args.yes else ask_yes(
+    if (hooks_on or codex_on) and (control is not None or "control" not in saved_choices()):  # asked once, ever, or answered on the page
+        answer = control if control is not None else True if args.yes else ask_yes(
             "Answer your agents from the building too: Allow or Deny their permission requests, and send them messages? "
             "It works only on this computer. [Y/n] ")
         serve_choice = plan_saved(answer)
 
-    print()
+    say("")
     if not company and not new_settings and not new_codex and not serve_choice:
         for folder in already:
-            print(f"  {shown(folder)} already has a floor.")
-        print("Everything is already set up: nothing changed.")
+            say(f"  {shown(folder)} already has a floor.")
+        say("Everything is already set up: nothing changed.")
         return 0
-    print("This will:")
-    if company and new:
-        floors = "a floor for this project" if len(added) == 1 else f"a floor for each of these {len(added)} projects"
-        print(f"  - write {shown(company_path)}: a building called \"{company['company']}\" with {floors}, "
-              "and a receptionist, Iris, at the front desk")
-    elif company and added:
-        print(f"  - add {len(added)} floor{'s' if len(added) != 1 else ''} to {shown(company_path)}, after keeping a copy in data/backups/")
-    elif company:
-        print(f"  - add the connectors' files to \"feeds\" in {shown(company_path)}, after keeping a copy in data/backups/")
-    if new_settings and events:
-        print(f"  - add Arnheim's hooks to Claude Code's settings, {shown(settings_file)}"
-              f"{', after keeping a copy beside it' if settings is not None else ''}. They tell the building when a "
-              "conversation starts, works, needs you and finishes. They change nothing Claude does unless you start "
-              "Arnheim with --control")
-    if status_done in ("added", "wrapped"):
-        print("  - let Claude Code's status line tell the building how much of your plan's limits is used, so it can say "
-              "when you'd reach them" + (": your own status line still shows, as before" if status_done == "wrapped" else ""))
-    for event, command in replaced:
-        print(f"  - replace Arnheim's {event} hook there, which runs only for some tools or only from one folder: {command}")
-    if new_codex:
-        print(f"  - add Arnheim's hooks to Codex, {shown(codex_file)}{', after keeping a copy beside it' if codex_settings is not None else ''}. "
-              "They tell the building the same about Codex's conversations, and Codex runs them once you trust them "
-              "(type /hooks in Codex)")
-    for event, command in codex_replaced:
-        print(f"  - replace Arnheim's Codex {event} hook there, which runs only for some tools or only from one folder: {command}")
-    if serve_choice:
-        print(f"  - remember in {shown(serve_file)} that python3 serve.py starts with control "
-              f"{'on, so you answer your agents from the building' if serve_choice['control'] else 'off'}")
-    print("  It never changes your projects' files.")
+    if not page:
+        say("This will:")
+        if company and new:
+            floors = "a floor for this project" if len(added) == 1 else f"a floor for each of these {len(added)} projects"
+            say(f"  - write {shown(company_path)}: a building called \"{company['company']}\" with {floors}, "
+                "and a receptionist, Iris, at the front desk")
+        elif company and added:
+            say(f"  - add {len(added)} floor{'s' if len(added) != 1 else ''} to {shown(company_path)}, after keeping a copy in data/backups/")
+        elif company:
+            say(f"  - add the connectors' files to \"feeds\" in {shown(company_path)}, after keeping a copy in data/backups/")
+        if new_settings and events:
+            say(f"  - add Arnheim's hooks to Claude Code's settings, {shown(settings_file)}"
+                f"{', after keeping a copy beside it' if settings is not None else ''}. They tell the building when a "
+                "conversation starts, works, needs you and finishes. They change nothing Claude does unless you start "
+                "Arnheim with --control")
+        if status_done in ("added", "wrapped"):
+            say("  - let Claude Code's status line tell the building how much of your plan's limits is used, so it can say "
+                "when you'd reach them" + (": your own status line still shows, as before" if status_done == "wrapped" else ""))
+        for event, command in replaced:
+            say(f"  - replace Arnheim's {event} hook there, which runs only for some tools or only from one folder: {command}")
+        if new_codex:
+            say(f"  - add Arnheim's hooks to Codex, {shown(codex_file)}{', after keeping a copy beside it' if codex_settings is not None else ''}. "
+                "They tell the building the same about Codex's conversations, and Codex runs them once you trust them "
+                "(type /hooks in Codex)")
+        for event, command in codex_replaced:
+            say(f"  - replace Arnheim's Codex {event} hook there, which runs only for some tools or only from one folder: {command}")
+        if serve_choice:
+            say(f"  - remember in {shown(serve_file)} that python3 serve.py starts with control "
+                f"{'on, so you answer your agents from the building' if serve_choice['control'] else 'off'}")
+        say("  It never changes your projects' files.")
     for path in twice:
-        print(f"  Note: {shown(path)} runs Arnheim's hooks too, so Claude Code would tell the building everything twice "
-              "in that project. Take them out of that file afterwards: this only changes your own settings.")
+        say(f"  Note: {shown(path)} runs Arnheim's hooks too, so Claude Code would tell the building everything twice "
+            "in that project. Take them out of that file afterwards: this only changes your own settings.")
     if not args.yes and ask("Go ahead? [Y/n] ", "y").lower() not in ("y", "yes"):
         raise Refused("Stopped before changing anything.")
 
-    print()
+    say("")
     if serve_choice:  # read again: the Company page may have changed a switch while you were deciding
         serve_choice = plan_saved(serve_choice["control"])
     changes = ([(company_path, company)] if company else []) + ([(settings_file, new_settings)] if new_settings else []) \
@@ -887,60 +904,61 @@ def setup(args):
     kept = write_all(changes, copies)
     if company:
         copy = kept.get(company_path)
-        print(f"Wrote {shown(company_path)}{f' (as it was before: {shown(copy)})' if copy else ''}:")
+        say(f"Wrote {shown(company_path)}{f' (as it was before: {shown(copy)})' if copy else ''}:")
         for floor in added:
-            print(f"  + {floor['label']}  {floor['folder']}")
+            say(f"  + {floor['label']}  {floor['folder']}")
         for folder in already:
-            print(f"  {shown(folder)} already had a floor.")
+            say(f"  {shown(folder)} already had a floor.")
     if new_settings and (events or replaced):
         copy = kept.get(settings_file)
-        print(f"Added to {shown(settings_file)}{f' (as it was before: {shown(copy)})' if copy else ''}, for "
-              f"{', '.join(events) or 'the hooks it replaced'}:")
-        print(f"  {hook_command()}")
+        say(f"Added to {shown(settings_file)}{f' (as it was before: {shown(copy)})' if copy else ''}, for "
+            f"{', '.join(events) or 'the hooks it replaced'}:")
+        say(f"  {hook_command()}")
     if new_settings and status_done in ("added", "wrapped"):
-        print(f"Claude Code's status line now runs {shown(USAGE_SCRIPT)}"
-              + (", which still shows yours." if status_done == "wrapped" else ", which shows your plan's limits."))
+        say(f"Claude Code's status line now runs {shown(USAGE_SCRIPT)}"
+            + (", which still shows yours." if status_done == "wrapped" else ", which shows your plan's limits."))
     if new_settings:
         if (settings or {}).get("disableAllHooks") is True:
-            print("  Note: this file says \"disableAllHooks\": true, so Claude Code runs none of them until you take that out.")
+            say("  Note: this file says \"disableAllHooks\": true, so Claude Code runs none of them until you take that out.")
         if sys.prefix != getattr(sys, "base_prefix", sys.prefix):
-            print("  Note: you ran this with a virtual environment's Python, which the hooks now use. Keep that environment, "
-                  "or run this again with your system's Python.")
+            say("  Note: you ran this with a virtual environment's Python, which the hooks now use. Keep that environment, "
+                "or run this again with your system's Python.")
     elif hooks_on:
-        print(f"Claude Code's settings ({shown(settings_file)}) already have Arnheim's hooks.")
+        say(f"Claude Code's settings ({shown(settings_file)}) already have Arnheim's hooks.")
     elif not args.no_hooks and not codex_on:
-        print("Claude Code doesn't seem to be on this computer (there is no claude command and no ~/.claude folder), so no "
-              "hooks were added. Install it from https://claude.com/claude-code, then run python3 connect/setup.py again.")
+        say("Claude Code doesn't seem to be on this computer (there is no claude command and no ~/.claude folder), so no "
+            "hooks were added. Install it from https://claude.com/claude-code, then run python3 connect/setup.py again.")
     if new_codex:
         copy = kept.get(codex_file)
-        print(f"Added to {shown(codex_file)}{f' (as it was before: {shown(copy)})' if copy else ''}, for "
-              f"{', '.join(codex_events) or 'the hooks it replaced'}:")
-        print(f"  {hook_command(script=CODEX_SCRIPT)}")
-        print("  Codex runs new hooks only once you trust them: start Codex, type /hooks, and trust Arnheim's. Once is enough.")
+        say(f"Added to {shown(codex_file)}{f' (as it was before: {shown(copy)})' if copy else ''}, for "
+            f"{', '.join(codex_events) or 'the hooks it replaced'}:")
+        say(f"  {hook_command(script=CODEX_SCRIPT)}")
+        say("  Codex runs new hooks only once you trust them: start Codex, type /hooks, and trust Arnheim's. Once is enough.")
     elif codex_on:
-        print(f"Codex's hooks ({shown(codex_file)}) already have Arnheim's.")
+        say(f"Codex's hooks ({shown(codex_file)}) already have Arnheim's.")
     if codex_on:
         for words in codex_notes():
-            print(f"  Note: {words}")
+            say(f"  Note: {words}")
     elif codex_old:
-        print(f"This Codex is {codex_old[0]}.{codex_old[1]}, older than {CODEX_HOOKS[0]}.{CODEX_HOOKS[1]}, which brought hooks, so "
-              "none were added for it. Until you update it, it can show each turn's end through its notify setting "
-              "(docs/connect.md, step 9).")
+        say(codex_old_note(codex_old))
     if serve_choice:
-        print(f"Wrote {shown(serve_file)}: control {'on' if serve_choice['control'] else 'off'} each time Arnheim starts "
-              "(python3 serve.py --no-control leaves it off once).")
-    print()
+        say(f"Wrote {shown(serve_file)}: control {'on' if serve_choice['control'] else 'off'} each time Arnheim starts "
+            "(python3 serve.py --no-control leaves it off once).")
+    say("")
+    if page:
+        say("Conversations you start in these folders from now on show in the building.")
+        return 0
     if not args.yes and can_always() and sys.stdin.isatty() and ask_yes(  # a person at a terminal, never a script or a test
             "Start Arnheim now, and each time you log in, so it keeps running after you close this window? [Y/n] "):
         start_always()
-        print("Conversations you start in these folders from now on show in the building.")
-        print("To take the hooks out again: python3 connect/setup.py --undo")
+        say("Conversations you start in these folders from now on show in the building.")
+        say("To take the hooks out again: python3 connect/setup.py --undo")
         return 0
-    print(f"Next: {'py' if WINDOWS else 'python3'} serve.py. It opens the page at http://127.0.0.1:8740 (already running? Reload the page)."
-          + (" Or python3 serve.py --always, to keep it running and start it each time you log in." if can_always() else ""))
-    print("Conversations you start in these folders from now on show in the building. To have it prove an agent's work by "
-          "running a project's tests, give its floor a check (docs/connect.md, step 5).")
-    print("To take the hooks out again: python3 connect/setup.py --undo")
+    say(f"Next: {'py' if WINDOWS else 'python3'} serve.py. It opens the page at http://127.0.0.1:8740 (already running? Reload the page)."
+        + (" Or python3 serve.py --always, to keep it running and start it each time you log in." if can_always() else ""))
+    say("Conversations you start in these folders from now on show in the building. To have it prove an agent's work by "
+        "running a project's tests, give its floor a check (docs/connect.md, step 5).")
+    say("To take the hooks out again: python3 connect/setup.py --undo")
     return 0
 
 

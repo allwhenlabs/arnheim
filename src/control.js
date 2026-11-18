@@ -5,7 +5,7 @@
 //
 // createControl({ base, headers, busy }) talks to the server: `base` is where /control/ is (by
 // default ../control/ beside src), `headers()` adds a page token for a server of its own, and
-// `busy()` says the person is using the page. The rest are the words for the walk: agentReply (or
+// `busy()` says the person is using the page (and `using()` gives whether it counts as in use now). The rest are the words for the walk: agentReply (or
 // agentQuick) and agentControls for an agent in its ring, deskStart for the receptionist, who can
 // start an agent on a project.
 
@@ -75,6 +75,8 @@ export function createControl({ base = BASE, headers = () => ({}), every = 3000,
     restart() { running = false; clearTimeout(timer); token = null; set(OFF); running = true; poll(); return this; },
     get on() { return !!state.on; },
     state: () => state,
+    // Whether the page counts as in use now (the two-minute rule above), so a permission request waits here.
+    using,
     watch(fn) { watchers.add(fn); return () => watchers.delete(fn); },
     askFor: (key) => state.asks.find((a) => a.key === key) || null,
     run: (key) => state.runs.find((r) => r.key === key) || null,

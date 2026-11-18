@@ -29,6 +29,9 @@ import { exactOf, kindWord, meaningOf, riskOf } from './risk.js';
 import { createPoe, has, insertAfter, needWord, norm, poeBadge } from './poe-desk.js';
 import { createGoalStand, isStandHref, standFloor, standHref } from './goal-stand.js';
 import { forecastOf, pressing, usageLine, usageWords } from './usage.js';
+import { CONNECTED, FIRST, UNDONE, answeringWords, codexLine, connectRequest, connectStart, firstMoment, floorFolders, updateLine } from './welcome.js';
+import { TOUR as TOUR_SEEN, createTour, tourWanted } from './tour.js';
+import { createAlerts, freshAlerts } from './alerts.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -64,6 +67,15 @@ const control = createControl({ busy: () => !!building?.walking?.() });
 // through Claude Code on the computer that serves the page (brain.js). Off otherwise.
 const brain = createBrain();
 const features = createFeatures(); // talking from any screen, the floors' leads, answering by voice (features.js)
+// This browser's own small memories (localStorage, or sessionStorage for this tab), none of which may stop the page.
+const kept = (key, where = 'localStorage') => { try { return window[where].getItem(key); } catch { return null; } };
+const keep = (key, value, where = 'localStorage') => { try { window[where].setItem(key, value); } catch { /* a private window: it lasts this visit */ } };
+const unkeep = (key, where = 'localStorage') => { try { window[where].removeItem(key); } catch { /* nothing kept */ } };
+const keptJson = (key, where) => { try { return JSON.parse(kept(key, where) || 'null'); } catch { return null; } };
+const pause = (ms) => new Promise((done) => setTimeout(done, ms));
+// Desktop alerts when an agent needs you, this browser's own choice (alerts.js), and the first tour (tour.js).
+const alerts = createAlerts({ win: window, storage: (() => { try { return window.localStorage; } catch { return null; } })() });
+const tour = createTour();
 let dock = null; // the Talk panel (talk-dock.js)
 let starting = null; // an agent the receptionist was asked to start, waiting for your word
 let controlNote = ''; // what came of the last thing done from the panel
@@ -1110,9 +1122,53 @@ function switchesCard() {
     h('p.small.muted', 'Each feature on or off, at once and for every start (data/serve.json). The talking ones are this device\'s own.'),
     switchNote && h('p.small.note', { role: 'status' }, switchNote),
     ...SWITCH_GROUPS.flatMap(([group, label]) => [h('h4.switch-group', label), h('ul.switch-list', rows.filter((s) => s.group === group).map(switchRow))]),
+    h('h4.switch-group', 'On this device'),
+    h('ul.switch-list', alertRow()),
     h('h4.switch-group', 'Talking, on this device'),
     h('ul.switch-list', talkRows()),
     phoneCard());
+}
+
+/* ---------- desktop alerts when an agent needs you (alerts.js) ---------- */
+
+// Your own company only. What was waiting when the page opened never alerts: the list is noted first (at the start,
+// and again when control's first answer arrives), and each item after that alerts once, only while the page is in the
+// background.
+let alertKnown = null; // ids of what needed you, seen on this page
+let alertsNote = '';
+let alertOfferGone = kept('arnheim-alerts-offer') === 'no';
+const ownCompany = () => dir === 'data' && !madeUp();
+function checkAlerts() {
+  if (!ownCompany()) return;
+  const items = waitingNow();
+  if (!alertKnown) { alertKnown = new Set(); freshAlerts(items, alertKnown); return; }
+  const fresh = freshAlerts(items, alertKnown);
+  if (!fresh.length || !alerts.on() || (!document.hidden && document.hasFocus())) return;
+  for (const i of fresh) alerts.show(i, floorOf(i.project)?.label || i.project, () => { location.hash = waitingHref(i) || '#/'; });
+}
+async function setAlerts(on) {
+  const said = await alerts.set(on);
+  alertsNote = said;
+  render();
+  if (alerts.on() || !on) setTimeout(() => { if (alertsNote === said) { alertsNote = ''; render(); } }, 10000); // done: said for a moment
+}
+function alertRow() {
+  return h('li', h('label.switch',
+    h('input', { type: 'checkbox', checked: alerts.on(), onchange: (event) => setAlerts(event.currentTarget.checked) }),
+    h('span', h('b', 'Desktop alerts when an agent needs you'),
+      h('span.small.muted', 'One alert for each permission request or question that comes while this page is in the background. Clicking it opens what is asked. This browser only.'),
+      alertsNote && h('span.small.note', { role: 'status' }, alertsNote))));
+}
+// Offered under the Overview's first card, on this computer's own company, until it is on or turned down here.
+function alertOffer() {
+  if (ownCompany() && alerts.on() && alertsNote) return h('p.small.note.alert-offer', { role: 'status' }, alertsNote);
+  if (!ownCompany() || alerts.on() || alertOfferGone || alerts.state() === 'none') return null;
+  return h('div.alert-offer',
+    h('p.small', 'Get a desktop alert when an agent needs you, while this page is in the background.'),
+    h('div.control-row',
+      btn('Turn on alerts', () => setAlerts(true), '', 'bell'),
+      btn('No thanks', () => { alertOfferGone = true; keep('arnheim-alerts-offer', 'no'); render(); }, '.quiet')),
+    alertsNote && h('p.small.note', { role: 'status' }, alertsNote));
 }
 
 // The talking switches alone, where Talk can always be switched back on.
@@ -1706,8 +1762,12 @@ function viewOverview() {
     body: [
       h('div.home-head', h('h2', { id: 'view-title', tabindex: '-1' }, heading), h('p', sub), noteOnce('.done-note')),
       fromAway() && !phoneMe?.phone && h('p.small', h('strong', 'View only. '), 'You are looking from another device: you can look round and walk in, but nothing here changes anything.'),
+      connectedCard(),
+      firstCard(),
       first ? focusCard(first) : h('div.all-clear', h('b', 'You are clear.'), 'Nothing is waiting on you right now.'),
+      alertOffer(),
       firstRun && setupCard(),
+      updateCard(),
       usageCard(),
       pauseCard(),
       clashCard(),
@@ -1738,7 +1798,8 @@ function viewOverview() {
           : empty(playing ? 'The work starts moving in a few seconds.' : 'Paused. Press Live at the top to let the work move.')),
       h('div.intro-small',
         h('p', h('strong', madeUp() ? `${org.company} is made up. ` : `${org.company}. `), madeUp() ? sampleLine() : org.about || ''),
-        h('p', `Each floor of the building is a project and each room holds one kind of thing. Tap a floor to bring it out. Press Walk to go in and talk to the people at work, and to ${deskName() || 'the receptionist'} at the front desk.`),
+        h('p', `Each floor of the building is a project and each room holds one kind of thing. Tap a floor to bring it out. Press Walk to go in and talk to the people at work, and to ${deskName() || 'the receptionist'} at the front desk. `,
+          tourLink()),
         h('p', dir === 'data'
           ? 'Everything here comes from data/company.json (the building), and from data/work.json and any tools connected to it (what is going on in it). A change to the work shows within a few seconds; reload after changing the building.'
           : 'Everything here comes from two files: sample/company.json (the building) and sample/work.json (what is going on in it). To show your own company, run python3 connect/setup.py in Arnheim\'s folder (README, "Connect your agents").')),
@@ -1746,9 +1807,111 @@ function viewOverview() {
   };
 }
 
-// With no data/ yet: the one step from the made-up company to your own projects and agents
-// (connect/setup.py), with what it touches and what it never does.
+// With no data/ yet: the one step from the made-up company to your own projects and agents. On this computer's own
+// page, Connect my agents does it here (serve.py's /setup/, which runs connect/setup.py); elsewhere, or without Claude
+// Code, the command for a terminal, with what it touches and what it never does.
 let setupNote = '';
+let setupHere = null; // what /setup/here said: { token, claude, install, company }, or null where there is none
+let setupAsked = false;
+let flow = null; // Connect my agents while it is open: { step, plan, ticked, typed, control, error } (welcome.js)
+let undoneNote = keptJson(UNDONE, 'sessionStorage'); // what Undo did, said once on the made-up company it went back to
+const setupGet = (name) => fetch(`setup/${name}`, { cache: 'no-store', credentials: 'same-origin' })
+  .then((r) => (r.ok ? r.json() : null)).catch(() => null);
+async function setupPost(name, body, again = false) {
+  let r;
+  try {
+    r = await fetch(`setup/${name}`, {
+      method: 'POST', cache: 'no-store', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-Arnheim-Switches': setupHere?.token || '' }, body: JSON.stringify(body),
+    });
+  } catch { return { error: 'Arnheim didn\'t answer. Is it still running?' }; }
+  if (r.status === 403 && !again) { // Arnheim started again, with a new token
+    setupHere = await setupGet('here');
+    if (setupHere) return setupPost(name, body, true);
+  }
+  const data = await r.json().catch(() => ({}));
+  return r.ok ? data : { ...data, error: data.error || `Arnheim answered ${r.status}.` };
+}
+// What setup said it did, in its own words, kept open across the panel's redraws once opened.
+let logOpen = false;
+const doneLog = (lines) => h('details.connect-log', { open: logOpen, ontoggle: (event) => { logOpen = event.currentTarget.open; } },
+  h('summary', 'What was done'), h('pre.connect-lines', lines.join('\n')));
+// Back to the Overview, freshly loaded: your own company once it is there, or the made-up one again.
+const reloadHome = () => { window.history.replaceState(null, '', location.pathname + location.search); location.reload(); };
+
+async function openFlow() {
+  flow = { step: 'loading' };
+  render();
+  const plan = await setupGet('plan');
+  if (!flow) return; // closed meanwhile
+  if (!plan) { flow = { step: 'failed' }; render(); return; }
+  if (plan.token) setupHere = { ...(setupHere || {}), token: plan.token };
+  flow = connectStart(plan);
+  render();
+  $('connect-flow')?.focus({ preventScroll: true });
+}
+async function connectNow() {
+  if (!flow || flow.step !== 'form') return;
+  const typed = $('connect-typed');
+  if (typed) flow.typed = typed.value;
+  if ($('content').contains(document.activeElement)) document.activeElement.blur(); // pressed Enter in the box: the panel redraws now
+  flow.step = 'working';
+  flow.error = '';
+  render();
+  const out = await setupPost('connect', connectRequest(flow));
+  if (out.error) {
+    flow.step = 'form';
+    flow.error = out.error;
+    render();
+    $('connect-error')?.focus({ preventScroll: true });
+    return;
+  }
+  keep(CONNECTED, JSON.stringify({ lines: out.lines || [], note: out.note || '', control: out.control ?? null, at: Date.now() }));
+  unkeep(FIRST); // your own company's first agent: waited for afresh
+  reloadHome();
+}
+function connectFlow() {
+  const f = flow;
+  const head = sectHead('zap', 'Connect my agents');
+  const closeFlow = () => { flow = null; render(); };
+  if (f.step === 'loading') return [head, h('p', { role: 'status' }, 'Looking for the projects you have worked on with Claude Code or Codex...')];
+  if (f.step === 'failed') {
+    return [head, h('p.banner.fail', { role: 'alert' }, 'Arnheim couldn\'t look for your projects. Is it still running? Reload the page to try again.'),
+      h('div.control-row', btn('Close', closeFlow))];
+  }
+  const plan = f.plan;
+  const working = f.step === 'working';
+  const projects = plan.projects;
+  const tick = (folder) => (event) => { if (event.currentTarget.checked) f.ticked.add(folder); else f.ticked.delete(folder); };
+  return [head,
+    h('form.connect-form', { onsubmit: (event) => { event.preventDefault(); connectNow(); }, 'aria-busy': working ? 'true' : null },
+      h('fieldset.connect-set',
+        h('legend', projects.length ? 'Give each of these a floor' : 'Your projects'),
+        projects.length
+          ? h('ul.switch-list', projects.map((p) => h('li', h('label.switch',
+            h('input', { type: 'checkbox', name: 'folder', value: p.folder, checked: f.ticked.has(p.folder), disabled: working, onchange: tick(p.folder) }),
+            h('span', h('b', p.label), h('span.small.muted', `${p.folder}, ${p.when}`))))))
+          : h('p.small.muted', 'Found none: no recent Claude Code or Codex conversation ran in a project folder that is still there. Type a project\'s folder below.')),
+      h('label.connect-typed', h('span.small', projects.length ? 'Add another project\'s folder (optional)' : 'A project\'s folder'),
+        h('input', { id: 'connect-typed', type: 'text', name: 'typed', value: f.typed, placeholder: '~/code/my-project', autocomplete: 'off',
+          autocapitalize: 'off', spellcheck: 'false', disabled: working, oninput: (event) => { f.typed = event.currentTarget.value; } })),
+      h('fieldset.connect-set',
+        h('legend', 'Answer your agents from the building too?'),
+        h('label.switch', h('input', { type: 'radio', name: 'control', value: 'yes', checked: f.control, disabled: working, onchange: () => { f.control = true; } }),
+          h('span', h('b', 'Yes'), h('span.small.muted', 'Allow or Deny their permission requests, and send them messages, from this page. It works only on this computer.'))),
+        h('label.switch', h('input', { type: 'radio', name: 'control', value: 'no', checked: !f.control, disabled: working, onchange: () => { f.control = false; } }),
+          h('span', h('b', 'No'), h('span.small.muted', 'Each agent asks in its own window, as usual. You can switch it on later, under Switches.')))),
+      h('ul.connect-found',
+        h('li', plan.claude ? 'Claude Code: found.' : 'Claude Code: not found on this computer.'),
+        h('li', codexLine(plan.codex)),
+        (plan.codex?.notes || []).map((n) => h('li.small.muted', n))),
+      f.error && h('p.banner.fail', { id: 'connect-error', role: 'alert', tabindex: '-1' }, f.error),
+      h('div.control-row',
+        h('button.btn.primary', { id: 'connect-go', type: 'submit', disabled: working }, working ? 'Connecting...' : 'Connect'),
+        h('button.btn', { id: 'connect-cancel', type: 'button', disabled: working, onclick: closeFlow }, 'Cancel')),
+      h('p.small.muted', 'It writes your building to data/, a floor for each project, and adds Arnheim\'s hooks and status line to Claude Code\'s settings, and its hooks to Codex\'s, keeping a copy of each file first. It never changes your projects\' files, and Undo takes it out again. To start Arnheim each time you log in, run python3 serve.py --always in a terminal.'))];
+}
+
 function setupCard() {
   const command = 'python3 connect/setup.py';
   const copy = (event) => {
@@ -1771,12 +1934,175 @@ function setupCard() {
     if (navigator.clipboard?.writeText) navigator.clipboard.writeText(command).then(() => { setupNote = 'Copied.'; render(); }, older);
     else older();
   };
+  if (!fromAway() && !setupAsked) { // this computer's own page: whether Claude Code is here, so the button can show
+    setupAsked = true;
+    setupGet('here').then((got) => { setupHere = got; render(); });
+  }
+  if (flow) return h('section.panel-card.setup-card.connect-flow', { id: 'connect-flow', tabindex: '-1', 'aria-label': 'Connect my agents' }, connectFlow());
+  const terminal = [
+    h('div.setup-run', h('code', command), btn('Copy', copy), setupNote && h('span.small.muted', { role: 'status' }, setupNote)),
+    h('p.small.muted', 'It finds the projects you have worked on with Claude Code or Codex and asks before it changes anything. It writes your building to data/, a floor for each project, and adds Arnheim\'s hooks to Claude Code\'s settings and Codex\'s, keeping a copy of each file first. It never changes your projects\' files, and python3 connect/setup.py --undo takes the hooks out again. Then reload this page. On Windows, type py instead of python3.'),
+  ];
+  const here = !fromAway() && setupHere;
   return h('section.panel-card.setup-card',
     sectHead('laptop', 'See your own agents here'),
-    h('p', `${org.company} is made up. To see your own projects, and the Claude Code and Codex conversations working in them, run this in a terminal, in Arnheim's folder:`),
-    h('div.setup-run', h('code', command), btn('Copy', copy), setupNote && h('span.small.muted', { role: 'status' }, setupNote)),
-    h('p.small.muted', 'It finds the projects you have worked on with Claude Code or Codex and asks before it changes anything. It writes your building to data/, a floor for each project, and adds Arnheim\'s hooks to Claude Code\'s settings and Codex\'s, keeping a copy of each file first. It never changes your projects\' files, and python3 connect/setup.py --undo takes the hooks out again. Then reload this page. On Windows, type py instead of python3.'));
+    undoneNote && h('div.undone-note', { role: 'status' },
+      h('p', h('strong', 'Undone. '), 'Arnheim\'s hooks are out of your settings, and this is the made-up company again.'),
+      undoneNote.lines?.length > 0 && doneLog(undoneNote.lines),
+      h('div.control-row', btn('Got it', () => { undoneNote = null; unkeep(UNDONE, 'sessionStorage'); render(); }))),
+    here?.claude
+      ? [h('p', `${org.company} is made up. To see your own projects, and the Claude Code and Codex conversations working in them, connect your agents. Nothing changes until you press Connect.`),
+        h('div.control-row.setup-go', h('button.btn.primary', { id: 'connect-open', type: 'button', onclick: openFlow }, icon('zap', 15), 'Connect my agents')),
+        h('p.small.muted.setup-or', 'Or run this in a terminal, in Arnheim\'s folder:'), terminal]
+      : here && here.claude === false
+        ? [h('p', `${org.company} is made up. Claude Code isn't on this computer, so there are no agents to connect yet. `,
+          h('a', { href: here.install || 'https://claude.com/claude-code', target: '_blank', rel: 'noopener' }, 'Install Claude Code'), ', then reload this page.'),
+          h('p.small.muted.setup-or', 'With Codex alone, run this in a terminal, in Arnheim\'s folder:'), terminal]
+        : [h('p', `${org.company} is made up. To see your own projects, and the Claude Code and Codex conversations working in them, run this in a terminal, in Arnheim's folder:`), terminal]);
 }
+
+// Once Connect my agents has done it: your own company, what was done, and Undo (hooks and status line out, and your
+// building put aside in data/backups/, so the page goes back to the made-up company).
+let connectedNote = keptJson(CONNECTED);
+let undoAsk = false;
+async function undoConnect() {
+  connectedNote = { ...connectedNote, working: true, error: '' };
+  render();
+  if (!setupHere) setupHere = await setupGet('here');
+  const out = await setupPost('undo', {});
+  if (out.error) {
+    connectedNote = { ...connectedNote, working: false, error: out.error };
+    render();
+    return;
+  }
+  unkeep(CONNECTED);
+  unkeep(FIRST);
+  keep(UNDONE, JSON.stringify({ lines: out.lines || [] }), 'sessionStorage');
+  reloadHome();
+}
+function connectedCard() {
+  if (!connectedNote || !ownCompany() || fromAway()) return null;
+  const n = connectedNote;
+  return h('section.panel-card.connected-card',
+    sectHead('circle-check', 'Your agents are connected'),
+    h('p', `This is ${org.company}, your own building, with a floor for each project. Conversations you start in their folders from now on show here.`),
+    n.control === true && h('p.small', 'You answer their permission requests here too, while you use this page.'),
+    n.note && h('p.small.note', n.note),
+    n.lines?.length > 0 && doneLog(n.lines),
+    n.error && h('p.banner.fail', { role: 'alert' }, n.error),
+    undoAsk
+      ? h('div.connect-undo',
+        h('p.small', 'Take Arnheim\'s hooks and status line out of Claude Code\'s and Codex\'s settings, and put your building aside in data/backups/, so this goes back to the made-up company?'),
+        h('div.control-row',
+          h('button.btn.primary', { id: 'undo-go', type: 'button', disabled: !!n.working, onclick: undoConnect }, n.working ? 'Undoing...' : 'Undo'),
+          h('button.btn', { id: 'undo-keep', type: 'button', disabled: !!n.working, onclick: () => { undoAsk = false; render(); } }, 'Keep it')))
+      : h('div.control-row',
+        h('button.btn.primary', { id: 'connected-ok', type: 'button', onclick: () => { unkeep(CONNECTED); connectedNote = null; render(); } }, 'Got it'),
+        h('button.btn.quiet', { id: 'undo-ask', type: 'button', onclick: () => { undoAsk = true; render(); $('undo-keep')?.focus(); } }, 'Undo')));
+}
+
+// Your own company's first moment (welcome.js): until a conversation has ever been seen in this browser, a card that
+// says where to start one; when the first comes, the card goes, and a note says it is here, once.
+let firstState = null;
+let firstArrived = null;
+function firstCard() {
+  if (!ownCompany()) return null;
+  const seen = kept(FIRST) === '1';
+  const now = firstMoment({ seen, waiting: !!firstState?.waiting, conversations: work.conversations });
+  if (now.seen && !seen) keep(FIRST, '1');
+  if (now.arrived) firstArrived = now.arrived;
+  firstState = now;
+  if (now.waiting) {
+    const folders = floorFolders(org);
+    return h('section.panel-card.first-card',
+      sectHead('bot', 'Waiting for your first agent'),
+      folders.length
+        ? [h('p', 'Open Claude Code (or Codex) in one of these folders, and it shows here as it starts:'),
+          h('ul.first-folders', folders.map((x) => h('li', h('code', x.folder), x.floor && h('span.small.muted', ` ${x.floor}`))))]
+        : h('p', 'Give a floor its folder in data/company.json, then open Claude Code (or Codex) there, and it shows here as it starts.'),
+      h('p.small.muted', 'Codex runs Arnheim\'s hooks once you trust them: type /hooks in Codex, once.'));
+  }
+  if (!firstArrived) return null;
+  const c = firstArrived;
+  const floor = floorOf(c.project);
+  return h('section.panel-card.first-card.arrived', { role: 'status' },
+    sectHead('circle-check', 'Your first agent is here'),
+    h('p', `${c.title || 'A conversation'}${floor ? `, on ${floor.label}` : ''}. Its floor lights up while it works, and turns amber when it needs you.`),
+    h('div.control-row',
+      floor && h('a.btn.primary', { href: convoHref(c) }, 'See it'),
+      h('button.btn', { id: 'first-ok', type: 'button', onclick: () => { firstArrived = null; render(); } }, 'Got it')));
+}
+
+// A newer Arnheim (serve.py's /update, the "Look for a newer Arnheim" switch): a notice on this computer's own page,
+// with Update now, which pulls it from GitHub and starts Arnheim again, and the way to do it by hand.
+let updateState = null; // what /update said: { token, behind? }
+let updateNote = '';
+let updateBusy = false;
+async function readUpdate() {
+  if (fromAway()) return;
+  try {
+    const r = await fetch('update', { cache: 'no-store', credentials: 'same-origin' });
+    updateState = r.ok ? await r.json() : null;
+  } catch { updateState = null; }
+}
+async function backAgain(most = 5 * 60000) {
+  const until = Date.now() + most;
+  await pause(1500);
+  while (Date.now() < until) {
+    const stop = new AbortController();
+    const timer = setTimeout(() => stop.abort(), 3000);
+    try {
+      const r = await fetch('look', { cache: 'no-store', signal: stop.signal });
+      if (r.ok) return true;
+    } catch { /* still starting */ } finally { clearTimeout(timer); }
+    await pause(1000);
+  }
+  return false;
+}
+async function updateArnheim() {
+  if (updateBusy) return;
+  updateBusy = true;
+  updateNote = '';
+  render();
+  let out;
+  try {
+    const r = await fetch('update', {
+      method: 'POST', cache: 'no-store', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-Arnheim-Switches': updateState?.token || '' }, body: '{}',
+    });
+    out = await r.json().catch(() => ({}));
+    if (!r.ok) out = { error: out.error || `Arnheim answered ${r.status}. Reload the page and try again.` };
+  } catch { out = { error: 'Arnheim didn\'t answer. Is it still running?' }; }
+  if (out.error) { updateBusy = false; updateNote = out.error; render(); return; }
+  updateNote = out.said || 'Updated.';
+  render();
+  if (!out.restarting) { updateBusy = false; updateState = { ...updateState, behind: 0 }; render(); return; }
+  if (await backAgain()) { reloadHome(); return; }
+  updateBusy = false;
+  updateNote = 'Arnheim hasn\'t come back yet. Look in the terminal it runs in, or start it again there: python3 serve.py';
+  render();
+}
+function updateCard() {
+  if (fromAway() || !updateState || (!updateState.behind && !updateNote)) return null;
+  const behind = updateState.behind > 0;
+  return h('section.panel-card.update-card',
+    sectHead('sparkles', behind ? updateLine(updateState.behind) : 'Arnheim'),
+    behind && h('div.control-row',
+      h('button.btn.primary', { id: 'update-now', type: 'button', disabled: updateBusy, onclick: updateArnheim }, updateBusy ? 'Updating...' : 'Update now')),
+    updateNote && h('p.small.note', { role: 'status' }, updateNote),
+    behind && h('p.small.muted', 'Update now gets it from GitHub and starts Arnheim again. By hand, in Arnheim\'s folder in a terminal: ',
+      h('code', 'git pull'), ', then start Arnheim again. Switch off Look for a newer Arnheim, on the Company page, to stop this notice.'));
+}
+
+// The first tour (tour.js): once per browser, by itself, and any time from the Overview or the Company page.
+const storageWorks = () => { try { window.localStorage.setItem('arnheim-probe', '1'); window.localStorage.removeItem('arnheim-probe'); return true; } catch { return false; } };
+function maybeTour() {
+  const seen = kept(TOUR_SEEN) === '1' || !storageWorks(); // a browser that can't remember would see it on every visit
+  if (!tourWanted({ seen, embedded: window.self !== window.top, away: fromAway(), walking: walkOn() || !!building?.walking?.() })) return;
+  keep(TOUR_SEEN, '1');
+  tour.open();
+}
+const tourLink = () => !fromAway() && h('button.linkish', { type: 'button', onclick: () => { if (!walkOn()) tour.open(); } }, 'Show the tour again');
 
 function floorCard(floor) {
   return h('li', h('a.floor-card', { href: `#/${floor.id}` },
@@ -1797,6 +2123,7 @@ function viewCompany() {
       switchesCard(),
       memoryCard(),
       alwaysCard(),
+      !fromAway() && h('p.small.muted.tour-again', 'New here? ', tourLink()),
     ],
   };
 }
@@ -2085,6 +2412,7 @@ function render({ nav = false } = {}) {
   }
   pending = false;
   const focusHref = !nav && panel.contains(active) ? active.getAttribute('href') : null;
+  const focusKey = !nav && panel.contains(active) && active.id ? active.id : null; // a button with an id keeps its focus
   const focusSwitch = !nav && ticked ? active.closest('label')?.querySelector('b')?.textContent : null;
   const scroll = panel.scrollTop;
   const view = viewFor(route);
@@ -2099,6 +2427,7 @@ function render({ nav = false } = {}) {
     panel.scrollTop = scroll;
     if (focusHref) [...panel.querySelectorAll('a')].find((a) => a.getAttribute('href') === focusHref)?.focus({ preventScroll: true });
     if (focusSwitch) [...panel.querySelectorAll('label.switch')].find((l) => l.querySelector('b')?.textContent === focusSwitch)?.querySelector('input')?.focus({ preventScroll: true });
+    if (focusKey && !panel.contains(document.activeElement)) document.getElementById(focusKey)?.focus({ preventScroll: true });
   }
 }
 
@@ -2112,11 +2441,42 @@ function tick() {
     el.style.width = `${Math.max(4, Math.round(Math.min(1, s / LONG) * 100))}%`;
     el.className = `meter-fill s-${waitMood(s)}`;
   }
+  showAnswering();
 }
 
 function refresh() {
   building?.setLive(liveModel());
+  checkAlerts();
   render();
+  showAnswering();
+}
+
+// The top bar's light while control is on (welcome.js): whether a permission request waits here now, by
+// control.js's two-minute rule, or goes to the agent's own window. Pressing it says why.
+function showAnswering() {
+  const wrap = $('answering-wrap');
+  if (!wrap) return;
+  const said = answeringWords(control.on, control.using());
+  wrap.hidden = !said;
+  if (!said) {
+    $('answering-why').hidden = true;
+    $('answering').setAttribute('aria-expanded', 'false');
+    return;
+  }
+  const light = $('answering');
+  light.classList.toggle('here', said.here);
+  if ($('answering-word').textContent !== said.text) $('answering-word').textContent = said.text;
+  light.title = said.why;
+  if ($('answering-why').textContent !== said.why) $('answering-why').textContent = said.why;
+}
+function setupAnswering() {
+  const light = $('answering');
+  if (!light) return;
+  const why = $('answering-why');
+  const show = (on) => { why.hidden = !on; light.setAttribute('aria-expanded', String(on)); };
+  light.addEventListener('click', () => show(why.hidden));
+  light.addEventListener('blur', () => show(false));
+  light.addEventListener('keydown', (event) => { if (event.key === 'Escape' && !why.hidden) { event.stopPropagation(); show(false); } });
 }
 
 /* ---------- the story: work moving on a loop ---------- */
@@ -2723,7 +3083,7 @@ async function readMemory() {
 // Your own company's work is read again every few seconds, so the building follows it as it
 // changes: an edit to work.json, or a tool writing its feed.
 async function followWork() {
-  if (document.hidden) return;
+  if (document.hidden && !alerts.on()) return; // with desktop alerts on, it keeps reading in the background, to alert
   try {
     const now = await readWork();
     const sig = JSON.stringify(now);
@@ -2786,6 +3146,7 @@ async function boot() {
   document.addEventListener('keydown', (event) => {
     // the walk has its own keys, from the moment Walk is pressed (it takes a moment to open) until it has closed
     if (building?.walking?.() || walkOn()) return;
+    if (tour.isOpen) return; // the first tour has its own keys while it is open: a key meant for it never answers a request
     const typing = event.target.matches?.('input, select, textarea, [contenteditable]');
     const free = !typing && !event.metaKey && !event.ctrlKey && !event.altKey;
     if (event.key === 'Escape') {
@@ -2809,18 +3170,31 @@ async function boot() {
   setInterval(step, Math.max(2, Number(work.every) || 6) * 1000);
   setInterval(tick, 1000);
   if (dir === 'data') setInterval(followWork, FOLLOW_MS);
+  checkAlerts(); // what waits on you as the page opens: never alerted
   if (dir === 'data' && !madeUp()) {
     // Control is off unless serve.py says it is on; then the panel follows what waits for you.
     let seen = '';
+    let primed = false;
     control.watch((s) => {
       const sig = JSON.stringify([s.on, s.asks.map((a) => a.id), s.runs.map((r) => [r.key, r.state, r.answered]), s.projects.length, s.paused, s.allowed]);
       if (sig === seen) return;
       seen = sig;
+      if (s.on && !primed) { // control's first answer: what was already waiting there never alerts either
+        primed = true;
+        freshAlerts(waitingNow(), alertKnown || (alertKnown = new Set()));
+      }
       refresh();
     });
     control.start();
     readSwitches().then((got) => { if (got) render(); });
   }
+  setupAnswering();
+  showAnswering();
+  if (!fromAway()) { // a newer Arnheim: asked of this computer's serve.py now and every half hour (it asks GitHub once a day)
+    readUpdate().then(() => render());
+    setInterval(() => readUpdate().then(() => render()), 30 * 60000);
+  }
+  setTimeout(maybeTour, 1200);
 }
 
 boot();
