@@ -68,7 +68,7 @@ import zipfile
 from html import escape as html_escape
 from urllib.parse import parse_qs, unquote
 
-from connect import always
+from connect import always, switches
 from connect.brain import Brain
 from connect.control import Control
 from connect.remote import COOKIE as PHONE_COOKIE, LIFE as PHONE_LIFE, Remote
@@ -354,7 +354,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         control = self.server.control
         if control is None:
             off = name == "token" and method == "GET"
-            code, data = (200, {"on": False}) if off else (404, {"error": "Control is off. Start Arnheim with --control to switch it on."})
+            code, data = (200, {"on": False}) if off else (404, {"error": "Control is off. Switch it on under Switches on the Company page, or start Arnheim with --control."})
             kind, data, extra = "application/json; charset=utf-8", json.dumps(data).encode(), {}
         elif not self.here() and not self.phone_controls():
             if self.phone() is not None and name == "token" and method == "GET":
@@ -366,6 +366,11 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             code, kind, data, extra = 429, "application/json; charset=utf-8", b'{"error": "Too many at once from this phone. Wait a minute."}', {}
         else:
             code, kind, data, extra = control.handle(method, name, body, self.headers.get("X-Arnheim-Control", ""))
+            if self.server.control is not control:  # switched off while this was answered: nobody is here to answer
+                try:
+                    os.remove(control.box.path("watched"))
+                except OSError:
+                    pass
         self.send_response(code)
         self.send_header("Content-Type", kind)
         self.send_header("Content-Length", str(len(data)))
@@ -382,7 +387,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         brain = self.server.brain
         if brain is None:
             off = name == "status" and method == "GET"
-            code, data = (200, {"on": False}) if off else (404, {"error": "The brain is off. Start Arnheim with --brain to switch it on."})
+            code, data = (200, {"on": False}) if off else (404, {"error": "The brain is off. Switch it on under Switches on the Company page, or start Arnheim with --brain."})
             kind, data, extra = "application/json; charset=utf-8", json.dumps(data).encode(), {}
         elif not self.here() and self.phone() is None:
             code, kind, data, extra = 403, "application/json; charset=utf-8", b'{"error": "Only on this computer, or a phone paired with it."}', {}
@@ -417,6 +422,37 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         finally:
             data.close()
         return None
+
+    def switches(self, body=None):
+        """/switches: each feature on or off (connect/switches.py), for the page on this computer only. GET gives
+        them with the page's token; POST {"name", "on"} with that token changes one, at once and for every start."""
+        board = self.server.board
+        own = host_ok(self.headers.get("Host", ""), self.server.server_address[1])  # 127.0.0.1 or localhost, even with --lan
+        if board is None or not self.here() or not own:
+            code, data = 403, {"error": "The switches are only on this computer's own page."}
+        elif body is None:
+            code, data = 200, {"token": board.token, "switches": board.listing()}
+        elif not hmac.compare_digest(self.headers.get("X-Arnheim-Switches", "").encode("utf-8", "replace"), board.token.encode()):
+            code, data = 403, {"error": "This page can't change the switches. Reload it."}
+        else:
+            try:
+                given = json.loads(body.decode("utf-8") or "{}")
+            except (UnicodeDecodeError, ValueError):
+                given = None
+            if not isinstance(given, dict) or given.get("name") not in switches.NAMES or not isinstance(given.get("on"), bool):
+                code, data = 400, {"error": "That isn't a switch."}
+            else:
+                try:
+                    note = board.switch(given["name"], given["on"])
+                    code, data = 200, {"token": board.token, "switches": board.listing(), **({"note": note} if note else {})}
+                except Refused as why:
+                    code, data = 409, {"error": str(why), "switches": board.listing()}
+        out = json.dumps(data).encode()
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(out)))
+        self.end_headers()
+        return io.BytesIO(out)
 
     def look(self):
         """/look: which look the page opens in, and, when it is the drawn one but wasn't asked for, why in one line."""
@@ -518,12 +554,14 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         except ValueError:
             self.send_error(400)
             return
-        known = path.startswith(("/voice/", "/control/", "/brain/", "/remote/"))
+        known = path.startswith(("/voice/", "/control/", "/brain/", "/remote/")) or path == "/switches"
         if not known or not 0 <= size <= 2_000_000:
             self.send_error(404 if not known else 413)
             return
         body = self.rfile.read(size)
-        if path.startswith("/brain/"):
+        if path == "/switches":
+            reply = self.switches(body)
+        elif path.startswith("/brain/"):
             reply = self.brain(path, body)
         elif path.startswith("/remote/"):
             reply = self.remote_route(path, body)
@@ -549,6 +587,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.remote_route(path)
         if path == "/look":
             return self.look()
+        if path == "/switches":
+            return self.switches()
         if path in ("/", "/index.html"):
             path = "/index.html"
         else:
@@ -578,6 +618,107 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         return handle
 
 
+class Refused(Exception):
+    """A switch the page can't change now, in words for the person who pressed it."""
+
+
+class Switchboard:
+    """The switches as this start has them (connect/switches.py): what you chose on the Company page, unless a word
+    given to serve.py as it started holds one for this start. A change works at once: control and the brain are
+    made or put away here, and the minute jobs ask before each run."""
+
+    def __init__(self, args, away, make_brain=None):
+        self.data = os.path.dirname(SAVED)
+        self.token = secrets.token_urlsafe(24)
+        self.lock = threading.Lock()
+        self.server = None
+        self.kept = None  # the Control made once, kept while control is off, so agents started here stay known
+        self.make_brain = make_brain
+        given = lambda word: bool(getattr(args, word, False))  # noqa: E731
+        held = {}
+        if away:  # control and the brain work only on this computer
+            held["control"] = held["brain"] = (False, away)
+        if given("control"):
+            held["control"] = (True, "--control")
+        elif given("no_control"):
+            held["control"] = (False, "--no-control")
+        if given("brain"):
+            held["brain"] = (True, "--brain")
+        if given("routines"):
+            held["routines"] = (True, "--routines")
+        if given("pings"):
+            held["pings"] = (True, "--pings")
+        if given("no_git"):
+            held["git"] = (False, "--no-git")
+        self.held = held
+
+    def on(self, name):
+        held = self.held.get(name)
+        return held[0] if held else switches.on(name, self.data)
+
+    def listing(self):
+        """The switches for the page. Control and the brain as they are running now: a brain kept on that
+        couldn't start shows as off, so pressing it tries again and says why."""
+        rows = switches.listing(self.data, self.held)
+        server = self.server
+        if server is not None:
+            for row in rows:
+                if row["name"] == "control":
+                    row["on"] = server.control is not None
+                elif row["name"] == "brain":
+                    row["on"] = server.brain is not None
+        return rows
+
+    def switch(self, name, on):
+        """Changes one switch, for now and every start. Refused, with nothing changed, for one a start word
+        holds, for one that can't be kept on disk, for the brain or control when it can't start, and for
+        control while agents started from the building are still at work. Gives a note to show, or None."""
+        with self.lock:
+            held = self.held.get(name)
+            if held:
+                where = "only on this computer" if held[1] in ("--lan", "--share") else None
+                raise Refused(f"Arnheim started with {held[1]}, which holds this for now"
+                              + (f": it works {where}." if where else f". Start it without {held[1]} to switch it here."))
+            server = self.server
+            if name == "control" and not on and server is not None and server.control is not None:
+                working = [r for r in list(server.control.runs.values()) if server.control.alive(r)]
+                if working:
+                    raise Refused(f"{len(working)} agent{'s' if len(working) != 1 else ''} started from the building "
+                                  f"{'are' if len(working) != 1 else 'is'} still at work, and only control can stop "
+                                  f"{'them' if len(working) != 1 else 'it'} from here. Stop {'them' if len(working) != 1 else 'it'} first, then switch this off.")
+            before = switches.saved(self.data).get(name)
+            try:
+                switches.save(name, on, self.data)
+            except (OSError, ValueError) as error:
+                raise Refused(f"The switch couldn't be kept in data/serve.json: {error}")
+            if server is None:
+                return None
+            try:
+                if name == "brain" and on and server.brain is None:
+                    server.brain = self.make_brain(server.control)
+                if name == "control" and on and self.kept is None:
+                    self.kept = server.control or Control()
+            except (ValueError, OSError) as error:
+                try:  # kept off, so a brain that can't start here doesn't stay "on" with no way to switch it off
+                    switches.save(name, False, self.data) if name == "brain" else switches.restore(name, before, self.data)
+                except OSError:
+                    pass
+                raise Refused(f"{'The brain' if name == 'brain' else 'Control'} can't start: {error}")
+            if name == "brain" and not on and server.brain is not None:
+                gone, server.brain = server.brain, None
+                gone.close()
+            if name == "control":
+                server.control = self.kept if on else None
+                if not on and self.kept is not None:
+                    try:  # nobody can answer here now: a waiting request goes back to the agent's own window at once
+                        os.remove(self.kept.box.path("watched"))
+                    except OSError:
+                        pass
+                if server.brain is not None:
+                    server.brain.control = server.control  # the assistant passes things on only while control is on
+            return None
+
+
 class Server(http.server.ThreadingHTTPServer):
     request_queue_size = 128  # one page load asks for about 25 files at once
     lan = False
@@ -585,6 +726,7 @@ class Server(http.server.ThreadingHTTPServer):
     control = None  # connect/control.py's Control, with --control
     brain = None  # connect/brain.py's Brain, with --brain
     remote = None  # connect/remote.py's Remote, with --remote
+    board = None  # the switches as this start has them (Switchboard)
     drawn = False  # --drawn: the page opens in the drawn look, and nothing is downloaded
     fetched = None  # why the photo-real pictures couldn't be downloaded at the start, if they couldn't
 
@@ -613,11 +755,11 @@ def saved():
     return got if isinstance(got, dict) else {}
 
 
-def control_wanted(args, away):
-    """(whether control is on, whether you chose it in setup): --control, or your choice in data/serve.json
-    unless --no-control, and never on the network (away is --lan or --share, or None)."""
-    chose = saved().get("control") is True and not args.no_control
-    return bool(args.control or (chose and not away)), chose
+def control_wanted(args, away, board=None):
+    """(whether control is on, whether you chose it in setup or on the Company page): --control, or your choice in
+    data/serve.json unless --no-control, and never on the network (away is --lan or --share, or None)."""
+    board = board or Switchboard(args, away)
+    return board.on("control"), saved().get("control") is True and not args.no_control
 
 
 def answers(port, wait=0.5):
@@ -744,7 +886,7 @@ def every_minute(name, when=None):
             if when is None or when():
                 subprocess.run([sys.executable, runner], cwd=ROOT, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
                                stderr=subprocess.DEVNULL, timeout=60)
-        except (OSError, subprocess.SubprocessError):
+        except Exception:  # whatever went wrong, it tries again next minute
             pass
         time.sleep(60 - time.time() % 60 + 1)  # just after each minute begins
 
@@ -968,16 +1110,24 @@ def main():
     if args.set_up_voice:
         from voice import install
         sys.exit(install.main([]))
-    control_on, chose = control_wanted(args, away)
+    def make_brain(control):
+        return Brain(tell=lambda why: print(f"The brain had no answer: {why}", file=sys.stderr, flush=True), control=control)
+
+    board = Switchboard(args, away, make_brain)  # the Company page's switches, and the words given here (connect/switches.py)
+    control_on, chose = control_wanted(args, away, board)
     try:
         remote = Remote(args.remote, os.path.join(ROOT, "data")) if args.remote else None
     except ValueError as error:
         sys.exit(str(error))
     control = Control() if control_on else None
-    try:
-        brain = Brain(tell=lambda why: print(f"The brain had no answer: {why}", file=sys.stderr, flush=True), control=control) if args.brain else None
-    except ValueError as error:
-        sys.exit(str(error))
+    brain = brain_trouble = None
+    if board.on("brain"):
+        try:
+            brain = make_brain(control)
+        except ValueError as error:
+            if args.brain:
+                sys.exit(str(error))
+            brain_trouble = str(error)  # switched on on the Company page, but it can't start here now
     where = ("0.0.0.0" if args.lan or args.share else "127.0.0.1", args.port)
     login_copy = os.environ.get("ARNHEIM_ALWAYS") == "1"  # the copy that starts at login (connect/always.py)
     server = None
@@ -1003,6 +1153,8 @@ def main():
     server.share = share_key(new=args.new_link) if args.share else None
     server.control = control
     server.brain = brain
+    server.board = board
+    board.server, board.kept = server, control
     server.drawn = args.drawn
     try:
         looks = pictures_at_start(args.drawn, lambda line: print(line, flush=True))
@@ -1026,9 +1178,11 @@ def main():
     if control_on:
         print("Control is on: the page on this computer can talk to your Claude Code and Codex agents, answer their "
               "permission requests, and start and stop them (docs/connect.md)."
-              + ("" if args.control else " You chose it in setup (data/serve.json); --no-control leaves it off."), flush=True)
+              + ("" if args.control else " Switch it off on the Company page, or start with --no-control for once."), flush=True)
     elif chose and away:
         print(f"Control stays off with {away}: it works only on this computer.", flush=True)
+    if brain_trouble:
+        print(f"The brain is switched on, but can't start: {brain_trouble}", flush=True)
     if brain:
         print(f"The brain is on: the receptionist and your assistant answer with Claude ({brain.model}), through "
               "your own Claude Code and on your own Claude plan. What you ask them goes to Claude with the "
@@ -1046,19 +1200,21 @@ def main():
               "founder's notes. It stays the same each time; python3 serve.py --share --new-link makes a new one and ends this one.", flush=True)
     for line in company_note():
         print(line, flush=True)
-    if not args.no_git:  # each floor's unsaved changes and open pull requests, once there are floors with folders
-        threading.Thread(target=every_minute, args=("projects.py", floors_have_folders), daemon=True).start()
-        if floors_have_folders():
-            print("Looking at your floors' folders every minute for unsaved changes and open pull requests "
-                  "(connect/projects.py). --no-git leaves it off.", flush=True)
-    if args.routines:
-        threading.Thread(target=every_minute, args=("routines.py",), daemon=True).start()
+    # The minute jobs run while their switch is on, and look again each minute, so the Company page's switches work at once.
+    threading.Thread(target=every_minute, args=("projects.py", lambda: board.on("git") and floors_have_folders()), daemon=True).start()
+    threading.Thread(target=every_minute, args=("routines.py", lambda: board.on("routines")), daemon=True).start()
+    threading.Thread(target=every_minute, args=("ping.py", lambda: board.on("pings")), daemon=True).start()
+    if board.on("git") and floors_have_folders():
+        print("Looking at your floors' folders every minute for unsaved changes and open pull requests "
+              "(connect/projects.py).", flush=True)
+    if board.on("routines"):
         print("Routines are on: each floor's routines in data/company.json run when they are due, while this runs "
               "(docs/connect.md, \"Routines\").", flush=True)
-    if args.pings:
-        threading.Thread(target=every_minute, args=("ping.py",), daemon=True).start()
+    if board.on("pings"):
         print("Pings are on: the morning brief, and decisions that wait on you, go to your phone at the times "
               "\"pings\" in data/company.json gives (docs/connect.md).", flush=True)
+    if os.path.isfile(os.path.join(ROOT, "data", "company.json")):  # your own company: the made-up one has no Switches
+        print("Each feature can be switched on or off on the Company page, under Switches.", flush=True)
     print("Ctrl-C stops it.", flush=True)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # stopped by its process id: tidy up as for Ctrl-C
     try:
@@ -1067,8 +1223,8 @@ def main():
         pass
     finally:
         server.server_close()
-        if brain:
-            brain.close()
+        for running in {id(b): b for b in (brain, server.brain) if b is not None}.values():  # one switched on from the page too
+            running.close()
 
 
 if __name__ == "__main__":

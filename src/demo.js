@@ -954,7 +954,7 @@ function floorAgents(floor) {
   ];
 }
 const momentsOn = (floor) => [...yesterday.moments, ...history].filter((m) => m && m.project === floor.project);
-const notConnected = () => (fromAway() && phoneMe?.phone ? phoneControlOff : "I can't do that here: this building isn't connected to your agents. Start it with serve.py --control.");
+const notConnected = () => (fromAway() && phoneMe?.phone ? phoneControlOff : "I can't do that here: this building isn't connected to your agents. On your own company's Company page, switch on Answer agents from the building, under Switches, or start Arnheim with serve.py --control.");
 
 // A permission answered by voice, once it was read back.
 function answerSaid(act) {
@@ -1055,13 +1055,71 @@ function leadCard(floor) {
 // Using it from a phone (serve.py --remote): how, and the phones paired with it. Filled in by remote below.
 function phoneCard() { return remoteCard(); }
 
-// The switches on the Company page, where Talk can always be switched back on.
+// Every feature, on or off, on this computer's own page (serve.py's /switches, connect/switches.py): kept for every
+// start in data/serve.json. A word serve.py started with holds its switch for that start. Elsewhere (the made-up
+// company, a phone) only the talking switches show, which are this device's own (features.js).
+let switchBoard = null; // { token, switches: [{ name, group, label, about, on, set_by }] }
+let switchNote = '';
+async function readSwitches() {
+  if (dir !== 'data' || madeUp() || fromAway()) return null;
+  try {
+    const r = await fetch('switches', { cache: 'no-store', credentials: 'same-origin' });
+    switchBoard = r.ok ? await r.json() : null;
+  } catch { switchBoard = null; }
+  return switchBoard;
+}
+async function flip(name, on, again = false) {
+  let data = {};
+  let ok = false;
+  try {
+    const r = await fetch('switches', {
+      method: 'POST', cache: 'no-store', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-Arnheim-Switches': switchBoard?.token || '' },
+      body: JSON.stringify({ name, on }),
+    });
+    if (r.status === 403 && !again && await readSwitches()) return flip(name, on, true); // Arnheim started again: a new token
+    data = await r.json().catch(() => ({}));
+    ok = r.ok;
+  } catch { data = { error: 'Arnheim didn\'t answer. Is it still running?' }; }
+  if (Array.isArray(data.switches)) switchBoard = { token: data.token || switchBoard?.token, switches: data.switches };
+  switchNote = ok ? data.note || '' : data.error || 'That switch didn\'t change.';
+  if (ok && name === 'control') control.restart();
+  if (ok && name === 'brain') brain.recheck().then(() => render());
+  render();
+}
+// Whether a switch is on, as this computer's page last heard; `otherwise` where there are none (HQ, a phone).
+const switchOn = (name, otherwise = true) => {
+  const s = switchBoard?.switches?.find((x) => x.name === name);
+  return s ? !!s.on : otherwise;
+};
+const SWITCH_GROUPS = [['agents', 'Your agents'], ['running', 'While Arnheim runs'], ['page', 'On this page']];
+function switchRow(s) {
+  return h('li', h('label.switch',
+    h('input', { type: 'checkbox', checked: !!s.on, disabled: !!s.set_by, onchange: (event) => flip(s.name, event.currentTarget.checked) }),
+    h('span', h('b', s.label), h('span.small.muted', s.about),
+      s.set_by && h('span.small', ` Set by ${s.set_by} for this start.`))));
+}
+const talkRows = () => FEATURES.map((f) => h('li', h('label.switch',
+  h('input', { type: 'checkbox', checked: features.get(f.id), onchange: (event) => features.set(f.id, event.currentTarget.checked) }),
+  h('span', h('b', f.label), h('span.small.muted', f.about)))));
+function switchesCard() {
+  const rows = switchBoard?.switches;
+  if (!Array.isArray(rows)) return talkingCard();
+  return h('section.panel-card.talking-card.switches-card',
+    sectHead('sliders-horizontal', 'Switches'),
+    h('p.small.muted', 'Each feature on or off, at once and for every start (data/serve.json). The talking ones are this device\'s own.'),
+    switchNote && h('p.small.note', { role: 'status' }, switchNote),
+    ...SWITCH_GROUPS.flatMap(([group, label]) => [h('h4.switch-group', label), h('ul.switch-list', rows.filter((s) => s.group === group).map(switchRow))]),
+    h('h4.switch-group', 'Talking, on this device'),
+    h('ul.switch-list', talkRows()),
+    phoneCard());
+}
+
+// The talking switches alone, where Talk can always be switched back on.
 function talkingCard() {
   return h('section.panel-card.talking-card',
     sectHead('mic', 'Talking'),
-    h('ul.switch-list', FEATURES.map((f) => h('li', h('label.switch',
-      h('input', { type: 'checkbox', checked: features.get(f.id), onchange: (event) => features.set(f.id, event.currentTarget.checked) }),
-      h('span', h('b', f.label), h('span.small.muted', f.about)))))),
+    h('ul.switch-list', talkRows()),
     phoneCard());
 }
 
@@ -1082,7 +1140,7 @@ const remotePost = (name, body = {}) => fetch(`remote/${name}`, {
   headers: { 'Content-Type': 'application/json', 'X-Arnheim-Remote': '1' }, body: JSON.stringify(body),
 }).then((r) => r.json());
 const remoteRedraw = () => readRemote().then(() => { render(); dock?.refresh(); });
-const phoneControlOff = 'Answering and instructing agents from this phone is off. Switch it on for this phone on your computer, on the Company page under Talking.';
+const phoneControlOff = 'Answering and instructing agents from this phone is off. Switch it on for this phone on your computer, on the Company page under Switches.';
 
 function remoteCard() {
   if (fromAway()) {
@@ -1299,7 +1357,7 @@ function sayUsage() {
 }
 function usageCard() {
   const list = forecastNow();
-  if (!list.length) return null;
+  if (!list.length || !switchOn('forecast')) return null;
   const urgent = pressing(list);
   const top = urgent ? busiestFloor() : null;
   return h(`section.panel-card.usage${urgent ? '.pressing' : ''}`,
@@ -1736,7 +1794,7 @@ function viewCompany() {
       org.mission && h('p.mission', h('span.muted', 'Mission: '), org.mission),
       org.about && h('p', org.about),
       h('ul.floor-list', floors().map(floorCard)),
-      talkingCard(),
+      switchesCard(),
       memoryCard(),
       alwaysCard(),
     ],
@@ -1751,6 +1809,7 @@ function alwaysCard() {
   return h('section.panel-card.always',
     sectHead('shield-check', 'Always allowed'),
     h('p.small.muted', 'Exact commands your agents run on a floor without asking you, for Claude Code and Codex alike. Only plain test, check and build commands, and ones that only look, can be here.'),
+    !switchOn('always') && h('p.small.note', 'Always allow is switched off under Switches: each of these asks again until it is back on.'),
     rows.length ? h('ul.list', rows.map((r) => h('li', h('div.row.memory-row', dot('quiet'),
       h('span.row-main', h('span.row-title', h('code', String(r.what || '').replace(/^Bash: /, ''))),
         h('span.row-sub', [floorOf(r.project)?.label || r.project, `since ${when(r.at)}`, r.used ? `used ${r.used} time${r.used === 1 ? '' : 's'}` : 'not used yet'].join(' · '))),
@@ -1777,13 +1836,14 @@ function memoryCard() {
     h('p.small.muted', dir === 'data'
       ? 'Decisions you asked the building to remember. Every Claude Code and Codex agent in the company\'s folders hears them as it starts, and one at work hears new ones with your next message.'
       : 'Decisions the building remembers. With your own company, every Claude Code agent hears them as it starts. These are made up.'),
+    !switchOn('memory') && h('p.small.note', 'The company\'s memory is switched off under Switches: no agent is told these until it is back on.'),
     rows.length ? h('ul.list', rows.map((r) => h('li', h('div.row.memory-row', dot('quiet'), h('span.row-main', h('span.row-title', r.text)),
       (memoryWrites() || mineMemory.includes(r)) && btn('Forget', () => forgetIt(r))))))
       : empty('Nothing yet. Tell the receptionist "remember that ...".'),
     canAdd ? h('form.control-say', { onsubmit: add },
       h('input', { name: 'text', type: 'text', maxlength: 300, autocomplete: 'off', placeholder: 'We never push on a Friday', 'aria-label': 'Something every agent should be told' }),
       h('button.btn', { type: 'submit' }, 'Remember'))
-      : h('p.small.muted', 'To add from here, start Arnheim with --control. Or edit data/memory.json.'),
+      : h('p.small.muted', 'To add from here, switch on Answer agents from the building, under Switches. Or edit data/memory.json.'),
     noteOnce());
 }
 
@@ -2016,13 +2076,16 @@ function render({ nav = false } = {}) {
   focusNow = null; // viewOverview sets it again when it is the view showing
   const panel = $('content');
   const active = document.activeElement;
-  // Never redraw under someone's typing: wait until they leave the box.
-  if (!nav && panel.contains(active) && active.matches('input, select, textarea')) {
+  // Never redraw under someone's typing: wait until they leave the box. A switch isn't typing: it redraws at once,
+  // and keeps its focus, so the keyboard can go on down the list.
+  const ticked = panel.contains(active) && active.matches('input[type=checkbox]');
+  if (!nav && panel.contains(active) && active.matches('input, select, textarea') && !ticked) {
     pending = true;
     return;
   }
   pending = false;
   const focusHref = !nav && panel.contains(active) ? active.getAttribute('href') : null;
+  const focusSwitch = !nav && ticked ? active.closest('label')?.querySelector('b')?.textContent : null;
   const scroll = panel.scrollTop;
   const view = viewFor(route);
   renderCrumbs(view.crumbs || []);
@@ -2035,6 +2098,7 @@ function render({ nav = false } = {}) {
   } else {
     panel.scrollTop = scroll;
     if (focusHref) [...panel.querySelectorAll('a')].find((a) => a.getAttribute('href') === focusHref)?.focus({ preventScroll: true });
+    if (focusSwitch) [...panel.querySelectorAll('label.switch')].find((l) => l.querySelector('b')?.textContent === focusSwitch)?.querySelector('input')?.focus({ preventScroll: true });
   }
 }
 
@@ -2755,6 +2819,7 @@ async function boot() {
       refresh();
     });
     control.start();
+    readSwitches().then((got) => { if (got) render(); });
   }
 }
 

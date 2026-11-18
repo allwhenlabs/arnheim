@@ -175,7 +175,7 @@ back from your speakers, held for about a word, so their own voice (soft or loud
 stop them. If a noisy room does, switch it off.
 
 Each of these is a switch, in the panel (the sliders button) and on the Company page under
-Talking: talk from any screen, a lead on each floor, answering requests by voice, leads reporting
+Switches: talk from any screen, a lead on each floor, answering requests by voice, leads reporting
 back, and cutting in by talking. They're kept in that browser. A company can set its own starting point in `company.json`, such as `"features":
 { "leads": false }`.
 
@@ -279,13 +279,21 @@ Deny and messages (control, below). Then it offers to start Arnheim at once and 
 Each Claude Code or Codex conversation in those folders shows on its project's floor: someone sits while it works, the floor turns amber when it needs your permission or
 an answer, and a blue light shows when it is your turn. `serve.py` also looks in each floor's folder
 every minute, for changes not yet committed and, with GitHub's `gh` signed in, open pull requests
-(`--no-git` leaves that off). [docs/connect.md](docs/connect.md) does each step by hand instead,
+(switch it off under Switches, below). [docs/connect.md](docs/connect.md) does each step by hand instead,
 and says what each piece does.
 
-With control on (say yes in the setup, or start Arnheim with `python3 serve.py --control`), you can
+With control on (say yes in the setup, switch it on under Switches, or start Arnheim with `python3 serve.py --control`), you can
 talk to your agents from the building for real, answer their permission requests with Allow or Deny,
 stop them, and start new ones on a project, by typing or out loud. It answers only the page on your
 computer ([docs/connect.md](docs/connect.md), step 4). With it off, a request shows where to answer it.
+
+Every feature can be switched on or off on the Company page, under **Switches**: answering your
+agents from the building, hand-overs, the company's memory, how-tos, Always allow, proving the work,
+the review line, the budget brake, restore points, warnings when two agents change one file, the
+receptionist thinking with Claude, routines, pings, looking in project folders, and the Your plan card.
+A change works at once and holds for every start (`data/serve.json`). A word given to `serve.py` as it
+starts, such as `--routines`, holds its switch for that start. Phones, the network and starting at
+login stay in the terminal (`--remote`, `--lan`, `--share`, `--always`) ([docs/connect.md](docs/connect.md), step 20).
 
 Fourteen things no single agent can do for itself:
 
@@ -355,8 +363,8 @@ own Claude plan: Sonnet, unless `ARNHEIM_BRAIN_MODEL` names another, such as `ha
 facts and what you say to them go to Claude, through your Claude Code, and nothing is kept on disk.
 Greetings, refusals and "remind me to ..." stay with the building's own rules, and they still never
 merge, publish, run jobs or sign in. With `--control` too, your assistant can pass a clear
-instruction of yours on to an agent at work, and an agent at work takes one for its own work. It is off unless you switch it on: start Arnheim again
-without `--brain` and it is off, with nothing to undo. It never works with `--lan`
+instruction of yours on to an agent at work, and an agent at work takes one for its own work. It is off unless you switch it on, under Switches on
+the Company page or with `--brain`, and off again the same way, with nothing to undo. It never works with `--lan`
 ([docs/brain.md](docs/brain.md)).
 
 ## Voice

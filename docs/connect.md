@@ -75,7 +75,7 @@ folder goes back to the made-up company.
 
 It asks one more thing: whether you want to answer your agents from the building (step 4). Your
 answer is kept in `data/serve.json`, so `serve.py` starts with control on, or off, without being
-told; `python3 serve.py --no-control` leaves it off once. Last, on a Mac or Linux, it offers to start
+told; the Company page's Switches change it (step 20), and `python3 serve.py --no-control` leaves it off once. Last, on a Mac or Linux, it offers to start
 Arnheim now and each time you log in, so it keeps running when you close the window: that is
 `python3 serve.py --always`, and `python3 serve.py --always off` takes it out again.
 
@@ -634,6 +634,31 @@ with whether the floor's check (step 5) passed after each, and asked to look bef
 the others said is quoted as information, never as instructions, and a conversation is never handed
 its own work back.
 
+## 20. Switches: every feature on or off
+
+The Company page's **Switches** turn each feature on or off, at once and for every start. They are
+only on the page on the computer that runs `serve.py`, never on a phone or another computer, and a
+change needs that page's own token.
+
+- **Your agents:** answering them from the building (step 4), hand-overs (step 19), the company's
+  memory (step 6), how-tos (step 17), Always allow (step 4), proving the work (step 5), the review line
+  (step 12), the budget brake (step 7), restore points (step 16), and the warning when two agents
+  change one file (step 10). The hooks read them at each event, so a new setting holds from the agent's
+  next step. Off keeps what was there: the memory, the standing allows and the budgets wait until
+  their switch is on again.
+- **While Arnheim runs:** the receptionist and your assistant thinking with Claude (`--brain`),
+  routines (`--routines`, step 13), pings (`--pings`, step 15), and looking in project folders
+  (`--no-git` turns it off, step 3).
+- **On this page:** the Your plan card (step 18), and the talking switches, which are each
+  browser's own.
+
+They are kept in `data/serve.json`, beside setup's answer about control, as `true` or `false`, such as
+`{ "control": true, "handovers": false }`; a switch not there is at its usual setting. A word given to
+`serve.py` as it starts (`--control`, `--no-control`, `--brain`, `--routines`, `--pings`, `--no-git`)
+holds its switch for that start, and the page shows it as set by that word. With `--lan` or `--share`,
+control and the brain stay off. Phones (`--remote`), the network (`--lan`, `--share`) and starting at
+login (`--always`) are only ever in the terminal.
+
 ## What is kept, and where
 
 `connect/setup.py` keeps a copy of each file before it changes it: `data/backups/company.before-arnheim-<when>.json`
@@ -661,8 +686,8 @@ under `refs/arnheim/restore/`.
 The usage forecast keeps `data/feeds/usage.json`: the limits' readings, twelve hours back. Hand-overs
 keep `data/control/handover.json`: a few pieces of finished work for each floor, three days back.
 Always allow keeps `data/control/allowed.json`, what you allowed two weeks back, and
-`data/control/always.json`, the commands you allow for good. Setup keeps your answer about control in
-`data/serve.json`.
+`data/control/always.json`, the commands you allow for good. `data/serve.json` keeps the switches (step 20),
+setup's answer about control among them.
 
 With control on, your messages wait in `data/control/` until Claude takes them, a permission
 request and its answer are deleted once it is answered, and each agent started from the building

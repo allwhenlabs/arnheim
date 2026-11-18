@@ -71,6 +71,8 @@ export function createControl({ base = BASE, headers = () => ({}), every = 3000,
   return {
     start() { if (!running) { running = true; poll(); } return this; },
     stop() { running = false; clearTimeout(timer); },
+    // After control was switched on or off (the Company page's Switches): ask the server afresh.
+    restart() { running = false; clearTimeout(timer); token = null; set(OFF); running = true; poll(); return this; },
     get on() { return !!state.on; },
     state: () => state,
     watch(fn) { watchers.add(fn); return () => watchers.delete(fn); },

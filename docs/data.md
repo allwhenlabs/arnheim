@@ -193,9 +193,9 @@ from when the page opened, the percent used, and seconds until the limit starts 
 company's readings come from Claude Code and Codex, in `data/feeds/usage.json`, and `usage` in
 `data/work.json` is ignored.
 
-`data/serve.json` isn't the company's: it keeps what you told `connect/setup.py` about starting
-Arnheim, `{ "control": true }` or `false`, so `serve.py` starts with control on, or off, without being
-told.
+`data/serve.json` isn't the company's: it keeps the Company page's switches, each `true` or `false`,
+such as `{ "control": true, "handovers": false }`, with what you told `connect/setup.py` about control
+among them ([connect.md](connect.md), step 20).
 
 ### How-tos
 

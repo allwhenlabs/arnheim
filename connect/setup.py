@@ -839,8 +839,9 @@ def setup(args):
         return 0
     print("This will:")
     if company and new:
-        print(f"  - write {shown(company_path)}: a building called \"{company['company']}\" with a floor for each of "
-              f"these {len(added)} projects, and a receptionist, Iris, at the front desk")
+        floors = "a floor for this project" if len(added) == 1 else f"a floor for each of these {len(added)} projects"
+        print(f"  - write {shown(company_path)}: a building called \"{company['company']}\" with {floors}, "
+              "and a receptionist, Iris, at the front desk")
     elif company and added:
         print(f"  - add {len(added)} floor{'s' if len(added) != 1 else ''} to {shown(company_path)}, after keeping a copy in data/backups/")
     elif company:
@@ -872,6 +873,8 @@ def setup(args):
         raise Refused("Stopped before changing anything.")
 
     print()
+    if serve_choice:  # read again: the Company page may have changed a switch while you were deciding
+        serve_choice = plan_saved(serve_choice["control"])
     changes = ([(company_path, company)] if company else []) + ([(settings_file, new_settings)] if new_settings else []) \
         + ([(codex_file, new_codex)] if new_codex else []) + ([(serve_file, serve_choice)] if serve_choice else [])
     copies = {}

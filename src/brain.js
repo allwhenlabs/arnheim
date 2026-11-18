@@ -62,6 +62,8 @@ export function createBrain({ base = BASE, headers = () => ({}) } = {}) {
 
   return {
     check,
+    // After the brain was switched on or off (the Company page's Switches): ask the server afresh.
+    recheck() { asked = null; return check(); },
     get on() { return !!status.on; },
     get model() { return status.model || null; },
     // Reads them the facts before they are asked anything, so the first answer comes sooner.

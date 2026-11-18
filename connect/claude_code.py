@@ -67,6 +67,7 @@ import restore  # noqa: E402  (beside this file: restore points before an agent 
 import standing  # noqa: E402  (beside this file: commands you allow for good)
 import usage  # noqa: E402  (beside this file: your plan's limits, for the forecast)
 import handover  # noqa: E402  (beside this file: finished work, handed to the next agent on a floor)
+import switches  # noqa: E402  (beside this file: each feature on or off, data/serve.json)
 
 DATA = os.environ.get("ARNHEIM_DATA") or os.path.join(os.path.dirname(HERE), "data")
 FEED = os.path.join(DATA, "feeds", "claude-code.json")
@@ -394,6 +395,8 @@ def update(event, extra=None):
 def hand_on(talk, project):
     """As a turn ends that changed files since your last message: a few lines of it, for the next agent to start
     on its floor (connect/handover.py)."""
+    if not switches.on("handovers", DATA):
+        return
     try:
         since = float(talk.get("asked_at") or 0)
         if not talk.get("changed") or float(talk["changed"]) < since:
@@ -407,7 +410,7 @@ def hand_on(talk, project):
 
 def handed(event):
     """What a conversation starting afresh is handed of the others' finished work on its floor, or None."""
-    if event.get("source") not in (None, "startup", "clear"):
+    if event.get("source") not in (None, "startup", "clear") or not switches.on("handovers", DATA):
         return None
     project = floor_of(event)
     if not project:
@@ -538,11 +541,13 @@ def weigh(event, talk, talks, tasks, project, extra, verdict, ended=None):
             per_day = budget.budget_of(json.load(handle), project)
     except (OSError, ValueError):
         per_day = None
+    if not switches.on("budget", DATA):
+        per_day = None  # the brake is switched off: nothing stops for a budget, nor asks
     limit = per_day * (1 + box.allowances(day).get(project, 0)) if per_day else None
     used = budget.spent_today(talks, project, day, ended)
     if not limit or used < limit:
         tasks[:] = [t for t in tasks if t.get("id") != tid]  # under budget again: nothing to ask
-    if name == "PostToolUse" and event.get("tool_name") in CHANGES:
+    if name == "PostToolUse" and event.get("tool_name") in CHANGES and switches.on("clash", DATA):
         others = clash(talk, talks, project, time.time(), [inside(p, event.get("cwd")) for p in changed_paths(event)])
         if others:
             who = ", ".join(f'"{title}"' for title, _ in others[:3])
@@ -579,6 +584,8 @@ def due(talk):
 def prove(event):
     """As a turn ends: if the conversation changed files since its floor's check last ran, starts the
     check in the background (connect/prove.py). Claude Code doesn't wait for it."""
+    if not switches.on("checks", DATA):
+        return
     try:
         talk = next((c for c in read_feed().get("conversations") or [] if isinstance(c, dict) and c.get("id") == key_of(event)), None)
         if talk and due(talk) and control.check_for(talk.get("project"), DATA):
@@ -606,7 +613,7 @@ def restore_point(event):
     tool = event.get("tool_name")
     given = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
     bulk = tool == "Bash" and restore.risky(given.get("command"))
-    if tool not in CHANGES and not bulk:
+    if (tool not in CHANGES and not bulk) or not switches.on("restore", DATA):
         return None
     project = project_for(event.get("cwd"))
     if not project:
@@ -634,6 +641,8 @@ def review(event):
     """As a turn ends on a floor with a review line (connect/review.py): holds it while the floor's check and
     the reader look at what changed. What Claude Code hears back: the work sent back with the reason, or None,
     when it passed, failed as often as allowed (it reaches you anyway), or the floor has no line."""
+    if not switches.on("review", DATA):
+        return None
     try:
         import review as line  # noqa: E402  (beside this file; only when a turn ends)
         talk = next((c for c in read_feed().get("conversations") or [] if isinstance(c, dict) and c.get("id") == key_of(event)), None)
@@ -711,7 +720,7 @@ def remembered(event, name):
     """The company's memory to hand this conversation now, as (words, when), or None: all of it as a
     conversation in the company's folders starts (or starts again after its context was compacted), and
     what was decided since it was last told when you send it a message."""
-    if name not in ("SessionStart", "UserPromptSubmit"):
+    if name not in ("SessionStart", "UserPromptSubmit") or not switches.on("memory", DATA):
         return None
     rows = control.memory(DATA)
     if not rows:
@@ -740,7 +749,7 @@ def shelf(event):
     """The company's how-tos for this conversation's floor, and those for every floor, as an agent is handed them
     as it starts: each title with its file, to read before work it covers. None if there are none."""
     project = project_for(event.get("cwd"))
-    if not project:
+    if not project or not switches.on("howtos", DATA):
         return None
     try:
         with open(os.path.join(DATA, "company.json"), encoding="utf-8-sig") as handle:
@@ -791,8 +800,9 @@ def respond(event):
         what = control.describe(tool, event.get("tool_input"))
         project = floor_of(event)
         command = standing.command_in(tool, event.get("tool_input"))  # the exact words it would run, if a plain command
+        always = switches.on("always", DATA)  # off: every request asks, and the standing allows are kept
         try:
-            standing_allow = standing.allows(DATA, project, tool, command)
+            standing_allow = standing.allows(DATA, project, tool, command) if always else None
         except Exception as error:  # a standing allow that can't be read never allows anything
             note(error)
             standing_allow = None
@@ -806,7 +816,7 @@ def respond(event):
         keep(event, {"asking": what})
         try:
             more = {"project": project, "before": standing.times(DATA, project, tool, command),
-                    "standable": standing.can_stand(tool, command), "command": command}
+                    "standable": always and standing.can_stand(tool, command), "command": command}
         except Exception as error:
             note(error)
             more = {"project": project}

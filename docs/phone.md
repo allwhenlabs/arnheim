@@ -33,7 +33,7 @@ through one looks to Arnheim as if it came from this computer itself, with every
    python3 serve.py --remote my-mac.your-tailnet.ts.net --control --brain
    ```
 
-5. **Pair your phone.** On this computer, open the Company page, find Talking, and press **Pair a
+5. **Pair your phone.** On this computer, open the Company page, find Switches (Talking, with the made-up company), and press **Pair a
    phone**. On your phone, open the https address and type the code it shows. The code works once,
    for five minutes.
 6. **Talk.** On the phone, tap **Talk**, then **Voice**. Phones put sound to sleep when the screen
@@ -43,7 +43,7 @@ through one looks to Arnheim as if it came from this computer itself, with every
 
 - Everything the page shows, the walk included, and talk to everyone in the building, out loud or
   typed. The voice is your computer's (README, "Voice").
-- **Answer and instruct agents only while you let it.** On this computer, under Talking, each phone
+- **Answer and instruct agents only while you let it.** On this computer, under Switches on the Company page, each phone
   has **Control for 15 minutes**. Until you press it, the phone can ask and listen but can't allow,
   deny, stop or tell an agent anything, and the leads say so. **Stop control** ends it early.
 - Anything that may touch something private (a key, a login, a hidden file) is never answered by
@@ -74,7 +74,7 @@ place.
 
 ## Stop it
 
-- **One phone:** Remove, under Talking on this computer, or Unpair this phone on the phone itself.
+- **One phone:** Remove, under Switches on this computer's Company page, or Unpair this phone on the phone itself.
 - **Every phone:** start Arnheim without `--remote`. Phones you paired stay listed in `data/remote/`
   until you remove them or delete that folder.
 - **The way in:** `tailscale serve reset` on this computer.

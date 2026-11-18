@@ -31,7 +31,9 @@ stays free: it costs nothing more than your plan's own use.
 ## Switch it on
 
 You need Claude Code installed and signed in on the computer that runs `serve.py`: check that
-`claude` works in a terminal there. Then start Arnheim with `--brain`:
+`claude` works in a terminal there. Then, on your own company's Company page under Switches, tick
+**Receptionist and assistant think with Claude**. Or start Arnheim with `--brain`, which works with
+the made-up company too:
 
 ```bash
 python3 serve.py --brain
@@ -53,7 +55,9 @@ anything at all."
 
 ## Switch it off
 
-Stop Arnheim (Ctrl-C in its terminal) and start it again without `--brain`:
+On your own company's Company page, under Switches, untick **Receptionist and assistant think with Claude**. It
+stops at once and stays off each time Arnheim starts. If you started Arnheim with `--brain`, that
+holds it on for that start: stop Arnheim (Ctrl-C in its terminal) and start it again without `--brain`:
 
 ```bash
 python3 serve.py
