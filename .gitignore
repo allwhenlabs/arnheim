@@ -13,3 +13,6 @@ __pycache__/
 /baked/
 # what serve.py downloads them into before they are whole (serve.py, fetch_pictures)
 /.baked-*
+
+# The Mac app as mac/build.sh builds it
+/mac/build/
