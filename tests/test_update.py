@@ -32,8 +32,9 @@ SHA = "0123456789abcdef0123456789abcdef01234567"
 class Git:
     """Stands in for subprocess.run with git: answers by the words given, and records each command."""
 
-    def __init__(self, top=None, remote="https://github.com/allwhenlabs/arnheim.git", head=SHA, pull=(0, "Updating a..b\nFast-forward\n", "")):
-        self.top, self.remote, self.head, self.pull = top or serve.ROOT, remote, head, pull
+    def __init__(self, top=None, remote="https://github.com/allwhenlabs/arnheim.git", head=SHA, pull=(0, "Updating a..b\nFast-forward\n", ""),
+                 branch="main"):
+        self.top, self.remote, self.head, self.pull, self.branch = top or serve.ROOT, remote, head, pull, branch
         self.commands = []
 
     def __call__(self, command, **kwargs):
@@ -45,7 +46,9 @@ class Git:
             return subprocess.CompletedProcess(command, 0, f"origin\t{self.remote} (fetch)\norigin\t{self.remote} (push)\n", "")
         if words == ["rev-parse", "HEAD"]:
             return subprocess.CompletedProcess(command, 0, self.head + "\n", "")
-        if words == ["pull", "--ff-only"]:
+        if words == ["rev-parse", "--abbrev-ref", "HEAD"]:
+            return subprocess.CompletedProcess(command, 0, self.branch + "\n", "")
+        if words == ["pull", "--ff-only", "origin", "main"]:
             code, out, err = self.pull
             return subprocess.CompletedProcess(command, code, out, err)
         return subprocess.CompletedProcess(command, 1, "", "unknown")
@@ -168,9 +171,27 @@ class UpdateNowTest(unittest.TestCase):
         self.assertTrue(done)
         self.assertIn("starting again", words)
         command, kwargs = git.commands[-1]
-        self.assertEqual(command, ["git", "pull", "--ff-only"])
+        self.assertEqual(command, ["git", "pull", "--ff-only", "origin", "main"])  # Arnheim's own remote, its main
         self.assertEqual(kwargs["cwd"], serve.ROOT)
         self.assertEqual(kwargs["env"]["GIT_TERMINAL_PROMPT"], "0")
+        self.assertIn("BatchMode=yes", kwargs["env"]["GIT_SSH_COMMAND"])  # nor an ssh passphrase or host key
+
+    def test_a_partial_clone_is_still_arnheim(self):
+        git = Git()
+        plain = git.__call__
+
+        def partial(command, **kwargs):
+            if command[1:] == ["remote", "-v"]:
+                return subprocess.CompletedProcess(command, 0, f"origin\t{git.remote} (fetch) [blob:none]\norigin\t{git.remote} (push)\n", "")
+            return plain(command, **kwargs)
+        self.assertEqual(serve.arnheim_remotes(partial), ["origin"])
+
+    def test_your_own_ssh_command_is_kept(self):
+        git = Git()
+        with mock.patch.dict(os.environ, {"GIT_SSH_COMMAND": "ssh -i ~/.ssh/other"}):
+            serve.update_now(self.server(), run=git)
+        pulled = [kwargs for command, kwargs in git.commands if command[1:2] == ["pull"]]
+        self.assertEqual(pulled[0]["env"]["GIT_SSH_COMMAND"], "ssh -i ~/.ssh/other")
         self.assertEqual(serve.update_now(self.server(), run=Git(pull=(0, "Already up to date.\n", "")))[1], serve.UP_TO_DATE)
 
     def test_why_it_couldnt_in_words(self):
@@ -188,7 +209,51 @@ class UpdateNowTest(unittest.TestCase):
             raise FileNotFoundError(2, "No such file or directory")
         done, words = serve.update_now(self.server(), run=no_git)
         self.assertFalse(done)
-        self.assertIn("git pull", words)
+        self.assertIn("isn't a copy of Arnheim", words)
+
+    def test_only_arnheim_s_own_main_while_the_notice_shows(self):
+        git = Git()
+        done, words = serve.update_now(argparse.Namespace(control=None, update=None, brain=None), run=git)
+        self.assertFalse(done)
+        self.assertIn("no newer Arnheim", words)
+        self.assertEqual(git.commands, [])  # nothing run
+        for git, why in ((Git(branch="feature"), "main branch"), (Git(remote="https://github.com/someone/fork.git"), "isn't a copy"),
+                         (Git(remote="https://example.com/mirror/github.com/allwhenlabs/arnheim"), "isn't a copy"),
+                         (Git(top="/somewhere/else"), "isn't a copy")):
+            done, words = serve.update_now(self.server(), run=git)
+            self.assertFalse(done)
+            self.assertIn(why, words)
+            self.assertFalse(any(c[0][1:2] == ["pull"] for c in git.commands))  # never pulled
+
+    def test_the_restart_never_makes_a_new_view_only_link(self):
+        server = argparse.Namespace(brain=None)
+        with mock.patch.object(sys, "orig_argv", ["python3", "serve.py", "--share", "--new-link"], create=True), \
+                mock.patch.object(serve.os, "execv") as again, mock.patch.dict(os.environ, {}, clear=False):
+            serve.restart_self(server, wait=0)
+            self.assertEqual(again.call_args[0][1], ["python3", "serve.py", "--share"])
+            self.assertEqual(os.environ.get("ARNHEIM_UPDATED"), "1")
+
+    def test_after_update_now_new_pictures_replace_old_ones(self):
+        base = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, base, True)
+        baked = os.path.join(base, "baked")
+        os.makedirs(baked)
+        with open(os.path.join(baked, "old.jpg"), "w") as handle:
+            handle.write("old")
+        fetched = []
+
+        def fetch(say):
+            fetched.append(True)
+            return "no network in this test"
+        with mock.patch.object(serve, "BAKED", baked):
+            serve.pictures_at_start(False, lambda line: None, fetch=fetch)  # an ordinary start: left as it is
+            self.assertTrue(os.path.isdir(baked))
+            self.assertEqual(fetched, [])
+            with mock.patch.dict(os.environ, {"ARNHEIM_UPDATED": "1"}):
+                serve.pictures_at_start(False, lambda line: None, fetch=fetch)
+                self.assertNotIn("ARNHEIM_UPDATED", os.environ)
+            self.assertFalse(os.path.exists(os.path.join(baked, "old.jpg")))
+            self.assertEqual(fetched, [True])
 
     def test_not_while_agents_started_here_work(self):
         class Busy:

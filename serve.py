@@ -932,20 +932,52 @@ def setup_undo(data):
 
 # ---------- a newer Arnheim (the "Look for a newer Arnheim" switch) ----------
 
-UPSTREAM = re.compile(r"github\.com[:/]allwhenlabs/arnheim(?:\.git)?/?$", re.I)
+UPSTREAM = re.compile(r"^(?:https://(?:[^@/\s]+@)?|ssh://git@|git@)github\.com[:/]allwhenlabs/arnheim(?:\.git)?/?$", re.I)
 COMPARE = "https://api.github.com/repos/allwhenlabs/arnheim/compare/main...{}?per_page=1"
 UP_TO_DATE = "Arnheim is already up to date."
 NO_PROMPT = {"GIT_TERMINAL_PROMPT": "0"}  # git never stops to ask for a password
+
+
+def git_env(run=subprocess.run):
+    """The environment git pull runs in: it never stops to ask for a password, a passphrase or a host key, over HTTPS
+    or ssh. An ssh command you chose yourself (GIT_SSH_COMMAND, GIT_SSH or git's core.sshCommand) is kept as it is."""
+    env = {**os.environ, **NO_PROMPT}
+    if not env.get("GIT_SSH_COMMAND") and not env.get("GIT_SSH") and not git_says(["config", "--get", "core.sshCommand"], run):
+        env["GIT_SSH_COMMAND"] = "ssh -o BatchMode=yes"
+    return env
 
 
 def git_says(words, run=subprocess.run):
     """What git prints for a fixed list of words, run in this folder, or None when it can't say."""
     try:
         done = run(["git", *words], cwd=ROOT, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=30,
-                   env={**os.environ, **NO_PROMPT})
+                   env={**os.environ, **NO_PROMPT})  # only ever words that stay in this folder
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
     return done.stdout.strip() if done.returncode == 0 else None
+
+
+def upstream(run=subprocess.run):
+    """The name of the remote that is Arnheim's own repository on GitHub, when this folder is a checkout of it; else
+    None. Like local_head, it never runs git in a folder with no .git."""
+    if not os.path.lexists(os.path.join(ROOT, ".git")):
+        return None
+    top = git_says(["rev-parse", "--show-toplevel"], run)
+    if not top or not same_file(top, ROOT):
+        return None
+    names = arnheim_remotes(run)
+    return names[0] if names else None
+
+
+def arnheim_remotes(run=subprocess.run):
+    """The remotes that fetch from Arnheim's own repository on GitHub, by name (a plain name, never one like an option)."""
+    names = []
+    for line in (git_says(["remote", "-v"], run) or "").splitlines():
+        parts = line.split()
+        if (len(parts) >= 3 and parts[2] == "(fetch)" and UPSTREAM.search(parts[1])  # a partial clone adds [blob:none]
+                and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]*", parts[0])):
+            names.append(parts[0])
+    return names
 
 
 def local_head(run=subprocess.run):
@@ -957,8 +989,7 @@ def local_head(run=subprocess.run):
     top = git_says(["rev-parse", "--show-toplevel"], run)
     if not top or not same_file(top, ROOT):
         return None
-    remotes = git_says(["remote", "-v"], run) or ""
-    if not any(len(line.split()) >= 2 and UPSTREAM.search(line.split()[1]) for line in remotes.splitlines()):
+    if not arnheim_remotes(run):
         return None
     sha = git_says(["rev-parse", "HEAD"], run)
     return sha if sha and re.fullmatch(r"[0-9a-f]{40}", sha) else None
@@ -990,7 +1021,7 @@ def check_newer(server, board, last, ask=newer_arnheim, now=None, every=86400):
     now = time.time() if now is None else now
     if not board.on("updates"):
         server.update = None
-        return 0  # switched on again, it asks at once
+        return 0  # switched on again, it asks at its next round, within the hour
     if last and now - last < every:
         return last
     behind = ask()
@@ -1010,16 +1041,25 @@ def look_for_newer(server, board, every=3600):
 
 
 def update_now(server, run=subprocess.run):
-    """Update now: `git pull --ff-only` in this folder, the same words every time. Gives (whether it worked, what to say)."""
+    """Update now: `git pull --ff-only <Arnheim's own remote> main` in this folder, only on main and only while the
+    Overview's notice says GitHub has a newer one. Gives (whether it worked, what to say)."""
+    if not server.update:
+        return False, "There is no newer Arnheim to update to just now."
     control = server.control
     working = [r for r in list(control.runs.values()) if control.alive(r)] if control is not None else []
     if working:
         return False, (f"{len(working)} agent{'s' if len(working) != 1 else ''} started from the building "
                        f"{'are' if len(working) != 1 else 'is'} still at work, and Arnheim starts again to update. Update once "
                        f"{'they have' if len(working) != 1 else 'it has'} finished.")
+    remote = upstream(run)
+    if remote is None:
+        return False, "This folder isn't a copy of Arnheim from GitHub, so it can't update itself. Nothing was changed."
+    if git_says(["rev-parse", "--abbrev-ref", "HEAD"], run) != "main":
+        return False, ("This copy isn't on Arnheim's main branch, so Update now leaves it as it is. Nothing was changed. "
+                       "Update it by hand with git.")
     try:
-        done = run(["git", "pull", "--ff-only"], cwd=ROOT, stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=180,
-                   env={**os.environ, **NO_PROMPT})
+        done = run(["git", "pull", "--ff-only", remote, "main"], cwd=ROOT, stdin=subprocess.DEVNULL, capture_output=True,
+                   text=True, timeout=180, env=git_env(run))
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         return False, f"git couldn't run here ({getattr(error, 'strerror', None) or error}). Update by hand: git pull, in Arnheim's folder."
     said = f"{done.stdout or ''}\n{done.stderr or ''}"
@@ -1048,9 +1088,11 @@ def restart_self(server, wait=0.5):
         except Exception:
             pass
     os.environ["ARNHEIM_NO_BROWSER"] = "1"
+    os.environ["ARNHEIM_UPDATED"] = "1"  # the new start may replace pictures made for the old version
     sys.stdout.flush()
     sys.stderr.flush()
-    words = list(getattr(sys, "orig_argv", None) or [sys.executable, *sys.argv])
+    words = [w for w in (getattr(sys, "orig_argv", None) or [sys.executable, *sys.argv]) if w != "--new-link"]  # once only
+    # (main's parser takes no shortened words, so --new-link is only ever written in full)
     os.execv(sys.executable, words)
 
 
@@ -1370,9 +1412,13 @@ def pictures_at_start(drawn, say, fetch=None):
     """At the start: the photo-real look's pictures, downloaded if baked/ isn't there yet (never with --drawn).
     Returns why the page shows the drawn look, in one plain line, or None when it shows the photo-real look or
     --drawn asked for the drawn one."""
+    updated = os.environ.pop("ARNHEIM_UPDATED", None) == "1"  # never passed on to what this start runs
     if drawn:
         return None
     trouble = None
+    if updated and os.path.isdir(BAKED) and not os.path.islink(BAKED) and pictures_state() == ("drawn", WHY_OTHER):
+        say("This version of Arnheim has new pictures: replacing the old ones in baked/.")
+        shutil.rmtree(BAKED, ignore_errors=True)  # only after Update now, and only pictures made for another version
     if not os.path.lexists(BAKED):
         trouble = (fetch or fetch_pictures)(say)
         if trouble is None:
@@ -1384,7 +1430,7 @@ def pictures_at_start(drawn, say, fetch=None):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Shows Arnheim in a browser.")
+    parser = argparse.ArgumentParser(description="Shows Arnheim in a browser.", allow_abbrev=False)
     parser.add_argument("port", nargs="?", type=int, default=8740, help="the port to use (8740 if left out)")
     parser.add_argument("--lan", action="store_true", help="show it to phones and other computers on this network too")
     parser.add_argument("--share", action="store_true",

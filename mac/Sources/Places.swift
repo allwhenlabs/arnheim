@@ -66,16 +66,22 @@ enum Install {
     static func ensure(_ bundled: Bundled, _ places: Places) throws -> String? {
         let files = FileManager.default
         let app = places.app
+        // One install at a time: two copies of the app started together wait for each other here.
+        try files.createDirectory(at: app.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let lock = open(app.deletingLastPathComponent().appendingPathComponent(".install.lock").path, O_CREAT | O_RDWR, 0o644)
+        if lock >= 0 { flock(lock, LOCK_EX) }
+        defer { if lock >= 0 { flock(lock, LOCK_UN); close(lock) } }
         let stamp = app.appendingPathComponent(stampName)
         let serve = app.appendingPathComponent("serve.py")
         let had = files.fileExists(atPath: app.path)
         var oldTop: [String] = []
         if had, let data = try? Data(contentsOf: stamp),
            let info = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            if info["version"] as? String == bundled.version, files.fileExists(atPath: serve.path) {
-                return nil
+            if info["version"] as? String == bundled.version,
+               bundled.top.allSatisfy({ files.fileExists(atPath: app.appendingPathComponent($0).path) }) {
+                return nil  // this version, whole: nothing to do
             }
-            oldTop = info["top"] as? [String] ?? []
+            oldTop = (info["top"] as? [String] ?? []).filter(plainName)
         }
         try files.createDirectory(at: app, withIntermediateDirectories: true)
         // Pictures made for another version would show the drawn look with a note to delete them: do it here.
@@ -87,13 +93,13 @@ enum Install {
             try files.removeItem(at: baked)
             note = " The pictures were for the old version, so serve.py downloads the new ones."
         }
-        for name in Set(oldTop).union(bundled.top).subtracting(kept) {
+        for name in Set(oldTop).union(bundled.top.filter(plainName)) {
             let old = app.appendingPathComponent(name)
             if files.fileExists(atPath: old.path) || (try? files.destinationOfSymbolicLink(atPath: old.path)) != nil {
                 try files.removeItem(at: old)
             }
         }
-        for name in bundled.top where !kept.contains(name) {
+        for name in bundled.top where plainName(name) {
             try files.copyItem(at: bundled.folder.appendingPathComponent(name), to: app.appendingPathComponent(name))
         }
         let info: [String: Any] = ["version": bundled.version, "commit": bundled.commit, "top": bundled.top]
@@ -101,6 +107,13 @@ enum Install {
         return had
             ? "Updated Arnheim's files to \(bundled.commit), keeping data/, baked/ and .voice/.\(note)"
             : "Put Arnheim's files (\(bundled.commit)) in \(app.path)."
+    }
+
+    /// A top-level name the app may replace: one plain name inside the folder, never the person's own
+    /// folders in any spelling (a Mac's disk ignores case).
+    static func plainName(_ name: String) -> Bool {
+        !name.isEmpty && name != "." && name != ".." && !name.contains("/") && !name.contains("\0")
+            && !kept.contains(where: { $0.caseInsensitiveCompare(name) == .orderedSame })
     }
 
     /// The fingerprint of the pictures a serve.py is made for (PICTURES["files"] in serve.py).

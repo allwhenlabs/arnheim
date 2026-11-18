@@ -46,7 +46,8 @@ SWITCHES = (
     ("git", "running", "Look in project folders",
      "Every minute: each floor's changes not yet committed, and its open pull requests.", True),
     ("updates", "running", "Look for a newer Arnheim",
-     "Once a day, ask GitHub whether a newer Arnheim is out, and say so on the Overview. Nothing about you is sent.", True),
+     "Once a day, ask GitHub whether a newer Arnheim is out, and say so on the Overview. GitHub is sent the commit this copy "
+     "is at, and nothing else about you.", True),
     ("forecast", "page", "Your plan",
      "The Overview's card that says when you'd reach your plan's limits. The receptionist still answers if you ask.", True),
 )

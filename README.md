@@ -50,6 +50,10 @@ To keep it running when you close the terminal, and have it start again each tim
 `python3 serve.py --always` instead, once (on a Mac or Linux). `python3 serve.py --always off`
 stops it and takes that out.
 
+On a Mac, the Arnheim app does this without a terminal: it sits in the menu bar, starts Arnheim, opens
+the page, and can start it each time you log in. For now you build it once with `mac/build.sh`
+([docs/mac.md](docs/mac.md) says how, and how to open it the first time).
+
 On Windows, run `py serve.py`. For another port, `python3 serve.py 8741`. On a Mac, the first
 `python3` may offer to install Apple's command line tools, which bring Python: say yes. Arnheim has
 been used on macOS in Chrome and Safari. On Linux (Ubuntu 24.04), its tests, setup, starting at login
