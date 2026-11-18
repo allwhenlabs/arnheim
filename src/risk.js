@@ -8,7 +8,8 @@ import { HIDDEN, SECRET } from './queue.js';
 // does reaches outside it: what it finds goes to the AI service, and none of them is ever called safe. A request
 // that touches a hidden or private-looking path (queue.js's HIDDEN and SECRET) always says look first.
 const LEVEL = { Read: 'read', NotebookRead: 'read', Glob: 'search', Grep: 'search', LS: 'search',
-  Edit: 'files', MultiEdit: 'files', Write: 'files', NotebookEdit: 'files', WebFetch: 'web', WebSearch: 'web', Bash: 'look' };
+  Edit: 'files', MultiEdit: 'files', Write: 'files', NotebookEdit: 'files', apply_patch: 'files', // apply_patch: Codex's edits
+  WebFetch: 'web', WebSearch: 'web', Bash: 'look' };
 
 const SAY = {
   read: { word: 'Reads outside', mood: 'needs', line: 'It reads a file outside the project. It changes nothing, but what it reads goes to the AI service.' },

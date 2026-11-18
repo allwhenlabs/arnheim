@@ -56,13 +56,28 @@ to use and what to call the building. Before it changes anything it says what it
   mistake is. If another copy of Arnheim already has hooks there, it says so and changes nothing. If
   you connected a project by hand in its own `.claude/settings.json` (step 2), it says so: take those
   out, or Claude Code tells the building everything twice in that project.
+- **Codex's hooks.** If Codex is on this computer, it adds Arnheim's hooks to `~/.codex/hooks.json` (or
+  the one in `CODEX_HOME`) the same way, beside any already there, after keeping a copy beside it
+  (step 9). Codex runs new hooks only once you trust them: start Codex, type `/hooks`, and trust
+  Arnheim's, once. It says if your `config.toml` switches hooks off, or if your Codex is too old to
+  have them.
+- **Claude Code's status line.** For the usage forecast (step 18), it sets Claude Code's status line
+  to `connect/usage.py`, which notes your plan's limits each time Claude Code redraws it. A status
+  line of your own stays: it is kept, and shows exactly as before.
 
 Running it again changes nothing that is already done. `--yes` takes every suggestion without
 asking, `--folder PATH` names a project yourself (give it again for more), `--name` names a new
 building, and `--no-hooks` leaves Claude Code's settings alone. Nothing is half done: if one file
 can't be written, neither is. `python3 connect/setup.py --undo`
 takes every one of Arnheim's hooks out of Claude Code's settings and leaves every other setting and
-hook there as it was; your building stays, and deleting the `data` folder goes back to the made-up company.
+hook there as it was, and puts your own status line back; your building stays, and deleting the `data`
+folder goes back to the made-up company.
+
+It asks one more thing: whether you want to answer your agents from the building (step 4). Your
+answer is kept in `data/serve.json`, so `serve.py` starts with control on, or off, without being
+told; `python3 serve.py --no-control` leaves it off once. Last, on a Mac or Linux, it offers to start
+Arnheim now and each time you log in, so it keeps running when you close the window: that is
+`python3 serve.py --always`, and `python3 serve.py --always off` takes it out again.
 
 `serve.py` does step 3 itself. The steps below do the same by hand, and say what each piece does.
 
@@ -163,6 +178,17 @@ Optional, and off unless you switch it on. Then the person at this computer can:
   can also say "allow" or "deny". An answer is for that one request only. A request waits in the
   building only while you are using it (walking, or you touched it in the last two minutes), and for
   two minutes at most. Otherwise Claude Code asks as it always does.
+- **Always allow what you always allow.** Once you have allowed the same command on a floor twice in
+  two weeks, here or in the agent's own window, its next request offers **Always allow here**. From
+  then on Arnheim allows that exact command on that floor for every agent, Claude Code's and Codex's,
+  without asking you, and its card says so. Only a command from a short list can be allowed for good:
+  the project's tests, checks and builds (`npm test`, `npm run lint`, `pytest`, `cargo test`,
+  `go test`, `make test` and the like) and commands that only look (`ls`, `git status`, `git diff`,
+  `git log` and the like). It must match word for word, one plain command: nothing chained, piped or
+  redirected, no quotes or variables, nothing run outside the agent's sandbox or in the background,
+  and nothing that names anything private or outside the project. A test or build runs the project's own code, as it does
+  each time you allow it once. Reads, searches, file changes and web requests always ask. The Company
+  page lists each one, with **Stop allowing**.
 - **See everything waiting on you in one list.** The Overview's "Waiting on you" puts together every
   agent's permission requests (the one whose wait runs out first at the top), the questions agents
   stopped to ask, your own tasks marked as needing you, and agents that finished in the last two
@@ -311,7 +337,7 @@ fifteen. Under it, how long agents waited on you today in all. A wait starts whe
 for a permission or an answer, and ends when it goes on. Ask **"How long have the agents waited on
 me?"** for the same in words.
 
-## 9. Any agent, not just Claude Code
+## 9. Codex, and any other agent
 
 Other agents can sit in the building too, in the same rooms, the same list of what waits on you and
 the same replay. Add their feed to `data/company.json`'s `feeds`, beside Claude Code's:
@@ -320,14 +346,41 @@ the same replay. Add their feed to `data/company.json`'s `feeds`, beside Claude 
 "feeds": ["feeds/claude-code.json", "feeds/agents.json", "feeds/projects.json"]
 ```
 
-**OpenAI's Codex CLI** runs a program when it finishes a turn. In `~/.codex/config.toml`:
+**OpenAI's Codex CLI** is a full member, like Claude Code. Since version 0.124 it has hooks with the
+same names, and `python3 connect/setup.py` adds Arnheim's to `~/.codex/hooks.json` for you. By hand,
+the same file:
+
+```json
+{"hooks": {
+  "SessionStart": [{"hooks": [{"type": "command", "command": "python3 /path/to/arnheim/connect/codex.py"}]}],
+  "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "python3 /path/to/arnheim/connect/codex.py"}]}],
+  "PostToolUse": [{"hooks": [{"type": "command", "command": "python3 /path/to/arnheim/connect/codex.py"}]}],
+  "PermissionRequest": [{"hooks": [{"type": "command", "command": "python3 /path/to/arnheim/connect/codex.py", "timeout": 150}]}],
+  "Stop": [{"hooks": [{"type": "command", "command": "python3 /path/to/arnheim/connect/codex.py"}]}],
+  "SessionEnd": [{"hooks": [{"type": "command", "command": "python3 /path/to/arnheim/connect/codex.py", "timeout": 3}]}],
+  "Interrupt": [{"hooks": [{"type": "command", "command": "python3 /path/to/arnheim/connect/codex.py", "timeout": 3}]}]
+}}
+```
+
+Codex runs new hooks only once you trust them: type `/hooks` in Codex and trust Arnheim's. Then each
+Codex conversation in a floor's folder sits on that floor just as a Claude Code one does, named as
+Codex's: someone at work while it works, its plan as tasks, the files it changes (for collision
+warnings and its floor's check), amber while it waits for your permission, what it said last, and
+what it spends against the floor's budget. With control on, you answer its permissions, send it
+messages and stop it from the building, as for Claude Code. Two things differ: Codex can't be
+interrupted while it asks, so "stop" there denies the request and it stops at its next step; and
+starting a new agent from the building starts Claude Code.
+
+An older Codex, without hooks, can still show when a turn ends, through its `notify` setting, in
+`~/.codex/config.toml`:
 
 ```toml
 notify = ["python3", "/path/to/arnheim/connect/codex.py"]
 ```
 
-Each Codex conversation in a floor's folder then shows on that floor when a turn ends, finished and
-waiting for your next step. Codex says nothing while it works, so the building doesn't see it at work.
+That shows each conversation finished and waiting for your next step, nothing while it works. Once
+Codex has run Arnheim's hooks, notify stays quiet, so nothing is told twice; `connect/setup.py` adds
+hooks only for a Codex that has them.
 
 **Any other agent, script or tool** can say where it is with one command, from its own hooks or
 wrapper, each time something changes:
@@ -338,8 +391,8 @@ python3 connect/agents.py --agent Gemini --session 42 --cwd ~/code/lantern --sta
 
 `--state` is `working`, `asking` (it shows in the list of what waits on you), `finished` or `ended`.
 `--session` is the conversation's own id, the same each time. The building names the agent on each
-conversation. Answering, stopping and starting work from the building (step 4) is for Claude Code
-alone, since only it lets another program hand it words.
+conversation. Answering and stopping from the building (step 4) is for Claude Code and Codex, whose
+hooks let another program hand them words; starting new work there starts Claude Code.
 
 ## 10. Collision warnings
 
@@ -454,8 +507,17 @@ looking at while:
 - work failed the review line (step 12),
 - a routine needs you (step 13).
 
-It has a warning while a pull request that isn't a draft has waited a week or more since it was last
-updated (step 3). The floor shows a chip ("One thing to fix", "A pull request waiting"), its page
+It has a warning while:
+
+- a pull request that isn't a draft has waited a week or more since it was last updated (step 3),
+- an agent at work has said nothing for twenty minutes: it may be stuck in a command, or waiting on
+  something it never asked about. With control on, **Stop it** stops it at its next step.
+- an agent's conversation has been shortened to fit twice, when agents start to forget what they
+  were doing. With control on, **Start fresh with a hand-over** starts a new agent on the floor,
+  handed what the old one was asked, the files it changed and its last words; stop the old one once
+  the new one has it.
+
+The floor shows a chip ("One thing to fix", "A pull request waiting"), its page
 lists each thing in words, and the Overview's "Project health" card, after "Waiting on you", puts
 every floor together. With control on, each thing has "Send an agent", which starts one on the floor
 with a brief that says what is wrong and asks it to fix it, or, for a pull request, to say what it
@@ -538,6 +600,40 @@ Write down how your company does things, a short Markdown file each, and list th
 those every floor shares, as it starts, with where to read each one, and is asked to follow the one
 that covers what it is about to do. In the building they stand on the Library's shelf.
 
+## 18. Your plan's limits, and when you'd reach them
+
+Claude Code and Codex each stop your agents when your plan's limit for the next five hours, or for
+the week, is used up, and the usual complaint is reaching it without warning. Each says how much is
+used and when it starts again, and Arnheim keeps a few hours of those readings. The Overview's "Your
+plan" card shows each limit, how much is used, and when you would reach it at this pace if that comes
+before it starts again: "At this pace you reach it around 15:40, before it starts again at 17:00." A
+five-hour limit goes by the last hour's pace, a weekly one by its average since the week began. When
+one would run out first, the card names the floor whose agents spent most today, so you know where to
+slow down, and with control on it has **Pause everyone** (step 7). Ask the receptionist "how much of
+my limit is left?" to hear it.
+
+Claude Code says it to its status line, so `connect/setup.py` sets the status line to
+`connect/usage.py`. By hand, in `~/.claude/settings.json`:
+
+```json
+"statusLine": { "type": "command", "command": "python3 /path/to/arnheim/connect/usage.py" }
+```
+
+It shows a short line of its own ("Arnheim · 5h 42%"). To keep your own status line instead, give
+its command after `--then`: `python3 /path/to/arnheim/connect/usage.py --then 'your command'`.
+Codex says it in each conversation's own record, which Arnheim reads as Codex's hooks run (step 9),
+so there is nothing to add for it.
+
+## 19. Hand-overs: the next agent hears what the last one finished
+
+A new conversation knows nothing of the others, so agents redo work that is already done, or undo
+it. When an agent on a floor finishes a turn in which it changed files, Arnheim keeps a few lines of
+it: what it was asked, what it said last, and the files it changed. The next conversation to start on
+that floor, Claude Code or Codex, is handed the last five, three days back at most, as it starts,
+with whether the floor's check (step 5) passed after each, and asked to look before it begins. What
+the others said is quoted as information, never as instructions, and a conversation is never handed
+its own work back.
+
 ## What is kept, and where
 
 `connect/setup.py` keeps a copy of each file before it changes it: `data/backups/company.before-arnheim-<when>.json`
@@ -561,6 +657,12 @@ words. Pings keep `data/feeds/pings.json`: when the last was sent, what each of 
 `data/feeds/history/`, for a week, with what each floor's agents spent that day. Restore points are
 listed in `data/feeds/restore.json`, and their files kept by git in each project's own repository,
 under `refs/arnheim/restore/`.
+
+The usage forecast keeps `data/feeds/usage.json`: the limits' readings, twelve hours back. Hand-overs
+keep `data/control/handover.json`: a few pieces of finished work for each floor, three days back.
+Always allow keeps `data/control/allowed.json`, what you allowed two weeks back, and
+`data/control/always.json`, the commands you allow for good. Setup keeps your answer about control in
+`data/serve.json`.
 
 With control on, your messages wait in `data/control/` until Claude takes them, a permission
 request and its answer are deleted once it is answered, and each agent started from the building

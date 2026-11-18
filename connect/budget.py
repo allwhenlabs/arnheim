@@ -4,6 +4,8 @@ What each Claude Code conversation spends, counted from its own transcript as th
 (connect/claude_code.py): the new tokens of each reply, that is what Claude read fresh, wrote to its
 cache, and wrote back. Re-reading its cache is left out: that is the same context again. A reply is
 logged once for each of its parts, so each is counted once, by its id, on the day it was written.
+A Codex conversation's transcript keeps a running total instead: what it read fresh and wrote, and the
+growth of that total is counted.
 
 A floor in data/company.json can give its agents a budget for a day, in new tokens ("budget":
 2000000), or the company can give every floor one. When a floor's agents pass it, the hook stops the
@@ -16,6 +18,7 @@ import os
 
 COUNTED = ("input_tokens", "cache_creation_input_tokens", "output_tokens")
 FIRST_READ = 64 * 1024 * 1024  # a transcript met for the first time is read from at most this far back
+MIDWAY = "midway"  # read part way through with no running total seen yet (a Codex transcript)
 
 
 def local_day(stamp=None):
@@ -28,9 +31,10 @@ def local_day(stamp=None):
     return datetime.datetime.now().strftime("%Y-%m-%d")
 
 
-def new_tokens(path, read):
+def new_tokens(path, read, limits=None):
     """New tokens in a transcript since it was last read: ({day: tokens}, where it has been read to).
-    `read` is what this gave back last time ({"path", "at", "last"}), or {}."""
+    `read` is what this gave back last time ({"path", "at", "last"}), or {}. A dict given as `limits` gets
+    the plan's limits a Codex transcript reported last, if it did (connect/usage.py)."""
     read = read if isinstance(read, dict) and read.get("path") == path else {}
     try:
         size = os.path.getsize(path)
@@ -43,14 +47,35 @@ def new_tokens(path, read):
     if not start and size > FIRST_READ:
         start = size - FIRST_READ
     spent = {}
+    midway = bool(start and not read)  # met for the first time, part way through
     with open(path, "rb") as handle:
         handle.seek(start)
-        if start and not read:
+        if midway:
             start += len(handle.readline())  # from the start of a whole line
         for raw in handle:
             if not raw.endswith(b"\n"):
                 break  # still being written: read it next time
             start += len(raw)
+            if b'"token_count"' in raw:  # Codex's transcript: a running total after each reply
+                found = codex_total(raw)
+                if found is None:
+                    continue
+                total, when, said = found
+                if limits is not None and isinstance(said, dict):
+                    limits.clear()
+                    limits.update(said)
+                if total is None:
+                    continue
+                before = last if isinstance(last, int) and not isinstance(last, bool) else None
+                if before is None and (midway or last == MIDWAY):
+                    last = total
+                    continue  # what came before this point isn't counted, as for Claude Code
+                last = total
+                n = max(0, total - (before or 0))
+                if n:
+                    day = local_day(when)
+                    spent[day] = spent.get(day, 0) + n
+                continue
             if b'"usage"' not in raw:
                 continue
             try:
@@ -71,7 +96,32 @@ def new_tokens(path, read):
                     pass
             day = local_day(row.get("timestamp"))
             spent[day] = spent.get(day, 0) + n
+    if midway and last is None:
+        last = MIDWAY  # met part way through, with no total yet: the next one is where counting starts
     return spent, {"path": path, "at": start, "last": last}
+
+
+def codex_total(raw):
+    """From one of a Codex transcript's token counts: (the new tokens it has spent in all, that is what it read
+    fresh, not from its cache, and what it wrote, or None when it doesn't say; when; the plan's limits it
+    reports, or None). None for any other line."""
+    try:
+        row = json.loads(raw)
+    except ValueError:
+        return None
+    payload = row.get("payload") if isinstance(row, dict) and row.get("type") == "event_msg" else None
+    if not isinstance(payload, dict) or payload.get("type") != "token_count":
+        return None
+    said = payload.get("rate_limits") if isinstance(payload.get("rate_limits"), dict) else None
+    info = payload.get("info")
+    total = info.get("total_token_usage") if isinstance(info, dict) else None
+    if not isinstance(total, dict):
+        return None, row.get("timestamp"), said
+    try:
+        fresh = max(0, int(total.get("input_tokens") or 0) - int(total.get("cached_input_tokens") or 0))
+        return fresh + max(0, int(total.get("output_tokens") or 0)), row.get("timestamp"), said
+    except (TypeError, ValueError):
+        return None
 
 
 def budget_of(company, project):

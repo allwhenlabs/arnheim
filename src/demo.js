@@ -28,6 +28,7 @@ import { icon } from './icons.js';
 import { exactOf, kindWord, meaningOf, riskOf } from './risk.js';
 import { createPoe, has, insertAfter, needWord, norm, poeBadge } from './poe-desk.js';
 import { createGoalStand, isStandHref, standFloor, standHref } from './goal-stand.js';
+import { forecastOf, pressing, usageLine, usageWords } from './usage.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -379,7 +380,7 @@ async function dropTask(id) {
 
 // What the rules answer even with the brain on: at once, and nothing Claude could be talked into
 // instead. A refusal stays a refusal.
-const RULED = new Set(['refuse', 'greeting', 'tour', 'waiting', 'memory', 'routines', 'health', 'brief', 'waited', 'weekly', 'history', 'restore']);
+const RULED = new Set(['refuse', 'greeting', 'tour', 'waiting', 'memory', 'routines', 'health', 'brief', 'waited', 'weekly', 'history', 'restore', 'usage']);
 const ruledBy = (t) => (RULED.has(t.id) ? { ...t, answer: (c) => { const a = t.answer(c); return a && { ...a, ruled: t.id }; } } : t);
 
 function setupDesk() {
@@ -398,6 +399,11 @@ function setupDesk() {
   const health = {
     id: 'health',
     answer: (c) => !c.floor && HEALTH_ASKED.test(c.text) && { lines: [sayHealth(org.floors, work)], go: c.go('#/', 'Show me') },
+  };
+  // "How much usage is left?", "when will I hit my limit?": the plan's limits, from Claude Code and Codex (usage.js).
+  const usage = {
+    id: 'usage',
+    answer: (c) => USAGE_ASKED.test(c.text) && { lines: [sayUsage()], go: c.go('#/', 'Show me') },
   };
   const label = (p) => floorOf(p)?.label || p;
   const waited = {
@@ -480,7 +486,7 @@ function setupDesk() {
       all.splice(Math.max(0, all.findIndex((t) => t.id === 'needs')), 0, waited, waiting, memory, routines, restorePoints);
       // Before "what's happening" and "what's running", which would take "catch me up" and "how are the
       // projects doing?" for themselves.
-      all.splice(Math.max(0, all.findIndex((t) => t.id === 'happening')), 0, brief, weekly, health, past);
+      all.splice(Math.max(0, all.findIndex((t) => t.id === 'happening')), 0, brief, weekly, health, usage, past);
       // Before the receptionist's own "how do I ..." answers about the building, a how-to of the company's that fits.
       all.splice(Math.max(0, all.findIndex((t) => t.id === 'how-to' || t.id === 'handoff')), 0, shelf);
       return brain.on ? all.map(ruledBy) : all;
@@ -1123,7 +1129,7 @@ function convoControls(c, { noAsk = false } = {}) {
     input.blur();
     controlDone(control.say(c.id, text), (r) => (r.sent === 'resumed' ? 'Sent. It is answering now.'
       : working ? 'Sent. It reads it at its next step, and its answer shows above.'
-        : 'Sent. It is waiting for you in Claude Code, so it sees this the next time you send it something there.'));
+        : waitsIn(c.id)));
   };
   return h('div.control',
     ask && h('div.control-ask',
@@ -1277,6 +1283,35 @@ function weekCard() {
 }
 
 // What each floor's agents have spent today, against its budget.
+// Your plan's limits (usage.js): how much is used, and whether at this pace you reach a limit before it starts
+// again, with the floor spending most today and, with control on, a way to pause every agent.
+const USAGE_ASKED = /\b(?:usage|limits?|quota|rate.?limit|my plan(?:'s)?)\b.*\b(?:left|used|hit|reach|run(?:ning)? out|when|much)\b|\b(?:how much|when)\b.*\b(?:usage|limit|quota)\b|\brun(?:ning)? out of (?:usage|tokens|quota)\b/i;
+const forecastNow = () => forecastOf(work.usage, Date.now() / 1000);
+function busiestFloor() {
+  const list = org.floors.map((f) => [f, spentOfFloor(f)]).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
+  return list[0]?.[0] || null;
+}
+function sayUsage() {
+  const list = forecastNow();
+  if (!list.length) return 'Claude Code and Codex haven\'t said how much of your plan is used yet. Claude Code says so through its status line, and Codex as it works (connect/setup.py sets both up).';
+  const top = busiestFloor();
+  return [...list.slice(0, 3).map((f) => usageWords(f)), pressing(list) && top ? `${top.label}'s agents have used the most today.` : null].filter(Boolean).join(' ');
+}
+function usageCard() {
+  const list = forecastNow();
+  if (!list.length) return null;
+  const urgent = pressing(list);
+  const top = urgent ? busiestFloor() : null;
+  return h(`section.panel-card.usage${urgent ? '.pressing' : ''}`,
+    sectHead('gauge', 'Your plan'),
+    h('ul.list', list.map((f) => h('li', h('div.row', dot(f.reaches === 'now' ? 'failed' : f.reaches === 'before' ? 'needs' : 'quiet'),
+      h('span.row-main', h('span.row-title', `${f.source}: ${Math.round(f.used)}% of the ${f.label}`), h('span.row-sub', usageLine(f)),
+        h('span.meter', { 'aria-hidden': 'true' }, h(`span.meter-fill.s-${f.reaches === 'now' ? 'failed' : f.reaches === 'before' ? 'needs' : 'working'}`, { style: `width: ${Math.min(100, Math.max(2, f.used))}%` }))))))),
+    top && h('p.small', `${top.label}'s agents have used the most today.`),
+    urgent && control.on && dir === 'data' && !control.paused() && h('div.control-row', btn('Pause everyone', () => controlDone(control.pauseAll(), () => 'Every agent stops at its next step, until you resume them.'), '', 'clock')),
+    h('p.small.muted', dir === 'data' ? 'As Claude Code and Codex report it. A 5-hour limit goes by the last hour\'s pace, a weekly one by its average.' : 'Made up, like the rest of the company.'));
+}
+
 function spendCard() {
   const list = org.floors.map((f) => [f, spendOf(f)]).filter(([, s]) => s);
   if (!list.length) return null;
@@ -1292,13 +1327,23 @@ function spendCard() {
 // when control is on for your own company. The Overview lists every floor that needs looking at; a floor's
 // page lists its own.
 function healthItems(floor, hh) {
+  const WHAT = { pr: 'Waiting too long', routine: 'A routine', review: 'The review line', quiet: 'Gone quiet', worn: 'Running long' };
   return hh.problems.map((p) => {
-    const li = row(null, p.line, p.kind === 'pr' ? 'Waiting too long' : p.kind === 'routine' ? 'A routine' : p.kind === 'review' ? 'The review line' : 'A check', p.kind === 'pr' ? 'needs' : 'failed');
+    const li = row(p.key ? convoHref({ id: p.key, project: floor.project }) : null, p.line, WHAT[p.kind] || 'A check',
+      ['pr', 'quiet', 'worn'].includes(p.kind) ? 'needs' : 'failed');
     if (control.on && dir === 'data') {
-      li.append(h('div.control-row.waiting-do', btn('Send an agent', () => {
-        controlDone(control.begin(floor.project, p.job), () => `An agent is on its way to ${floor.label} to see to it. Watch it sit down in the Conversations room.`);
+      const send = (label, done) => btn(label, () => {
+        controlDone(control.begin(floor.project, p.job), () => done);
         watchStart({ project: floor.project });
-      })));
+      });
+      if (p.kind === 'quiet' && REACHABLE.test(p.key || '')) {
+        li.append(h('div.control-row.waiting-do', btn('Stop it', () => controlDone(control.halt(p.key), () => 'Stopping it at its next step. If it is stuck in a command, stop it where it runs.'))));
+      } else if (p.kind === 'worn') {
+        li.append(h('div.control-row.waiting-do', send('Start fresh with a hand-over',
+          `A new agent on ${floor.label} picks up where it left off, handed what it was doing. Stop the old one when the new one has it.`)));
+      } else if (p.job) {
+        li.append(h('div.control-row.waiting-do', send('Send an agent', `An agent is on its way to ${floor.label} to see to it. Watch it sit down in the Conversations room.`)));
+      }
     }
     return li;
   });
@@ -1386,6 +1431,8 @@ function waitMeter(items) {
 
 // A conversation control can pass a message to: one the Claude Code feed names (connect/control.py, KEY).
 const REACHABLE = /^cc-[A-Za-z0-9]{1,12}$/;
+// Sent to a conversation that waits for your next message: where it waits, Claude Code or the agent the feed names.
+const waitsIn = (key) => `Sent. It is waiting for you in ${work.conversations.find((c) => c.id === key)?.agent || 'Claude Code'}, so it sees this the next time you send it something there.`;
 const waitingHead = (i) => ({ permission: `${i.title} wants your permission`, question: `${i.title} is asking`, task: i.title, turn: `${i.title} has finished` })[i.kind];
 const waitingHref = (i) => (i.key && i.project ? convoHref({ id: i.key, project: i.project }) : i.task ? taskHref(i.task) : null);
 const waitingLink = (i) => ({ title: waitingHead(i), sub: i.project, href: waitingHref(i), mood: i.kind === 'turn' ? 'check' : 'needs' });
@@ -1460,6 +1507,18 @@ function waitingActions(i, { keys = false } = {}) {
     out.push(h('div.control-row.waiting-do',
       h('button.btn.primary', { type: 'button', onclick: () => answerOnce(i, 'allow') }, label('Allow', 'A')),
       h('button.btn', { type: 'button', onclick: () => answerOnce(i, 'deny') }, label('Deny', 'D'))));
+    const before = Number(i.ask?.before) || 0;
+    if (i.ask?.standable && before >= 2 && control.on && !i.ask?.sample) {
+      // the same exact command, allowed twice already on this floor: offer to stop asking (connect/standing.py)
+      const floor = floorOf(i.ask.project)?.label || i.ask.project || 'this floor';
+      out.push(h('div.waiting-do.always-offer',
+        h('p.small', `You've allowed this ${before} times on ${floor} lately. Always allow this exact command there, for every agent?`),
+        h('div.control-row', btn('Always allow here', () => {
+          if (answered.has(i.ask.id)) return;
+          answered.add(i.ask.id);
+          controlDone(control.always(i.ask.id), () => `Allowed, and from now on on ${floor} without asking. The Company page lists it, to take back.`);
+        }))));
+    }
   }
   if (i.kind === 'task' && i.task?.routine && control.on && dir === 'data') {
     out.push(h('div.control-row.waiting-do',
@@ -1475,7 +1534,7 @@ function waitingActions(i, { keys = false } = {}) {
     out.push(h('div.waiting-do.decided',
       h('p.small', h('span.muted', 'You decided before: '), decided.map((r) => r.text).join(' ')),
       reachable && h('div.control-row', btn('Send it that', () => controlDone(control.say(i.key, `You decided this before: ${decided.map((r) => r.text).join(' ')}`),
-        () => 'Sent. It is waiting for you in Claude Code, so it sees this the next time you send it something there.'), '.primary'))));
+        () => waitsIn(i.key)), '.primary'))));
   }
   if ((i.kind === 'question' || i.kind === 'turn') && reachable) {
     const send = (event) => {
@@ -1486,11 +1545,17 @@ function waitingActions(i, { keys = false } = {}) {
       input.value = '';
       input.blur();
       controlDone(control.say(i.key, text), (r) => (r.sent === 'resumed' ? 'Sent. It is answering now.'
-        : 'Sent. It is waiting for you in Claude Code, so it sees this the next time you send it something there.'));
+        : waitsIn(i.key)));
     };
     out.push(h('form.control-say.waiting-do', { onsubmit: send },
       h('input', { name: 'text', type: 'text', maxlength: 2000, autocomplete: 'off', placeholder: i.kind === 'question' ? 'Answer it' : 'What next?', 'aria-label': `A reply to ${i.title}` }),
       h('button.btn', { type: 'submit' }, 'Send')));
+  }
+  if (!control.on && dir === 'data' && (i.kind === 'permission' || i.kind === 'question') && REACHABLE.test(i.key || '')) {
+    // your own agents, with control off: say where the answer goes instead of leaving no way to give it
+    const agent = work.conversations.find((c) => c.id === i.key)?.agent || 'Claude Code';
+    out.push(h('p.small.muted.answer-where.waiting-do', `Answer it in ${agent}, where it runs. To answer here too, start Arnheim with `,
+      h('code', 'python3 serve.py --control'), '.'));
   }
   return out;
 }
@@ -1585,6 +1650,7 @@ function viewOverview() {
       fromAway() && !phoneMe?.phone && h('p.small', h('strong', 'View only. '), 'You are looking from another device: you can look round and walk in, but nothing here changes anything.'),
       first ? focusCard(first) : h('div.all-clear', h('b', 'You are clear.'), 'Nothing is waiting on you right now.'),
       firstRun && setupCard(),
+      usageCard(),
       pauseCard(),
       clashCard(),
       rest.length > 0 && h('section.panel-card.home-more',
@@ -1649,9 +1715,9 @@ function setupCard() {
   };
   return h('section.panel-card.setup-card',
     sectHead('laptop', 'See your own agents here'),
-    h('p', `${org.company} is made up. To see your own projects, and the Claude Code conversations working in them, run this in a terminal, in Arnheim's folder:`),
+    h('p', `${org.company} is made up. To see your own projects, and the Claude Code and Codex conversations working in them, run this in a terminal, in Arnheim's folder:`),
     h('div.setup-run', h('code', command), btn('Copy', copy), setupNote && h('span.small.muted', { role: 'status' }, setupNote)),
-    h('p.small.muted', 'It finds the projects you have worked on with Claude Code or Codex and asks before it changes anything. It writes your building to data/, a floor for each project, and adds Arnheim\'s hooks to Claude Code\'s settings, keeping a copy of each file first. It never changes your projects\' files, and python3 connect/setup.py --undo takes the hooks out again. Then reload this page. On Windows, type py instead of python3.'));
+    h('p.small.muted', 'It finds the projects you have worked on with Claude Code or Codex and asks before it changes anything. It writes your building to data/, a floor for each project, and adds Arnheim\'s hooks to Claude Code\'s settings and Codex\'s, keeping a copy of each file first. It never changes your projects\' files, and python3 connect/setup.py --undo takes the hooks out again. Then reload this page. On Windows, type py instead of python3.'));
 }
 
 function floorCard(floor) {
@@ -1672,8 +1738,25 @@ function viewCompany() {
       h('ul.floor-list', floors().map(floorCard)),
       talkingCard(),
       memoryCard(),
+      alwaysCard(),
     ],
   };
+}
+
+// The commands you allowed for good (connect/standing.py), each a press away from asking again.
+function alwaysCard() {
+  if (dir !== 'data' || !control.on) return null;
+  const rows = control.standing();
+  const when = (at) => new Date(at * 1000).toLocaleDateString([], { day: 'numeric', month: 'short' });
+  return h('section.panel-card.always',
+    sectHead('shield-check', 'Always allowed'),
+    h('p.small.muted', 'Exact commands your agents run on a floor without asking you, for Claude Code and Codex alike. Only plain test, check and build commands, and ones that only look, can be here.'),
+    rows.length ? h('ul.list', rows.map((r) => h('li', h('div.row.memory-row', dot('quiet'),
+      h('span.row-main', h('span.row-title', h('code', String(r.what || '').replace(/^Bash: /, ''))),
+        h('span.row-sub', [floorOf(r.project)?.label || r.project, `since ${when(r.at)}`, r.used ? `used ${r.used} time${r.used === 1 ? '' : 's'}` : 'not used yet'].join(' · '))),
+      btn('Stop allowing', () => controlDone(control.unalways(r.id), () => `It asks again on ${floorOf(r.project)?.label || r.project}.`))))))
+      : empty('Nothing yet. When you have allowed the same command twice on a floor, the next request offers "Always allow here".'),
+    noteOnce());
 }
 
 // What every agent is told: the company's memory, with a way to add to it and take from it.
@@ -1692,7 +1775,7 @@ function memoryCard() {
   return h('section.panel-card.memory',
     sectHead('archive', 'What every agent is told'),
     h('p.small.muted', dir === 'data'
-      ? 'Decisions you asked the building to remember. Every Claude Code agent in the company\'s folders hears them as it starts, and one at work hears new ones with your next message.'
+      ? 'Decisions you asked the building to remember. Every Claude Code and Codex agent in the company\'s folders hears them as it starts, and one at work hears new ones with your next message.'
       : 'Decisions the building remembers. With your own company, every Claude Code agent hears them as it starts. These are made up.'),
     rows.length ? h('ul.list', rows.map((r) => h('li', h('div.row.memory-row', dot('quiet'), h('span.row-main', h('span.row-title', r.text)),
       (memoryWrites() || mineMemory.includes(r)) && btn('Forget', () => forgetIt(r))))))
@@ -2460,6 +2543,7 @@ async function readWork() {
     if (feed.ended && typeof feed.ended === 'object') now.ended.push(feed.ended);
   }
   now.memory = await readMemory();
+  now.usage = await readUsage(now);
   if (dir !== 'data') now.pullRequests = now.pullRequests.map((p) => (p.waited ? { ...p, updated: OPENED - p.waited * 86400 } : p)); // the sample's: days waited
   if (dir !== 'data') now.restore = now.restore.map((p) => (Number.isFinite(p.ago) ? { ...p, at: OPENED - p.ago } : p)); // the sample's: seconds ago
   if (dir !== 'data') now.conversations = now.conversations.map((c) => (Number.isFinite(c.ago) ? { ...c, at: OPENED - c.ago } : c));
@@ -2535,6 +2619,24 @@ const weekMoments = () => weekDays().flatMap((d) => d.moments);
 // The sample's spending today: what its conversations say they spent.
 const sampleSpent = () => Object.fromEntries(org.floors.map((f) => [f.project, spentOfFloor(f)]).filter(([, n]) => n > 0));
 const spentOfFloor = (f) => spendOf(f)?.spent || 0;
+
+// Your plan's limits as Claude Code and Codex report them (connect/usage.py), for the forecast (usage.js). The
+// sample's are made up in its work.json ("usage"), their times counting back from when the page opened.
+let lastUsage = null;
+async function readUsage(now) {
+  if (dir !== 'data') {
+    const u = now.usage && typeof now.usage === 'object' ? now.usage : null;
+    if (!u?.sources) return null;
+    const shift = (rows) => (Array.isArray(rows) ? rows : []).map((r) => ({ at: OPENED - (Number(r.ago) || 0), used: r.used, resets_at: OPENED + (Number(r.resets_in) || 0) }));
+    return { sources: Object.fromEntries(Object.entries(u.sources).map(([k, w]) => [k, Object.fromEntries(Object.entries(w || {}).map(([n, rows]) => [n, shift(rows)]))])) };
+  }
+  try {
+    lastUsage = await readJson('data/feeds/usage.json');
+  } catch (error) {
+    if (error.status === 404) lastUsage = null;
+  }
+  return lastUsage;
+}
 
 // The company's memory: memory.json beside company.json, written through control (docs/connect.md,
 // "Company memory"). None yet is an empty memory; one caught mid-change keeps what it said last time.

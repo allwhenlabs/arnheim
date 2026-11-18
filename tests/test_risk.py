@@ -24,6 +24,7 @@ const cases = {
   privateRead: r.riskOf(ask('Read', 'Read: ~/.ssh/id_ed25519', { read: false })),
   search: r.riskOf(ask('Grep', 'Grep: TODO')),
   edit: r.riskOf(ask('Edit', 'Edit: app.js')),
+  codexEdit: r.riskOf(ask('apply_patch', 'apply_patch: change src/sort.js')),
   web: r.riskOf(ask('WebFetch', 'WebFetch: https://example.com')),
   command: r.riskOf(ask('Bash', 'Bash: npm test')),
   unknown: r.riskOf(ask('Mystery', 'Mystery')),
@@ -73,6 +74,7 @@ class RiskTest(unittest.TestCase):
         self.assertEqual([r[k]["word"] for k in ("read", "search", "privateRead", "edit", "web", "command", "unknown", "proto")],
                          ["Reads outside", "Searches outside", "Look first", "Changes files", "Goes online", "Read it first", "Read it first", "Read it first"])
         self.assertNotIn("ok", [r[k]["mood"] for k in ("read", "search", "edit", "web", "command", "unknown")])
+        self.assertEqual(r["codexEdit"], r["edit"])  # Codex's apply_patch changes files, as Edit does
         self.assertIn("AI service", r["read"]["line"])
         self.assertIsNone(r["notPermission"])
 

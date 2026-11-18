@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Arnheim's Claude Code connector: a hook that shows each Claude Code conversation in the building.
 
+OpenAI's Codex CLI has the same hooks, by the same names, and connect/codex.py hands each of its events
+here marked as Codex's: everything below holds for a Codex conversation too, its edits (apply_patch) and
+its plan (update_plan) included.
+
 Claude Code runs it at the moments docs/connect.md lists, and hands it what happened as JSON on
 stdin. It finds the floor whose "folder" (in data/company.json) holds the conversation's folder, and
 keeps data/feeds/claude-code.json up to date for the page, which reads it every few seconds:
@@ -60,13 +64,17 @@ sys.path.insert(0, HERE)
 import budget  # noqa: E402  (beside this file: what each conversation spends)
 import control  # noqa: E402  (beside this file: what the building has for Claude Code)
 import restore  # noqa: E402  (beside this file: restore points before an agent changes files)
+import standing  # noqa: E402  (beside this file: commands you allow for good)
+import usage  # noqa: E402  (beside this file: your plan's limits, for the forecast)
+import handover  # noqa: E402  (beside this file: finished work, handed to the next agent on a floor)
 
 DATA = os.environ.get("ARNHEIM_DATA") or os.path.join(os.path.dirname(HERE), "data")
 FEED = os.path.join(DATA, "feeds", "claude-code.json")
 LOG = os.path.join(DATA, "feeds", "claude-code.log")
 KEEP = 12 * 3600  # a conversation not heard from for this long has gone
 ASKS = {"permission_prompt", "elicitation_dialog", "agent_needs_input"}  # Claude waits for you to decide
-CHANGES = {"Edit", "MultiEdit", "Write", "NotebookEdit"}  # tools that change files: then its floor's check is due
+CHANGES = {"Edit", "MultiEdit", "Write", "NotebookEdit", "apply_patch"}  # tools that change files (apply_patch is Codex's): then its floor's check is due
+AGENT = "arnheim_agent"  # set by another agent's connector on the events it hands on (connect/codex.py): who it is
 NEW = "A new conversation"
 # A prompt Claude Code was handed by something else, not typed by the person: a helper's report, another
 # session's message, a notice. It is never "what you asked", and never a conversation's title.
@@ -143,6 +151,16 @@ def key_of(event):
     return "cc-" + re.sub(r"[^A-Za-z0-9]", "", str(event["session_id"]))[:12]
 
 
+def changed_paths(event):
+    """The files a step changed, as the tool named them: Claude Code's edits name one, Codex's apply_patch
+    names each file in its patch."""
+    given = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+    if event.get("tool_name") == "apply_patch":
+        return control.patched(given)[:FILES_KEPT]
+    path = str(given.get("file_path") or given.get("notebook_path") or "")
+    return [path] if path else []
+
+
 def change(event, feed, project, now, extra=None):
     """What this event changes in the feed's conversations and tasks. `extra` says what the
     building's control did: handed over a message (heard), had Claude go on rather than stop
@@ -178,6 +196,8 @@ def change(event, feed, project, now, extra=None):
             talk.update(spent={"day": day, "tokens": back.get("tokens") or 0}, read=back.get("read"))
         talks.append(talk)
     talk.update(project=project, at=now)
+    if event.get(AGENT):
+        talk["agent"] = str(event[AGENT])
     if event.get("session_title"):
         talk["title"] = line(event["session_title"], 70)
     ask = f"{key}-ask"
@@ -196,6 +216,9 @@ def change(event, feed, project, now, extra=None):
         talk.update(working=False)
     elif name == "SessionStart" and event.get("source") in (None, "startup", "clear"):
         talk.update(working=False, check=False)
+        talk.pop("compacted", None)  # a fresh start: nothing shortened yet
+    elif name == "SessionStart" and event.get("source") == "compact":  # its conversation was shortened to fit
+        talk["compacted"] = int(talk.get("compacted") or 0) + 1
     elif name == "UserPromptSubmit":
         said = "" if HANDED.match(str(event.get("prompt") or "")) else line(event.get("prompt"), 100)
         if talk["title"] == NEW and said:
@@ -211,13 +234,13 @@ def change(event, feed, project, now, extra=None):
         talk.update(working=True, check=False)
         drop(ask)
         given = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
-        path = str(given.get("file_path") or given.get("notebook_path") or "")
         if event.get("tool_name") in CHANGES:
             talk["changed"] = now
-        if event.get("tool_name") in CHANGES and path:  # which files it changed lately, for clashes
-            where = inside(path, event.get("cwd"))
-            files = [f for f in talk.get("files") or [] if isinstance(f, dict) and f.get("path") != where]
-            talk["files"] = (files + [{"path": where, "at": now}])[-FILES_KEPT:]
+            files = [f for f in talk.get("files") or [] if isinstance(f, dict)]
+            for path in changed_paths(event):  # which files it changed lately, for clashes
+                where = inside(path, event.get("cwd"))
+                files = [f for f in files if f.get("path") != where] + [{"path": where, "at": now}]
+            talk["files"] = files[-FILES_KEPT:]
         if event.get("tool_name") == "TaskUpdate":  # its own task list: in progress, done or deleted
             tid = given.get("taskId") or given.get("task_id")
             state = given.get("status")
@@ -225,11 +248,13 @@ def change(event, feed, project, now, extra=None):
                 drop(f"{key}-t{tid}")
             elif tid and state in ("in_progress", "pending"):
                 task(f"{key}-t{tid}", status="working" if state == "in_progress" else "open")
-        elif event.get("tool_name") == "TodoWrite":  # the older to-do list: the whole list each time
+        elif event.get("tool_name") in ("TodoWrite", "update_plan"):  # the older to-do list, or Codex's plan: the whole list each time
             tasks[:] = [t for t in tasks if not str(t.get("id", "")).startswith(f"{key}-todo")]
-            for i, todo in enumerate(given.get("todos") or []):
+            listed = given.get("todos") if event.get("tool_name") == "TodoWrite" else given.get("plan")
+            for i, todo in enumerate(listed if isinstance(listed, list) else []):
                 if isinstance(todo, dict) and todo.get("status") in ("pending", "in_progress"):
-                    task(f"{key}-todo{i}", title=line(todo.get("content"), 90), status="working" if todo["status"] == "in_progress" else "open")
+                    task(f"{key}-todo{i}", title=line(todo.get("content") or todo.get("step"), 90),
+                         status="working" if todo["status"] == "in_progress" else "open")
     elif name == "Notification":
         kind = event.get("notification_type")
         if kind in ASKS:
@@ -243,8 +268,13 @@ def change(event, feed, project, now, extra=None):
             task(ask, title=f"{talk['title']}: {message}", status="needs_you", note=message)
         elif kind == "idle_prompt":
             talk.update(working=False, check=True)
+    elif name == "PermissionRequest" and extra.get("standing"):  # a command you allowed for good: no wait
+        talk.update(working=True, check=False)
+        talk["asked_for"] = {"tool": str(event.get("tool_name") or ""), "what": extra.get("asking"), "standing": True}
     elif name == "PermissionRequest":
         message = line(f"I'm waiting for your permission: {extra.get('asking') or event.get('tool_name') or 'a tool'}", 140)
+        talk["asked_for"] = {"tool": str(event.get("tool_name") or ""), "what": extra.get("asking"),
+                             "command": standing.command_in(str(event.get("tool_name") or ""), event.get("tool_input"))}
         talk.update(working=False, check=True)
         talk["says"] = {**talk.get("says", {}), "needs": f"{message}.", "permission": str(event.get("tool_name") or "")}
         task(ask, title=line(f"{talk['title']}: {message}", 120), status="needs_you", note=message)
@@ -262,10 +292,15 @@ def change(event, feed, project, now, extra=None):
             talk["answered"] = talk.pop("heard")
         talk["stopped"] = now
         drop(ask)
+    elif name == "Interrupt":  # Codex: you stopped it there
+        talk.update(working=False, check=True, says={"now": "I stopped, as you asked.", "next": "It's your turn now."})
+        drop(ask)
     elif name == "TaskCreated" and event.get("task_id"):
         task(f"{key}-t{event['task_id']}", title=line(event.get("task_subject") or "A task", 90), status="open")
     elif name == "TaskCompleted" and event.get("task_id"):
         drop(f"{key}-t{event['task_id']}")
+    if name in ("PostToolUse", "UserPromptSubmit", "Stop", "Interrupt", "SessionStart"):
+        talk.pop("asked_for", None)  # what it asked for was run, or the moment for it has passed
     if extra.get("heard"):
         talk["heard"] = extra["heard"]
     if extra.get("memory_at"):
@@ -326,8 +361,18 @@ def update(event, extra=None):
         before = next((dict(c) for c in feed.get("conversations") or [] if isinstance(c, dict) and c.get("id") == key_of(event)), None)
         talks, tasks = change(event, feed, where, time.time(), extra)
         talk = next((c for c in talks if c.get("id") == key_of(event)), None)
+        asked = (before or {}).get("asked_for")
+        ran = standing.command_in(str(event.get("tool_name") or ""), event.get("tool_input"))
+        if event.get("hook_event_name") == "PostToolUse" and isinstance(asked, dict) and not asked.get("standing") \
+                and asked.get("tool") == event.get("tool_name") and ran and asked.get("command") == ran:
+            try:
+                standing.record(DATA, where, asked["tool"], ran)  # you allowed this exact command, here or in the agent: it ran
+            except Exception as error:  # remembering it never costs the feed
+                note(error)
         if talk is not None:
             weigh(event, talk, talks, tasks, where, extra or {}, verdict, feed.get("ended"))
+        if event.get("hook_event_name") == "Stop" and talk is not None and not (extra or {}).get("going_on"):
+            hand_on(talk, where)
         try:
             if talk is not None or before is not None:  # one that ended has left the feed: log it as it was
                 said = dict(extra or {})
@@ -346,18 +391,43 @@ def update(event, extra=None):
     return verdict
 
 
+def hand_on(talk, project):
+    """As a turn ends that changed files since your last message: a few lines of it, for the next agent to start
+    on its floor (connect/handover.py)."""
+    try:
+        since = float(talk.get("asked_at") or 0)
+        if not talk.get("changed") or float(talk["changed"]) < since:
+            return
+        files = [f.get("path") for f in talk.get("files") or [] if isinstance(f, dict) and float(f.get("at") or 0) >= since]
+        handover.note(DATA, project, talk.get("id"), talk.get("title"), talk.get("asked"), (talk.get("says") or {}).get("now"),
+                      [f for f in files if f], talk.get("agent") or "Claude Code")
+    except Exception as error:  # the hand-over's trouble never costs the feed
+        note(error)
+
+
+def handed(event):
+    """What a conversation starting afresh is handed of the others' finished work on its floor, or None."""
+    if event.get("source") not in (None, "startup", "clear"):
+        return None
+    project = floor_of(event)
+    if not project:
+        return None
+    talks = {c.get("id"): c for c in read_feed().get("conversations") or [] if isinstance(c, dict)}
+    return handover.told(DATA, project, key_of(event), lambda k: ((talks.get(k) or {}).get("proof") or {}).get("state"))
+
+
 def moment(event, talk, extra, verdict):
     """What this event was, for the day's replay: (kind, words), or None for nothing worth keeping."""
     name = event.get("hook_event_name")
-    given = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
-    if verdict.get("stop") or extra.get("stopped"):
+    if verdict.get("stop") or extra.get("stopped") or name == "Interrupt":
         return "stopped", (talk.get("says") or {}).get("now") or "It stopped."
     if name == "UserPromptSubmit" and not extra.get("paused_prompt"):
         said = line(event.get("prompt"), 80)
         return "working", f'You asked: "{said}"' if said else "It started work."
     if name == "PostToolUse" and event.get("tool_name") in CHANGES:
-        path = str(given.get("file_path") or given.get("notebook_path") or "")
-        return "changed", inside(path, event.get("cwd")) if path else "a file"
+        paths = [inside(p, event.get("cwd")) for p in changed_paths(event)]
+        more = f" and {len(paths) - 1} more" if len(paths) > 1 else ""
+        return "changed", paths[0] + more if paths else "a file"
     if name in ("PermissionRequest", "Notification") and (talk.get("says") or {}).get("needs"):
         return "asked", talk["says"]["needs"]
     if name == "Stop" and not extra.get("going_on"):
@@ -424,20 +494,19 @@ def add_moment(talk, project, kind, what, spent=None):
                 pass
 
 
-def clash(talk, talks, project, now):
-    """The other conversations on this floor that changed a file this one just changed, within CLASH
-    seconds: [(their title, the file)]."""
+def clash(talk, talks, project, now, mine=None):
+    """The other conversations on this floor that changed a file this one just changed (`mine`, the files
+    changed in this step, or else the last file it changed), within CLASH seconds: [(their title, the file)]."""
     files = talk.get("files") or []
-    mine = files[-1].get("path") if files and isinstance(files[-1], dict) else None
     if not mine:
-        return []
+        mine = [files[-1].get("path")] if files and isinstance(files[-1], dict) and files[-1].get("path") else []
     out = []
     for c in talks:
         if c is talk or c.get("project") != project:
             continue
         for f in c.get("files") or []:
-            if isinstance(f, dict) and f.get("path") == mine and now - float(f.get("at") or 0) < CLASH:
-                out.append((c.get("title") or "another conversation", mine))
+            if isinstance(f, dict) and f.get("path") in mine and now - float(f.get("at") or 0) < CLASH:
+                out.append((c.get("title") or "another conversation", f["path"]))
     return out
 
 
@@ -450,7 +519,13 @@ def weigh(event, talk, talks, tasks, project, extra, verdict, ended=None):
     name = event.get("hook_event_name")
     day = budget.local_day()
     if event.get("transcript_path") and name in COUNT:
-        spent, talk["read"] = budget.new_tokens(event["transcript_path"], talk.get("read"))
+        said = {}
+        spent, talk["read"] = budget.new_tokens(event["transcript_path"], talk.get("read"), said)
+        if said and event.get(AGENT) == "Codex":  # its plan's limits, as its record last said (connect/usage.py)
+            try:
+                usage.keep("Codex", usage.from_codex(said), DATA)
+            except Exception as error:
+                note(error)
         had = talk.get("spent") if isinstance(talk.get("spent"), dict) and talk["spent"].get("day") == day else {}
         talk["spent"] = {"day": day, "tokens": int(had.get("tokens") or 0) + spent.get(day, 0)}
     if extra.get("paused_prompt"):
@@ -468,7 +543,7 @@ def weigh(event, talk, talks, tasks, project, extra, verdict, ended=None):
     if not limit or used < limit:
         tasks[:] = [t for t in tasks if t.get("id") != tid]  # under budget again: nothing to ask
     if name == "PostToolUse" and event.get("tool_name") in CHANGES:
-        others = clash(talk, talks, project, time.time())
+        others = clash(talk, talks, project, time.time(), [inside(p, event.get("cwd")) for p in changed_paths(event)])
         if others:
             who = ", ".join(f'"{title}"' for title, _ in others[:3])
             verdict["warn"] = (f"Arnheim, the building, saw that {who} also changed {others[0][1]} in the last two hours, in another "
@@ -687,6 +762,15 @@ def shelf(event):
             "their company's work. Before you do something one of them covers, read it and follow it: " + "; ".join(rows[:HOWTOS_TOLD]) + ".")
 
 
+def floor_of(event):
+    """The floor a conversation is on: its folder's, or where it already sits in the building."""
+    project = project_for(event.get("cwd"))
+    if project:
+        return project
+    seat = next((c for c in read_feed().get("conversations") or [] if isinstance(c, dict) and c.get("id") == key_of(event)), None)
+    return seat.get("project") if seat else None
+
+
 def respond(event):
     """Keeps the feed up to date, and gives what Claude Code should hear back, if anything: your
     messages from the building, your answer there to a permission, or your request to stop.
@@ -705,13 +789,35 @@ def respond(event):
     if name == "PermissionRequest":
         tool = str(event.get("tool_name") or "a tool")
         what = control.describe(tool, event.get("tool_input"))
+        project = floor_of(event)
+        command = standing.command_in(tool, event.get("tool_input"))  # the exact words it would run, if a plain command
+        try:
+            standing_allow = standing.allows(DATA, project, tool, command)
+        except Exception as error:  # a standing allow that can't be read never allows anything
+            note(error)
+            standing_allow = None
+        if standing_allow:  # you allowed this exact command on this floor for good (connect/standing.py)
+            keep(event, {"asking": what, "standing": True})
+            try:
+                standing.used(DATA, standing_allow["id"])
+            except Exception as error:  # counting it never stops the allow
+                note(error)
+            return {"hookSpecificOutput": {"hookEventName": name, "decision": {"behavior": "allow"}}}
         keep(event, {"asking": what})
-        got = control.await_answer(box, key, tool, what)
+        try:
+            more = {"project": project, "before": standing.times(DATA, project, tool, command),
+                    "standable": standing.can_stand(tool, command), "command": command}
+        except Exception as error:
+            note(error)
+            more = {"project": project}
+        got = control.await_answer(box, key, tool, what, more)
         if got == "allow":  # this one request, as it was shown: never a rule for later ones
             return {"hookSpecificOutput": {"hookEventName": name, "decision": {"behavior": "allow"}}}
         if got in ("deny", "stop"):
             decision = {"behavior": "deny", "message": "Denied from Arnheim, the building." if got == "deny" else "Stopped from Arnheim, the building."}
-            if got == "stop":
+            if got == "stop" and event.get(AGENT) == "Codex":
+                box.stop(key)  # Codex takes no interrupt here: it stops at its next step instead
+            elif got == "stop":
                 decision["interrupt"] = True
             return {"hookSpecificOutput": {"hookEventName": name, "decision": decision}}
         return None
@@ -742,13 +848,17 @@ def respond(event):
                 return held
         if name == "Stop":
             prove(event)
-        howtos = None
+        howtos = finished = None
         if name == "SessionStart":
             try:
                 howtos = shelf(event)
             except Exception as error:  # the shelf's trouble never costs Claude its start
                 note(error)
-        words = "\n\n".join(w for w in (howtos, memo[0] if memo else None, verdict.get("warn")) if w)
+            try:
+                finished = handed(event)
+            except Exception as error:  # nor does the hand-over's
+                note(error)
+        words = "\n\n".join(w for w in (howtos, finished, memo[0] if memo else None, verdict.get("warn")) if w)
         return {"hookSpecificOutput": {"hookEventName": name, "additionalContext": words}} if words else None
     heard = rows[-1].get("id")
     if name == "Stop":

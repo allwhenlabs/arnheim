@@ -6,6 +6,11 @@
   python3 serve.py --lan    on phones and other computers on this network too (README, "Phones")
   python3 serve.py --share  the same, but only for those you give its view-only link (README, "A view-only link")
   python3 serve.py --drawn  in the drawn look, without downloading the photo-real look's pictures
+  python3 serve.py --always  start it now and each time you log in, so it keeps running when this window
+                            closes (Mac and Linux; --always off takes that out again)
+  python3 serve.py --set-up-voice
+                            give this computer the voice the walk's people speak with, once (1.5 to 3 GB;
+                            README, "Voice")
   python3 serve.py --control  and let the page talk to your Claude Code agents, answer their
                             permission requests, and start and stop them (docs/connect.md)
   python3 serve.py --brain  and let the receptionist and your assistant talk about anything, with
@@ -13,6 +18,10 @@
   python3 serve.py --remote my-mac.your-tailnet.ts.net
                             and let your own phone in, from anywhere, through a private way in such as
                             Tailscale Serve, once it is paired with a code from this computer (docs/phone.md)
+
+It opens the page in your browser when it starts in a terminal (--no-browser leaves that). If you chose,
+in connect/setup.py, to answer your agents from the building, it starts with --control on (data/serve.json;
+--no-control leaves it off this time).
 
 It serves the page and its files from this folder, and nothing else: no other folders, no
 listings, nothing cached, so a change shows on the next reload. Your own company goes in data/
@@ -54,10 +63,12 @@ import threading
 import time
 import urllib.error
 import urllib.request
+import webbrowser
 import zipfile
 from html import escape as html_escape
 from urllib.parse import parse_qs, unquote
 
+from connect import always
 from connect.brain import Brain
 from connect.control import Control
 from connect.remote import COOKIE as PHONE_COOKIE, LIFE as PHONE_LIFE, Remote
@@ -86,6 +97,7 @@ FORWARDED = ("X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "Forwar
 # Both are checked by spelling in lower case, and again by what the file is on disk: a Mac's disk takes
 # /data/Notes.json for /data/notes.json.
 BAKED = os.path.join(ROOT, "baked")
+SAVED = os.path.join(ROOT, "data", "serve.json")  # what you chose in connect/setup.py: {"control": true}
 # The photo-real look's pictures this version of Arnheim is made for: baked/, from a release's baked.zip (README,
 # "The photo-real look"). A new bake goes out as a new release, and these four change with it (studio/publish.py).
 PICTURES = {
@@ -591,6 +603,112 @@ def network_address():
     return None if address.startswith(("0.", "127.")) else address
 
 
+def saved():
+    """What you chose in connect/setup.py for each start, such as answering your agents from the building."""
+    try:
+        with open(SAVED, encoding="utf-8-sig") as handle:
+            got = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    return got if isinstance(got, dict) else {}
+
+
+def control_wanted(args, away):
+    """(whether control is on, whether you chose it in setup): --control, or your choice in data/serve.json
+    unless --no-control, and never on the network (away is --lan or --share, or None)."""
+    chose = saved().get("control") is True and not args.no_control
+    return bool(args.control or (chose and not away)), chose
+
+
+def answers(port, wait=0.5):
+    """Whether something already answers on this computer at the port."""
+    try:
+        with socket.create_connection(("127.0.0.1", port), timeout=wait):
+            return True
+    except OSError:
+        return False
+
+
+def open_page(url):
+    """The page in this computer's browser, if it has one to open."""
+    try:
+        webbrowser.open(url)
+    except Exception:  # no browser here (a server, say): the address printed is enough
+        pass
+
+
+def python_name():
+    """This Python by the name that survives an upgrade, where there is one (connect/setup.py)."""
+    try:
+        from connect.setup import interpreter
+        return interpreter()
+    except Exception:
+        return sys.executable
+
+
+def wait_for_port(where, every=30):
+    """The login copy, when something else has its port: says so once, then takes the port when it frees."""
+    print(f"Port {where[1]} is in use. Arnheim takes it as soon as it is free (python3 serve.py --always off stops this).", flush=True)
+    while True:
+        time.sleep(every)
+        try:
+            return Server(where, Handler)
+        except OSError as error:
+            if error.errno not in PORT_TAKEN:
+                raise
+
+
+def keep_running(args):
+    """python3 serve.py --always [off]: Arnheim started by itself when you log in, and kept running
+    (connect/always.py)."""
+    if args.always == "off":
+        path = always.turn_off()
+        for _ in range(20):  # until its copy has let go of the port
+            if not path or not answers(args.port):
+                break
+            time.sleep(0.25)
+        print("Arnheim no longer starts by itself, and the copy it started has stopped." if path
+              else "Arnheim wasn't set to start by itself: nothing changed.")
+        return 0
+    words = [str(args.port)] if args.port != 8740 else []
+    for flag in ("lan", "share", "control", "no_control", "routines", "pings", "no_git", "brain", "drawn"):
+        if getattr(args, flag):
+            words.append("--" + flag.replace("_", "-"))
+    if args.remote:
+        words += ["--remote", args.remote]
+    if always.kind() is None:
+        sys.exit("Starting Arnheim when you log in works on a Mac and on Linux for now. Keep this window open with "
+                 "python3 serve.py, or add it to your computer's own list of things to start at login.")
+    always.stop_running()  # the copy it started before lets go of the port
+    for _ in range(20):
+        if not answers(args.port):
+            break
+        time.sleep(0.25)
+    else:
+        sys.exit(f"Port {args.port} is in use, perhaps by Arnheim in another window. Stop that one (Ctrl-C there), then run this again.")
+    try:
+        path = always.turn_on([python_name(), os.path.join(ROOT, "serve.py"), *words], ROOT)
+    except always.Unsupported as why:
+        sys.exit(str(why))
+    except (OSError, RuntimeError) as error:
+        sys.exit(f"Arnheim couldn't be set to start by itself: {error}")
+    url = f"http://127.0.0.1:{args.port}"
+    print(f"Arnheim now starts by itself when you log in, and keeps running when you close this window ({path}).", flush=True)
+    print("Starting it now. The first start downloads the photo-real look's pictures, so it can take a minute...", flush=True)
+    end = time.time() + 180
+    while time.time() < end and not answers(args.port):
+        time.sleep(0.5)
+    log = always.log_of()
+    if answers(args.port):
+        print(f"Arnheim is at {url}", flush=True)
+        if sys.stdout.isatty() and not args.no_browser:
+            open_page(url)
+    else:
+        print(f"It hasn't answered yet. {'What it says is in ' + log if log else 'journalctl --user -u arnheim says why'}.", flush=True)
+    print("python3 serve.py --always off stops it and takes it out.", flush=True)
+    return 0
+
+
 def company_note():
     """Which company the page will show, and why any of data/'s files can't be read."""
     def shown(name):  # as the page will get it: a file inside this folder, links resolved
@@ -822,6 +940,13 @@ def main():
     parser.add_argument("--remote", metavar="NAME",
                         help="let your own paired phone in from anywhere, through a private https way in such as Tailscale Serve "
                              "that answers at NAME (docs/phone.md)")
+    parser.add_argument("--no-control", action="store_true", help="leave control off this time, though you chose it in connect/setup.py")
+    parser.add_argument("--no-browser", action="store_true", help="don't open the page in the browser when it starts")
+    parser.add_argument("--always", nargs="?", const="on", choices=["on", "off"],
+                        help="start it now and each time you log in, so it keeps running when this window closes (Mac and Linux); "
+                             "--always off takes that out")
+    parser.add_argument("--set-up-voice", action="store_true",
+                        help="give this computer the voice the walk's people speak with, once: it asks first (1.5 to 3 GB; README, \"Voice\")")
     args = parser.parse_args()
     if not 0 < args.port < 65536:
         parser.error("the port is a number from 1 to 65535")
@@ -838,24 +963,41 @@ def main():
                  f"copy on another port: python3 serve.py --brain, and python3 serve.py {args.port + 1} {away}")
     if args.remote and away:
         sys.exit(f"--remote keeps Arnheim on this computer and lets only paired phones in, so it can't go with {away}. Leave out one of them.")
+    if args.always:
+        sys.exit(keep_running(args))
+    if args.set_up_voice:
+        from voice import install
+        sys.exit(install.main([]))
+    control_on, chose = control_wanted(args, away)
     try:
         remote = Remote(args.remote, os.path.join(ROOT, "data")) if args.remote else None
     except ValueError as error:
         sys.exit(str(error))
-    control = Control() if args.control else None
+    control = Control() if control_on else None
     try:
         brain = Brain(tell=lambda why: print(f"The brain had no answer: {why}", file=sys.stderr, flush=True), control=control) if args.brain else None
     except ValueError as error:
         sys.exit(str(error))
+    where = ("0.0.0.0" if args.lan or args.share else "127.0.0.1", args.port)
+    login_copy = os.environ.get("ARNHEIM_ALWAYS") == "1"  # the copy that starts at login (connect/always.py)
+    server = None
     try:
-        server = Server(("0.0.0.0" if args.lan or args.share else "127.0.0.1", args.port), Handler)
+        server = Server(where, Handler)
     except OSError as error:
-        if error.errno in PORT_TAKEN:
+        if error.errno in PORT_TAKEN and login_copy:
+            pass  # it waits for the port below, rather than start again every minute
+        elif error.errno in PORT_TAKEN:
+            if always.installed():
+                sys.exit(f"Arnheim already runs by itself (python3 serve.py --always): open http://127.0.0.1:{args.port}. "
+                         "To start it here instead, first run python3 serve.py --always off.")
             sys.exit(f"Port {args.port} is already in use, perhaps by another copy of Arnheim. Stop that one, "
                      f"or give another port: python3 serve.py {args.port + 1 if args.port < 65535 else 8741}")
-        if error.errno == errno.EACCES:
+        elif error.errno == errno.EACCES:
             sys.exit(f"This computer won't let Arnheim use port {args.port}. Give one above 1024: python3 serve.py 8740")
-        raise
+        else:
+            raise
+    if server is None:
+        server = wait_for_port(where)
     server.lan = args.lan or args.share
     server.remote = remote
     server.share = share_key(new=args.new_link) if args.share else None
@@ -871,15 +1013,22 @@ def main():
         sys.exit("\nStopped before the pictures were in place. Nothing was kept.")
     server.fetched = looks
     print(f"Arnheim is at http://127.0.0.1:{args.port}", flush=True)
+    if sys.stdout.isatty() and not args.no_browser and not os.environ.get("ARNHEIM_NO_BROWSER"):
+        threading.Timer(0.5, open_page, args=(f"http://127.0.0.1:{args.port}",)).start()
     if looks:
         print(looks, flush=True)
+    if not VOICE.installed():
+        print("The walk's people speak once this computer has a voice: python3 serve.py --set-up-voice (about 1.5 GB, or 3 GB on Linux, once).", flush=True)
     if remote:
         print(f"Phones are on: a phone paired with this computer can open https://{remote.name}/ from anywhere your "
               f"private way in reaches. With Tailscale, run once: tailscale serve --bg {args.port}. To pair a phone, open "
               "the Company page here and choose Pair a phone (docs/phone.md).", flush=True)
-    if args.control:
-        print("Control is on: the page on this computer can talk to your Claude Code agents, answer their "
-              "permission requests, and start and stop them (docs/connect.md).", flush=True)
+    if control_on:
+        print("Control is on: the page on this computer can talk to your Claude Code and Codex agents, answer their "
+              "permission requests, and start and stop them (docs/connect.md)."
+              + ("" if args.control else " You chose it in setup (data/serve.json); --no-control leaves it off."), flush=True)
+    elif chose and away:
+        print(f"Control stays off with {away}: it works only on this computer.", flush=True)
     if brain:
         print(f"The brain is on: the receptionist and your assistant answer with Claude ({brain.model}), through "
               "your own Claude Code and on your own Claude plan. What you ask them goes to Claude with the "

@@ -117,6 +117,22 @@
     { "id": "sample-ask-tests", "key": "cl1", "tool": "Bash", "what": "Bash: npm test -- reader", "ago": 240 },
     { "id": "sample-ask-read", "key": "ck1", "tool": "Read", "what": "Read: ../field-tests/run-3.csv", "ago": 95 }
   ],
+  "usage": {
+    "about": "Made up: the plan's limits as Claude Code and Codex would report them, seconds back from when the page opened (connect/usage.py).",
+    "sources": {
+      "Claude Code": {
+        "five_hour": [
+          { "ago": 3600, "used": 40, "resets_in": 7200 }, { "ago": 2700, "used": 45, "resets_in": 7200 },
+          { "ago": 1800, "used": 51, "resets_in": 7200 }, { "ago": 900, "used": 56, "resets_in": 7200 },
+          { "ago": 60, "used": 62, "resets_in": 7200 }
+        ],
+        "seven_day": [{ "ago": 3600, "used": 29, "resets_in": 264600 }, { "ago": 60, "used": 31, "resets_in": 264600 }]
+      },
+      "Codex": {
+        "five_hour": [{ "ago": 3000, "used": 12, "resets_in": 9000 }, { "ago": 60, "used": 15, "resets_in": 9000 }]
+      }
+    }
+  },
   "story": [
     { "line": "Lantern's nightly build started on the Build server.", "change": [["jobs", "j1", { "state": "running" }]] },
     { "line": "A conversation about the wind sensor on Tidepool started working.", "change": [["conversations", "ct2", { "working": true, "check": false, "proof": null, "says": {"now": "I'm looking at why the wind sensor reads high after a few days. It drifts by about half a metre a second.", "next": "Next I'll compare it with the spare sensor and write down a fix.", "when": "Once the spare has run for a day."} }]] },

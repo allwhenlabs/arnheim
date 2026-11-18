@@ -50,14 +50,16 @@ def _beside(name):
 
 
 try:
-    from . import budget, restore  # as connect.control, from serve.py
+    from . import budget, restore, standing  # as connect.control, from serve.py
 except ImportError:
     try:
         import budget  # beside this file, as the hook has it
         import restore
+        import standing
     except ImportError:
         budget = _beside("budget")
         restore = _beside("restore")
+        standing = _beside("standing")
 
 HERE = os.path.dirname(os.path.realpath(__file__))
 DATA = os.environ.get("ARNHEIM_DATA") or os.path.join(os.path.dirname(HERE), "data")
@@ -203,9 +205,24 @@ def told(rows, new=False):
             f"Follow them unless they tell you otherwise: {said}")
 
 
+PATCHED = re.compile(r"^\*\*\* (?:Add|Update|Delete) File: (.+?)\s*$|^\*\*\* Move to: (.+?)\s*$", re.M)
+
+
+def patched(given):
+    """The files a Codex patch changes (its apply_patch tool), as the patch names them, in order."""
+    given = given if isinstance(given, dict) else {}
+    patch = given.get("command") or given.get("patch") or given.get("input") or ""
+    if isinstance(patch, list):
+        patch = "\n".join(str(part) for part in patch)
+    return list(dict.fromkeys(a or b for a, b in PATCHED.findall(str(patch))))
+
+
 def describe(tool, given):
     """What a permission is for, in one line: the command, the file or the address."""
     given = given if isinstance(given, dict) else {}
+    if tool == "apply_patch":  # Codex's edits: the files, never the whole patch
+        files = patched(given)
+        return one_line(f"apply_patch: change {', '.join(files)}" if files else "apply_patch: change files", 300)
     for field in ("command", "file_path", "notebook_path", "url", "query", "path", "pattern", "description"):
         if isinstance(given.get(field), str) and given[field].strip():
             return one_line(f"{tool}: {given[field]}", 300)
@@ -286,10 +303,20 @@ class Box:
         return rows
 
     # A permission a conversation is waiting for, and the one answer to it.
-    def ask(self, key, tool, what, until):
+    def ask(self, key, tool, what, until, more=None):
+        """A request waiting for your answer. `more`: how often you allowed it before on its floor ("before"),
+        whether it may be allowed for good ("standable"), and its floor ("project"; connect/standing.py)."""
         aid = secrets.token_urlsafe(12)
-        write(self.path("asks", aid + ".json"), {"id": aid, "key": key, "tool": tool, "what": what, "at": time.time(), "until": until})
+        row = {**(more or {}), "id": aid, "key": key, "tool": tool, "what": what, "at": time.time(), "until": until}
+        write(self.path("asks", aid + ".json"), row)
         return aid
+
+    def ask_row(self, aid):
+        """A request still waiting for an answer, or None."""
+        if not isinstance(aid, str) or not ASK_ID.match(aid):
+            return None
+        row = read(self.path("asks", aid + ".json"))
+        return row if row and float(row.get("until") or 0) > time.time() and not os.path.exists(self.path("answers", aid + ".json")) else None
 
     def asks(self):
         """The requests still waiting for an answer, oldest first."""
@@ -374,14 +401,14 @@ class Box:
         return True
 
 
-def await_answer(box, key, tool, what):
+def await_answer(box, key, tool, what, more=None):
     """For the hook: shows a permission request in the building, if someone is using it, and waits
     for your answer there. Gives "allow", "deny", "stop" (deny and stop the conversation), or None: no
     answer, so Claude Code asks as it always does."""
     if not box.watched():
         return None
     until = time.time() + wait_seconds()
-    aid = box.ask(key, tool, what, until)
+    aid = box.ask(key, tool, what, until, more)
     try:
         while time.time() < until:
             got = box.answered(aid)
@@ -451,6 +478,12 @@ class Control:
                 if not self.box.answer(given.get("id"), given.get("behavior")):
                     raise Refused("That request isn't waiting any more: it was answered, or Claude Code asked there instead.")
                 return answer(200, {"ok": True})
+            if name == "always":
+                return answer(200, self.always(given.get("id")))
+            if name == "unalways":
+                if not standing.remove(self.data, given.get("id")):
+                    raise Refused("That isn't one of the commands allowed for good.")
+                return answer(200, {"ok": True})
             if name == "start":
                 return answer(200, self.start(given.get("project"), given.get("text")))
             if name == "stop":
@@ -484,12 +517,31 @@ class Control:
         return {
             "on": True,
             "wait": wait_seconds(),
-            "asks": [{k: row.get(k) for k in ("id", "key", "tool", "what", "at", "until")} for row in self.box.asks()],
+            "asks": [{k: row.get(k) for k in ("id", "key", "tool", "what", "at", "until", "before", "standable", "project")} for row in self.box.asks()],
+            "always": standing.rows(self.data),
             "runs": runs,
             "projects": [{k: f[k] for k in ("project", "label", "floor", "check")} for f in self.floors()],
             "paused": self.box.paused(),
             "allowed": self.box.allowances(budget.local_day()),
         }
+
+    def always(self, aid):
+        """Allows a waiting request now, and its exact command on its floor from now on (connect/standing.py)."""
+        row = self.box.ask_row(aid)
+        if not row:
+            raise Refused("That request isn't waiting any more: it was answered, or the agent asked there instead.")
+        project, tool, command = row.get("project"), row.get("tool"), row.get("command")
+        if not standing.can_stand(tool, command):
+            raise Refused("Only a plain test, check or build command, or one that only looks, can be allowed for good. This one asks each time.")
+        if standing.times(self.data, project, tool, command) < standing.OFFER_AFTER:
+            raise Refused(f"Allow it {standing.OFFER_AFTER} times on this floor first: then it can be allowed for good.")
+        if not self.box.answer(aid, "allow"):
+            raise Refused("That request isn't waiting any more: it was answered, or the agent asked there instead.")
+        try:
+            kept = standing.add(self.data, project, tool, command)
+        except ValueError as why:  # allowed this once, as asked; it asks again next time
+            raise Refused(f"Allowed this once. {why}")
+        return {"ok": True, "always": kept}
 
     # ---------- talking, starting and stopping ----------
 

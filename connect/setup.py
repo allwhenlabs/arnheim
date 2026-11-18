@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """Connects Arnheim to your own work in one step.
 
-  python3 connect/setup.py                 find your projects, make your building, connect Claude Code
+  python3 connect/setup.py                 find your projects, make your building, connect Claude Code and Codex
   python3 connect/setup.py --yes           the same, taking every suggestion without asking
   python3 connect/setup.py --folder PATH   use this project folder instead of looking (give it again for more)
-  python3 connect/setup.py --undo          take Arnheim's hooks out of Claude Code's settings again
+  python3 connect/setup.py --undo          take Arnheim's hooks out of Claude Code's and Codex's settings again
 
 It finds the folders your recent Claude Code and Codex conversations ran in, from the first lines of
 each conversation's file (which name its folder), never from what was said in it. Each project
 becomes a floor. It writes them to data/company.json, or adds them to the one there, and adds
-Arnheim's hooks to Claude Code's settings (docs/connect.md, steps 1, 2 and 4), keeping a copy of each
-file before it changes it. It asks before it changes anything, never changes your projects' files,
+Arnheim's hooks to Claude Code's settings (docs/connect.md, steps 1, 2 and 4), and to Codex's hooks.json
+if Codex is here (step 9), keeping a copy of each file before it changes it. It asks before it changes anything, never changes your projects' files,
 and running it twice changes nothing the second time. Standard library only, Python 3.7 or newer.
 """
 import argparse
@@ -19,6 +19,7 @@ import os
 import re
 import shlex
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -27,8 +28,13 @@ HERE = os.path.dirname(os.path.realpath(__file__))
 ROOT = os.path.dirname(HERE)
 DATA = os.environ.get("ARNHEIM_DATA") or os.path.join(ROOT, "data")
 SCRIPT = os.path.join(HERE, "claude_code.py")
+CODEX_SCRIPT = os.path.join(HERE, "codex.py")
+USAGE_SCRIPT = os.path.join(HERE, "usage.py")  # Claude Code's status line: your plan's limits (connect/usage.py)
 WINDOWS = os.name == "nt"
 MOST = 12  # projects suggested at most, newest first
+SERVE = os.path.join(ROOT, "serve.py")
+YES = re.compile(r"^(y|yes|yeah|yep|ok|okay|sure|all)[.!]?$", re.I)  # said instead of pressing Enter
+NO = re.compile(r"^(n|no|nope|q|quit|stop|cancel)[.!]?$", re.I)
 
 # Claude Code's moments that Arnheim hears (docs/connect.md, step 2), and the permission request that
 # control answers (step 4). Without --control, nobody is waiting in the building, so a permission
@@ -36,6 +42,11 @@ MOST = 12  # projects suggested at most, newest first
 EVENTS = ("SessionStart", "UserPromptSubmit", "PostToolUse", "Notification", "Stop", "TaskCreated",
           "TaskCompleted", "SessionEnd", "PermissionRequest")
 TIMEOUTS = {"PermissionRequest": 150}
+# Codex's hooks have the same names (docs/connect.md, step 9). It has no Notification: it asks through
+# PermissionRequest. Interrupt is you stopping it. SessionEnd and Interrupt may take 3 seconds at most there.
+CODEX_EVENTS = ("SessionStart", "UserPromptSubmit", "PostToolUse", "PermissionRequest", "Stop", "SessionEnd", "Interrupt")
+CODEX_TIMEOUTS = {"PermissionRequest": 150, "SessionEnd": 3, "Interrupt": 3}
+CODEX_HOOKS = (0, 124)  # the Codex that brought hooks
 FEEDS = ["feeds/claude-code.json", "feeds/agents.json", "feeds/projects.json"]
 ROOMS = [
     {"id": "work", "label": "Work", "about": "Tasks, and what an agent is waiting on you for. A desk glows amber when it needs you."},
@@ -341,10 +352,10 @@ def hook_command(exe=None, script=None, windows=WINDOWS):
     return " ".join(shlex.quote(p) for p in (exe, script))
 
 
-def connector_of(command):
+def connector_of(command, name="claude_code.py"):
     """The connector a hook command runs, as written, if it is Arnheim's (any copy): a Python running
-    connect/claude_code.py, with or without anything after it. Else None."""
-    if not isinstance(command, str) or "claude_code.py" not in command:
+    connect/claude_code.py (or the connector named), with or without anything after it. Else None."""
+    if not isinstance(command, str) or name not in command:
         return None
     for text in (command, command.replace("\\", "/")):  # as written, then with Windows' backslashes as slashes
         try:
@@ -354,7 +365,7 @@ def connector_of(command):
         words = [w.strip("'\"") for w in words]
         for n, word in enumerate(words[1:], 1):
             path = word.replace("\\", "/")
-            if (path == "connect/claude_code.py" or path.endswith("/connect/claude_code.py")) and \
+            if (path == "connect/" + name or path.endswith("/connect/" + name)) and \
                     any(PYTHON.match(os.path.basename(w.replace("\\", "/"))) for w in words[:n]):
                 return word
     return None
@@ -373,8 +384,9 @@ def settings_path():
     return os.path.join(claude_home(), "settings.json")
 
 
-def read_settings():
-    path = settings_path()
+def read_settings(path=None, who="Claude Code"):
+    """(the settings file, what it holds or None): Claude Code's settings, or Codex's hooks.json."""
+    path = path or settings_path()
     settings = read_json(path, shown(path))
     if settings is None:
         return path, None
@@ -382,19 +394,26 @@ def read_settings():
         raise Refused(f"{shown(path)} should be one object, between {{ and }}. Fix it and run this again. Nothing was changed.")
     hooks = settings.get("hooks", {})
     if not isinstance(hooks, dict) or any(not isinstance(v, list) for v in hooks.values()):
-        raise Refused(f"In {shown(path)}, \"hooks\" should be an object of lists, as Claude Code's docs show. Fix it and "
+        raise Refused(f"In {shown(path)}, \"hooks\" should be an object of lists, as {who}'s docs show. Fix it and "
                       "run this again. Nothing was changed.")
     return path, settings
 
 
-def plan_hooks(settings):
-    """(the settings to write or None, [events added], [(event, command) replaced]). This copy's hook only
-    for some tools (a matcher), or by a relative path that works in one folder only, is replaced by one for
-    everything. Refuses when another copy of Arnheim already has hooks there."""
+def codex_hooks_path():
+    return os.path.join(codex_home(), "hooks.json")
+
+
+def plan_hooks(settings, codex=False):
+    """(the settings to write or None, [events added], [(event, command) replaced]): Claude Code's, or with
+    codex, Codex's hooks.json. This copy's hook only for some tools (a matcher), or by a relative path that
+    works in one folder only, is replaced by one for everything. Refuses when another copy of Arnheim
+    already has hooks there."""
+    events, script, timeouts = (CODEX_EVENTS, CODEX_SCRIPT, CODEX_TIMEOUTS) if codex else (EVENTS, SCRIPT, TIMEOUTS)
+    name, who = os.path.basename(script), "Codex" if codex else "Claude Code"
     settings = json.loads(json.dumps(settings or {}))
     hooks = settings.setdefault("hooks", {})
-    command, added, replaced, others = hook_command(), [], [], set()
-    for event in EVENTS:
+    command, added, replaced, others = hook_command(script=script), [], [], set()
+    for event in events:
         groups, covered = [], False
         for group in hooks.get(event, []):
             if not isinstance(group, dict) or not isinstance(group.get("hooks"), list):
@@ -402,10 +421,10 @@ def plan_hooks(settings):
                 continue
             kept = []
             for hook in group["hooks"]:
-                found = connector_of(hook.get("command") if isinstance(hook, dict) else None)
+                found = connector_of(hook.get("command") if isinstance(hook, dict) else None, name)
                 if not found:
                     kept.append(hook)
-                elif absolute(found) and not same_file(found, SCRIPT):
+                elif absolute(found) and not same_file(found, script):
                     others.add(found)
                     kept.append(hook)
                 elif absolute(found) and group.get("matcher") in CATCH_ALL:
@@ -417,16 +436,53 @@ def plan_hooks(settings):
                 groups.append(group if len(kept) == len(group["hooks"]) else {**group, "hooks": kept})
         if not covered:
             hook = {"type": "command", "command": command}
-            if event in TIMEOUTS:
-                hook["timeout"] = TIMEOUTS[event]
+            if event in timeouts:
+                hook["timeout"] = timeouts[event]
             groups.append({"hooks": [hook]})
             added.append(event)
         if event in hooks or groups:
             hooks[event] = groups
     if others:
-        raise Refused("Claude Code already tells another copy of Arnheim what happens, at " + ", ".join(sorted(others))
+        raise Refused(f"{who} already tells another copy of Arnheim what happens, at " + ", ".join(sorted(others))
                       + ". Run python3 connect/setup.py --undo to take those hooks out, then run this again here. Nothing was changed.")
     return (settings if added or replaced else None), added, replaced
+
+
+def plan_status(settings):
+    """(the settings with Arnheim's status line, or None when nothing changes; what it does: "added", "wrapped"
+    (yours still shows, run by Arnheim's), "left" (a kind it can't wrap) or None (already there)). Claude Code
+    hands a status line your plan's limits, which Arnheim keeps for the forecast (connect/usage.py)."""
+    settings = json.loads(json.dumps(settings or {}))
+    line = settings.get("statusLine")
+    ours = hook_command(script=USAGE_SCRIPT)
+    if isinstance(line, dict) and connector_of(line.get("command"), "usage.py"):
+        return None, None
+    if line is None:
+        settings["statusLine"] = {"type": "command", "command": ours}
+        return settings, "added"
+    if not WINDOWS and isinstance(line, dict) and line.get("type") == "command" and isinstance(line.get("command"), str) \
+            and line["command"].strip():
+        settings["statusLine"] = {**line, "command": f"{ours} --then {shlex.quote(line['command'])}"}
+        return settings, "wrapped"
+    return None, "left"
+
+
+def take_out_status(settings):
+    """(the settings with your own status line back, or without Arnheim's, and whether it changed)."""
+    settings = json.loads(json.dumps(settings))
+    line = settings.get("statusLine")
+    if not isinstance(line, dict) or not connector_of(line.get("command"), "usage.py"):
+        return settings, False
+    try:
+        words = shlex.split(line["command"], posix=not WINDOWS)
+    except ValueError:
+        words = []
+    theirs = words[words.index("--then") + 1] if "--then" in words and words.index("--then") + 1 < len(words) else None
+    if theirs:
+        settings["statusLine"] = {**line, "command": theirs}
+    else:
+        del settings["statusLine"]
+    return settings, True
 
 
 def connected_by_hand(folders):
@@ -449,8 +505,9 @@ def connected_by_hand(folders):
     return found
 
 
-def take_out(settings):
-    """(the settings without any of Arnheim's hooks, [(event, command) taken out]). Everything else stays."""
+def take_out(settings, name="claude_code.py"):
+    """(the settings without any of Arnheim's hooks, [(event, command) taken out]): those running the
+    connector named. Everything else stays."""
     settings = json.loads(json.dumps(settings))
     hooks = settings.get("hooks") or {}
     taken = []
@@ -462,7 +519,7 @@ def take_out(settings):
                 continue
             kept = []
             for hook in group["hooks"]:
-                if isinstance(hook, dict) and connector_of(hook.get("command")):
+                if isinstance(hook, dict) and connector_of(hook.get("command"), name):
                     taken.append((event, hook["command"]))
                 else:
                     kept.append(hook)
@@ -580,8 +637,10 @@ def pick(found):
     chosen = list(found)
     while True:
         said = ask("Press Enter to give each of these a floor, or type the numbers you want (like 1 3), or a folder to add: ")
-        if not said:
+        if not said or YES.match(said):
             return chosen
+        if NO.match(said):
+            raise Refused("Stopped before changing anything.")
         if re.fullmatch(r"[\d\s,]+", said):
             numbers = [int(n) for n in re.findall(r"\d+", said)]
             wrong = [n for n in numbers if not 1 <= n <= len(found)]
@@ -609,23 +668,106 @@ def claude_code_here():
     return bool(shutil.which("claude")) or os.path.isdir(claude_home())
 
 
+def codex_here():
+    return bool(shutil.which("codex")) or os.path.isdir(codex_home())
+
+
+def codex_version():
+    """This computer's Codex as (major, minor), or None when it can't be told."""
+    found = shutil.which("codex")
+    if not found:
+        return None
+    try:
+        said = subprocess.run([found, "--version"], capture_output=True, text=True, timeout=10).stdout
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+    match = re.search(r"(\d+)\.(\d+)", said or "")
+    return (int(match.group(1)), int(match.group(2))) if match else None
+
+
+def codex_notes():
+    """What could keep Codex from running the hooks, or make it tell the building twice, in words."""
+    notes = []
+    version = codex_version()
+    config = os.path.join(codex_home(), "config.toml")
+    try:
+        with open(config, encoding="utf-8-sig") as handle:
+            text = handle.read(1 << 20)
+    except OSError:
+        text = ""
+    features = re.search(r"^\s*\[features\]\s*$(.*?)(?=^\s*\[|\Z)", text, re.M | re.S)
+    if features and re.search(r"^\s*hooks\s*=\s*false\b", features.group(1), re.M):
+        notes.append(f"{shown(config)} switches Codex's hooks off ([features] hooks = false). Take that line out for them to run.")
+    if re.search(r"^\s*notify\s*=.*codex\.py", text, re.M):
+        notes.append(f"{shown(config)} also runs connect/codex.py when a turn ends (notify). You can leave it: once "
+                     "the hooks run, it stays quiet, so nothing is told twice.")
+    return notes
+
+
+def saved_path():
+    return os.path.join(DATA, "serve.json")
+
+
+def saved_choices():
+    path = saved_path()
+    had = read_json(path, shown(path))
+    return had if isinstance(had, dict) else {}
+
+
+def plan_saved(answer):
+    """(what to write to data/serve.json, or None): your choice to answer your agents from the building."""
+    had = saved_choices()
+    return None if had.get("control") is answer else {**had, "control": answer}
+
+
+def ask_yes(question, default=True):
+    """A yes or no: Enter is the default. The end of the input counts as no."""
+    try:
+        said = input(question).strip()
+    except EOFError:
+        print()
+        return False
+    return default if not said else bool(YES.match(said)) or said.lower().startswith("y")
+
+
+def start_always():
+    """Starts Arnheim now and at each login (serve.py --always), here in this window's words."""
+    try:
+        return subprocess.call([sys.executable, SERVE, "--always"])
+    except OSError as error:
+        print(f"It couldn't start: {error}. Start it with: python3 serve.py")
+        return 1
+
+
+def can_always():
+    return sys.platform == "darwin" or sys.platform.startswith("linux")
+
+
 def undo():
-    path, settings = read_settings()
-    if settings is None:
-        print(f"There are no Claude Code settings at {shown(path)}, so there is nothing to take out.")
-        return 0
-    out, taken = take_out(settings)
-    if not taken:
-        print(f"Claude Code's settings ({shown(path)}) have none of Arnheim's hooks: nothing changed.")
-    else:
+    changed = 0
+    for path, who, name in ((settings_path(), "Claude Code", "claude_code.py"), (codex_hooks_path(), "Codex", "codex.py")):
+        path, settings = read_settings(path, who)
+        if settings is None:
+            if who == "Claude Code":
+                print(f"There are no Claude Code settings at {shown(path)}, so there is nothing to take out.")
+            continue
+        out, taken = take_out(settings, name)
+        out, status_back = take_out_status(out) if who == "Claude Code" else (out, False)
+        if not taken and not status_back:
+            print(f"{who}'s {'settings' if who == 'Claude Code' else 'hooks'} ({shown(path)}) have none of Arnheim's hooks: nothing changed.")
+            continue
         copy = write_all([(path, out)], {path: os.path.dirname(os.path.realpath(path))})[path]
-        print(f"Took Arnheim's hooks out of {shown(path)}:")
+        changed += 1
+        if taken:
+            print(f"Took Arnheim's hooks out of {shown(path)}:")
         commands = {}
         for event, command in taken:
             commands.setdefault(command, []).append(event)
         for command, events in commands.items():
             print(f"  {command}")
             print(f"    for {', '.join(events)}")
+        if status_back:
+            print("  Claude Code's status line is " + ("yours again." if out.get("statusLine") else "back to none, as it was."))
         print(f"Every other setting and hook in it is as it was. The file as it was before is at {shown(copy)}.")
     print("Your building, data/company.json, is left as it is. Delete the data folder to go back to the made-up company.")
     return 0
@@ -672,9 +814,25 @@ def setup(args):
     settings_file, settings = read_settings() if hooks_on else (settings_path(), None)
     new_settings, events, replaced = plan_hooks(settings) if hooks_on else (None, [], [])
     twice = connected_by_hand([p["folder"] for p in projects]) if new_settings else []
+    status_done = None
+    if hooks_on:
+        with_status, status_done = plan_status(new_settings if new_settings is not None else settings)
+        if with_status is not None:
+            new_settings = with_status
+    codex_old = codex_version()
+    codex_old = codex_old if codex_old and codex_old < CODEX_HOOKS and not args.no_hooks else None  # no hooks yet
+    codex_on = not args.no_hooks and codex_here() and not codex_old
+    codex_file, codex_settings = read_settings(codex_hooks_path(), "Codex") if codex_on else (codex_hooks_path(), None)
+    new_codex, codex_events, codex_replaced = plan_hooks(codex_settings, codex=True) if codex_on else (None, [], [])
+    serve_file, serve_choice = saved_path(), None
+    if (hooks_on or codex_on) and "control" not in saved_choices():  # answering from the building: asked once, ever
+        answer = True if args.yes else ask_yes(
+            "Answer your agents from the building too: Allow or Deny their permission requests, and send them messages? "
+            "It works only on this computer. [Y/n] ")
+        serve_choice = plan_saved(answer)
 
     print()
-    if not company and not new_settings:
+    if not company and not new_settings and not new_codex and not serve_choice:
         for folder in already:
             print(f"  {shown(folder)} already has a floor.")
         print("Everything is already set up: nothing changed.")
@@ -687,13 +845,25 @@ def setup(args):
         print(f"  - add {len(added)} floor{'s' if len(added) != 1 else ''} to {shown(company_path)}, after keeping a copy in data/backups/")
     elif company:
         print(f"  - add the connectors' files to \"feeds\" in {shown(company_path)}, after keeping a copy in data/backups/")
-    if new_settings:
+    if new_settings and events:
         print(f"  - add Arnheim's hooks to Claude Code's settings, {shown(settings_file)}"
               f"{', after keeping a copy beside it' if settings is not None else ''}. They tell the building when a "
               "conversation starts, works, needs you and finishes. They change nothing Claude does unless you start "
               "Arnheim with --control")
+    if status_done in ("added", "wrapped"):
+        print("  - let Claude Code's status line tell the building how much of your plan's limits is used, so it can say "
+              "when you'd reach them" + (": your own status line still shows, as before" if status_done == "wrapped" else ""))
     for event, command in replaced:
         print(f"  - replace Arnheim's {event} hook there, which runs only for some tools or only from one folder: {command}")
+    if new_codex:
+        print(f"  - add Arnheim's hooks to Codex, {shown(codex_file)}{', after keeping a copy beside it' if codex_settings is not None else ''}. "
+              "They tell the building the same about Codex's conversations, and Codex runs them once you trust them "
+              "(type /hooks in Codex)")
+    for event, command in codex_replaced:
+        print(f"  - replace Arnheim's Codex {event} hook there, which runs only for some tools or only from one folder: {command}")
+    if serve_choice:
+        print(f"  - remember in {shown(serve_file)} that python3 serve.py starts with control "
+              f"{'on, so you answer your agents from the building' if serve_choice['control'] else 'off'}")
     print("  It never changes your projects' files.")
     for path in twice:
         print(f"  Note: {shown(path)} runs Arnheim's hooks too, so Claude Code would tell the building everything twice "
@@ -702,12 +872,15 @@ def setup(args):
         raise Refused("Stopped before changing anything.")
 
     print()
-    changes = ([(company_path, company)] if company else []) + ([(settings_file, new_settings)] if new_settings else [])
+    changes = ([(company_path, company)] if company else []) + ([(settings_file, new_settings)] if new_settings else []) \
+        + ([(codex_file, new_codex)] if new_codex else []) + ([(serve_file, serve_choice)] if serve_choice else [])
     copies = {}
     if company and not new:
         copies[company_path] = os.path.join(DATA, "backups")
     if new_settings and settings is not None:
         copies[settings_file] = os.path.dirname(os.path.realpath(settings_file))
+    if new_codex and codex_settings is not None:
+        copies[codex_file] = os.path.dirname(os.path.realpath(codex_file))
     kept = write_all(changes, copies)
     if company:
         copy = kept.get(company_path)
@@ -716,11 +889,15 @@ def setup(args):
             print(f"  + {floor['label']}  {floor['folder']}")
         for folder in already:
             print(f"  {shown(folder)} already had a floor.")
-    if new_settings:
+    if new_settings and (events or replaced):
         copy = kept.get(settings_file)
         print(f"Added to {shown(settings_file)}{f' (as it was before: {shown(copy)})' if copy else ''}, for "
               f"{', '.join(events) or 'the hooks it replaced'}:")
         print(f"  {hook_command()}")
+    if new_settings and status_done in ("added", "wrapped"):
+        print(f"Claude Code's status line now runs {shown(USAGE_SCRIPT)}"
+              + (", which still shows yours." if status_done == "wrapped" else ", which shows your plan's limits."))
+    if new_settings:
         if (settings or {}).get("disableAllHooks") is True:
             print("  Note: this file says \"disableAllHooks\": true, so Claude Code runs none of them until you take that out.")
         if sys.prefix != getattr(sys, "base_prefix", sys.prefix):
@@ -728,11 +905,36 @@ def setup(args):
                   "or run this again with your system's Python.")
     elif hooks_on:
         print(f"Claude Code's settings ({shown(settings_file)}) already have Arnheim's hooks.")
-    elif not args.no_hooks:
+    elif not args.no_hooks and not codex_on:
         print("Claude Code doesn't seem to be on this computer (there is no claude command and no ~/.claude folder), so no "
               "hooks were added. Install it from https://claude.com/claude-code, then run python3 connect/setup.py again.")
+    if new_codex:
+        copy = kept.get(codex_file)
+        print(f"Added to {shown(codex_file)}{f' (as it was before: {shown(copy)})' if copy else ''}, for "
+              f"{', '.join(codex_events) or 'the hooks it replaced'}:")
+        print(f"  {hook_command(script=CODEX_SCRIPT)}")
+        print("  Codex runs new hooks only once you trust them: start Codex, type /hooks, and trust Arnheim's. Once is enough.")
+    elif codex_on:
+        print(f"Codex's hooks ({shown(codex_file)}) already have Arnheim's.")
+    if codex_on:
+        for words in codex_notes():
+            print(f"  Note: {words}")
+    elif codex_old:
+        print(f"This Codex is {codex_old[0]}.{codex_old[1]}, older than {CODEX_HOOKS[0]}.{CODEX_HOOKS[1]}, which brought hooks, so "
+              "none were added for it. Until you update it, it can show each turn's end through its notify setting "
+              "(docs/connect.md, step 9).")
+    if serve_choice:
+        print(f"Wrote {shown(serve_file)}: control {'on' if serve_choice['control'] else 'off'} each time Arnheim starts "
+              "(python3 serve.py --no-control leaves it off once).")
     print()
-    print(f"Next: {'py' if WINDOWS else 'python3'} serve.py, then open http://127.0.0.1:8740 (already running? Reload the page).")
+    if not args.yes and can_always() and sys.stdin.isatty() and ask_yes(  # a person at a terminal, never a script or a test
+            "Start Arnheim now, and each time you log in, so it keeps running after you close this window? [Y/n] "):
+        start_always()
+        print("Conversations you start in these folders from now on show in the building.")
+        print("To take the hooks out again: python3 connect/setup.py --undo")
+        return 0
+    print(f"Next: {'py' if WINDOWS else 'python3'} serve.py. It opens the page at http://127.0.0.1:8740 (already running? Reload the page)."
+          + (" Or python3 serve.py --always, to keep it running and start it each time you log in." if can_always() else ""))
     print("Conversations you start in these folders from now on show in the building. To have it prove an agent's work by "
           "running a project's tests, give its floor a check (docs/connect.md, step 5).")
     print("To take the hooks out again: python3 connect/setup.py --undo")
@@ -745,12 +947,12 @@ def main(argv=None):
             stream.reconfigure(errors="replace")  # a folder's name the console can't show never stops it
         except (AttributeError, ValueError):
             pass
-    parser = argparse.ArgumentParser(description="Connects Arnheim to your own projects and Claude Code, in one step.")
+    parser = argparse.ArgumentParser(description="Connects Arnheim to your own projects, Claude Code and Codex, in one step.")
     parser.add_argument("--yes", action="store_true", help="take every suggestion without asking")
     parser.add_argument("--folder", action="append", metavar="PATH", help="use this project folder instead of looking (give it again for more)")
     parser.add_argument("--name", help="what the building is called, if it is new (My company if left out)")
-    parser.add_argument("--no-hooks", action="store_true", help="only make the building: leave Claude Code's settings alone")
-    parser.add_argument("--undo", action="store_true", help="take Arnheim's hooks out of Claude Code's settings")
+    parser.add_argument("--no-hooks", action="store_true", help="only make the building: leave Claude Code's and Codex's settings alone")
+    parser.add_argument("--undo", action="store_true", help="take Arnheim's hooks out of Claude Code's and Codex's settings")
     args = parser.parse_args(argv)
     try:
         return undo() if args.undo else setup(args)

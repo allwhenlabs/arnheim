@@ -79,6 +79,10 @@ export function createControl({ base = BASE, headers = () => ({}), every = 3000,
     projects: () => state.projects,
     say: (key, text) => call('say', { key, text }),
     answer: (id, behavior) => after(call('answer', { id, behavior })),
+    // Always allow what you always allow (connect/standing.py): a waiting request's exact command, on its floor, for good.
+    always: (id) => after(call('always', { id })),
+    unalways: (id) => after(call('unalways', { id })),
+    standing: () => state.always || [],
     begin: (project, text) => after(call('start', { project, text })),
     halt: (key) => after(call('stop', { key })),
     // Done means proven (connect/prove.py): the name of a floor's check, if it has one, and running it again.
@@ -145,7 +149,7 @@ export function agentReply(control, item, text, latest = () => item) {
     }
     const resumed = sent.sent === 'resumed';
     if (!resumed && !latest()?.working) {
-      yield "I'm waiting for you in Claude Code, so I'll see this the next time you send me something there.";
+      yield `I'm waiting for you in ${latest()?.agent || 'Claude Code'}, so I'll see this the next time you send me something there.`;
       return;
     }
     yield resumed ? 'On it. ' : "Got it. I'll read that at my next step. ";

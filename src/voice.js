@@ -244,12 +244,12 @@ export function createVoice({ hud, card, ctx, el, button, signal, early = true, 
     else if (!on) { text = 'Type to talk, or turn the voice on.'; state = 'off'; }
     else if (audio && audio.state !== 'running') { text = 'Tap anywhere to wake the voice.'; state = 'off'; } // a phone's sound, asleep after the screen locked
     else if (!server || server.state === 'starting' || server.state === 'off') { text = 'Waking the voice'; state = 'thinking'; }
-    else if (!server.say) { text = 'Type to talk. This computer has no voice set up.'; state = 'off'; }
+    else if (!server.say) { text = 'Type to talk. To give this computer a voice, run python3 serve.py --set-up-voice'; state = 'off'; }
     else if (server.state === 'failed') { text = `Type to talk. The voice stopped: ${server.error || 'no reason given'}`; state = 'off'; }
     else if (mode === 'hearing') text = 'Hearing you';
     else if (mode === 'thinking') text = `${name} is thinking`;
     else if (mode === 'speaking') text = `${name} is speaking`;
-    else if (!canHear()) { text = 'Type to talk. Listening is not set up on this computer yet.'; state = 'off'; }
+    else if (!canHear()) { text = 'Type to talk. To have them listen too, run python3 serve.py --set-up-voice'; state = 'off'; }
     else if (micTrouble) { text = `Type to talk. ${micTrouble}`; state = 'off'; }
     else text = 'Listening. Just speak.';
     line.textContent = text;

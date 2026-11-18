@@ -1,7 +1,9 @@
 # Arnheim
 
-Arnheim shows which of your AI coding agents is waiting on you, and whether the work each one calls
-done really passes its checks, as a building you can walk through.
+Arnheim puts all your AI coding agents, Claude Code and Codex alike, in one building you can walk
+through. It shows which one is waiting on you and lets you answer it there, proves whether the work
+each one calls done really passes its checks, tells the next agent what the last one finished, and
+warns you before your plan's limit runs out.
 
 ![A 20-second tour of Fernhollow, the made-up sample company: the building with a floor for each project, lit amber where something waits on you; allowing an agent's request from the list beside it; a room turning green when an agent's work passes its tests; then walking in to the receptionist, who says what needs you](docs/tour.gif)
 
@@ -9,8 +11,8 @@ done really passes its checks, as a building you can walk through.
 git clone https://github.com/allwhenlabs/arnheim && cd arnheim && python3 serve.py
 ```
 
-Then open http://127.0.0.1:8740. It needs Python 3.7 or newer and a current browser, with nothing
-to install, and shows a made-up company until you add your own ([Start](#start) has the details).
+It opens http://127.0.0.1:8740 in your browser. It needs Python 3.7 or newer and a current browser,
+with nothing to install, and shows a made-up company until you add your own ([Start](#start) has the details).
 The first start downloads the pictures for the photo-real look (52 MB) once; `python3 serve.py
 --drawn` skips that and keeps the drawn look ([The photo-real look](#the-photo-real-look)).
 
@@ -37,13 +39,19 @@ Safari). There is nothing to install. In this folder:
 python3 serve.py
 ```
 
-Then open http://127.0.0.1:8740. It shows Fernhollow, a made-up company, until you add your own.
-The first time, it downloads the photo-real look's pictures before it opens ([The photo-real
-look](#the-photo-real-look)).
+It opens http://127.0.0.1:8740 in your browser (`--no-browser` leaves that to you). It shows
+Fernhollow, a made-up company, until you add your own. The first time, it downloads the photo-real
+look's pictures before it opens ([The photo-real look](#the-photo-real-look)).
+
+To keep it running when you close the terminal, and have it start again each time you log in, run
+`python3 serve.py --always` instead, once (on a Mac or Linux). `python3 serve.py --always off`
+stops it and takes that out.
 
 On Windows, run `py serve.py`. For another port, `python3 serve.py 8741`. On a Mac, the first
 `python3` may offer to install Apple's command line tools, which bring Python: say yes. Arnheim has
-been used on macOS in Chrome and Safari; Linux and Windows should work but haven't been tried.
+been used on macOS in Chrome and Safari. On Linux (Ubuntu 24.04), its tests, setup, starting at login
+and the voice have been run, but not yet the page in a Linux browser. Windows should work but hasn't
+been tried.
 
 ## Walk through it
 
@@ -261,27 +269,29 @@ python3 connect/setup.py
 Codex, from the folder each recent
 conversation ran in (never from what was said), lists them, and asks before it changes anything.
 Then it gives each project a floor in `data/company.json` and adds Arnheim's hooks to Claude Code's
-settings, keeping a copy of each file first. It never changes your projects' files, running it again
+settings, and to Codex's if it is here, keeping a copy of each file first. Codex runs new hooks once
+you trust them: type `/hooks` in Codex and trust Arnheim's, once. It never changes your projects' files, running it again
 changes nothing, and `python3 connect/setup.py --undo` takes the hooks out. `--yes` takes every
 suggestion without asking, and `--folder ~/code/my-app` names a project yourself.
 
-Then start `python3 serve.py`. Each Claude Code conversation in those folders shows on its project's
-floor: someone sits while Claude works, the floor turns amber when Claude needs your permission or
+It asks one more thing: whether you want to answer your agents from the building, with Allow and
+Deny and messages (control, below). Then it offers to start Arnheim at once and each time you log in.
+Each Claude Code or Codex conversation in those folders shows on its project's floor: someone sits while it works, the floor turns amber when it needs your permission or
 an answer, and a blue light shows when it is your turn. `serve.py` also looks in each floor's folder
 every minute, for changes not yet committed and, with GitHub's `gh` signed in, open pull requests
 (`--no-git` leaves that off). [docs/connect.md](docs/connect.md) does each step by hand instead,
 and says what each piece does.
 
-Then, if you like, switch on control: start Arnheim with `python3 serve.py --control`, and from
-the building you can talk to your agents for real, answer their permission requests with Allow or
-Deny, stop them, and start new ones on a project, by typing or out loud. It answers only the page on
-your computer ([docs/connect.md](docs/connect.md), step 4).
+With control on (say yes in the setup, or start Arnheim with `python3 serve.py --control`), you can
+talk to your agents from the building for real, answer their permission requests with Allow or Deny,
+stop them, and start new ones on a project, by typing or out loud. It answers only the page on your
+computer ([docs/connect.md](docs/connect.md), step 4). With it off, a request shows where to answer it.
 
-Eleven things no single agent can do for itself:
+Fourteen things no single agent can do for itself:
 
-- **Any agent, not just Claude Code.** OpenAI's Codex CLI, and any agent or script that can run a
-  command, sit in the same building and the same list of what waits on you
-  ([docs/connect.md](docs/connect.md), step 9).
+- **Claude Code and Codex together.** OpenAI's Codex CLI is a full member: at work, asking, answered
+  and stopped from the building like Claude Code, in the same list of what waits on you. Any other
+  agent or script that can run a command sits there too ([docs/connect.md](docs/connect.md), step 9).
 - **One list of what waits on you.** The Overview puts every agent's permission requests and
   questions, your own tasks, and agents that have just finished in one list, most urgent first, each
   with its answer beside it.
@@ -303,8 +313,20 @@ Eleven things no single agent can do for itself:
   outdated packages or a nightly security scan. You only hear about one when it needs you
   ([docs/connect.md](docs/connect.md), step 13).
 - **Project health at a glance.** Each floor says whether it is well: failed checks, work the review
-  line failed, routines that need you, and pull requests left waiting a week, each with a button to
-  send an agent to fix it ([docs/connect.md](docs/connect.md), step 14).
+  line failed, routines that need you, pull requests left waiting a week, an agent gone quiet for
+  twenty minutes, and one whose conversation was shortened to fit so often it starts to forget, each
+  with a button to send an agent, stop it, or start fresh with a hand-over
+  ([docs/connect.md](docs/connect.md), step 14).
+- **Your plan's limits, before you reach them.** Claude Code and Codex say how much of your 5-hour
+  and weekly limits is used. Arnheim tells you when you'd reach each at this pace, if that's before
+  it starts again, and which floor spent most ([docs/connect.md](docs/connect.md), step 18).
+- **Always allow what you always allow.** Allow the same test, check or build command, or one that
+  only looks, twice on a floor (`npm test`, `pytest`, `git status`), and the next request offers to
+  allow it there for good, for every agent. Anything else always asks
+  ([docs/connect.md](docs/connect.md), step 4).
+- **Hand-overs.** A new conversation on a floor, Claude Code or Codex, is told what the others there
+  finished lately and which files they changed, so it doesn't redo or undo their work
+  ([docs/connect.md](docs/connect.md), step 19).
 - **A morning brief, and pings on your phone.** The receptionist tells you what happened since you
   were last here and what waits on you, out loud on a walk. Your phone gets the brief in the morning,
   and later only the decisions that wait on you ([docs/connect.md](docs/connect.md), step 15).
@@ -340,8 +362,21 @@ without `--brain` and it is off, with nothing to undo. It never works with `--la
 ## Voice
 
 Optional: without it you type and read, and everything else is the same. The voice runs on the
-computer that runs `serve.py`. Kokoro speaks (Apache 2.0) and Whisper listens (MIT). It needs
-Python 3.10 to 3.12 and about 1.2 GB of disk. In this folder:
+computer that runs `serve.py`. Kokoro speaks (Apache 2.0) and Whisper listens (MIT), both on this
+computer, not online. In this folder:
+
+```bash
+python3 serve.py --set-up-voice
+```
+
+It finds a Python from 3.10 to 3.12 (newer ones can't run Kokoro yet), or has uv fetch one, says how
+much disk it takes (about 1.5 GB on a Mac, 3 GB on Linux) and how much is free, and asks. Then it installs both into `.voice`
+here and downloads their models once (about 470 MB), which takes a few minutes. Turn on Voice on a
+walk; the first answer takes a few seconds while the voice wakes. If a step fails, run it again: it
+carries on where it stopped. `python3 voice/install.py --speak-only` leaves out listening. To take
+the voice out, delete `.voice`.
+
+By hand, the same is:
 
 ```bash
 python3.12 -m venv .voice
@@ -349,9 +384,7 @@ python3.12 -m venv .voice
 ARNHEIM_VOICE_FETCH=1 .voice/bin/python -I voice/worker.py < /dev/null
 ```
 
-The last line downloads the models once (about 470 MB) and ends with `"ready": true`. Then start
-Arnheim as usual and turn on Voice on a walk; the first answer takes a few seconds while the voice
-wakes. To have them speak but not listen, leave out `openai-whisper`. On Linux, first run
+The last line ends with `"ready": true`. On Linux, first run
 `.voice/bin/pip install torch --index-url https://download.pytorch.org/whl/cpu`, or pip brings
 several GB of graphics libraries.
 

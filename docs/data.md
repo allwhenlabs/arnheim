@@ -186,6 +186,17 @@ Deny. Each is `{ "id": "...", "key": "<a conversation's id>", "tool": "Bash", "w
 Answering one there runs nothing. Your own company's requests come from your agents, with control on,
 and `asks` in `data/work.json` is ignored.
 
+The sample also has `usage`: made-up readings of the plan's limits, so its Overview shows the "Your
+plan" card (docs/connect.md, step 18). It is `{ "sources": { "Claude Code": { "five_hour": [...],
+"seven_day": [...] }, "Codex": {...} } }`, each reading `{ "ago", "used", "resets_in" }`: seconds back
+from when the page opened, the percent used, and seconds until the limit starts again. Your own
+company's readings come from Claude Code and Codex, in `data/feeds/usage.json`, and `usage` in
+`data/work.json` is ignored.
+
+`data/serve.json` isn't the company's: it keeps what you told `connect/setup.py` about starting
+Arnheim, `{ "control": true }` or `false`, so `serve.py` starts with control on, or off, without being
+told.
+
 ### How-tos
 
 A how-to is a short Markdown file: `#` headings, paragraphs, lists (`-` or `1.`), `` `code` ``,

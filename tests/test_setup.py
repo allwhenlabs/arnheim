@@ -273,19 +273,34 @@ class SetupTest(unittest.TestCase):
         self.assertIn("--folder", out)
 
     def test_it_asks_first_and_takes_your_choice(self):
-        code, out = self.h.run(answers="n\n")  # Enter would take both; "n" isn't a number or a folder
+        code, out = self.h.run(answers="n\n")  # "n" stops it, before anything changes
         self.assertEqual(code, 1)
-        self.assertIn("There is no folder at n", out)
+        self.assertIn("Stopped before changing anything", out)
         self.assertFalse(os.path.exists(os.path.join(self.h.data, "company.json")))
-        code, out = self.h.run(answers="2\nThe Works\nn\n")
+        code, out = self.h.run(answers="nowhere\n")  # not a number, a yes or a no: a folder, and there's none
+        self.assertIn("There is no folder at nowhere", out)
+        code, out = self.h.run(answers="2\nThe Works\nn\nn\n")
         self.assertEqual(code, 1)
         self.assertIn("Stopped before changing anything", out)
         self.assertFalse(os.path.exists(os.path.join(self.h.data, "company.json")))
         self.assertFalse(os.path.exists(os.path.join(self.h.claude, "settings.json")))
-        code, out = self.h.run(answers="2\nThe Works\n\n")
+        code, out = self.h.run(answers="2\nThe Works\nn\n\n")  # no to answering from the building, then go ahead
         self.assertEqual(code, 0, out)
         self.assertEqual(self.h.company()["company"], "The Works")
         self.assertEqual([f["id"] for f in self.h.company()["floors"]], ["beta-app"])
+        with open(os.path.join(self.h.data, "serve.json"), encoding="utf-8") as handle:
+            self.assertEqual(json.load(handle), {"control": False})
+        self.assertIn("Next: python3 serve.py", out)  # the end of the answers is a no to starting it now
+
+    def test_yes_takes_them_all_and_control_is_asked_once(self):
+        code, out = self.h.run(answers="y\n\n\n\n")
+        self.assertEqual(code, 0, out)
+        self.assertEqual([f["id"] for f in self.h.company()["floors"]], ["alpha", "beta-app"])
+        with open(os.path.join(self.h.data, "serve.json"), encoding="utf-8") as handle:
+            self.assertEqual(json.load(handle), {"control": True})  # Enter: yes
+        code, out = self.h.run("--yes")
+        self.assertNotIn("Answer your agents from the building", out)
+        self.assertIn("nothing changed", out)
 
     def test_a_linked_settings_file_stays_a_link(self):
         real = os.path.join(self.h.base, "dotfiles", "settings.json")

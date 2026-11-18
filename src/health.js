@@ -1,6 +1,8 @@
 // Project health at a glance: what is wrong on a floor, each with a job an agent could be sent to do about it.
 // A floor is unwell while an agent's work there failed its check or the review line, or a routine needs
-// you; it has a warning while a pull request has waited too long. Everything comes from what the building
+// you; it has a warning while a pull request has waited too long, an agent at work has said nothing for a
+// while (stuck, or a long command), or an agent's conversation has run so long it was shortened to fit more
+// than once (long ones tend to get worse: its job is a fresh start, handed what it was doing). Everything comes from what the building
 // already reads (proof.js, review.js, routines.js, connect/projects.py). No other imports, so
 // tests/test_health.py can run it under Node.
 
@@ -9,6 +11,9 @@ import { reviewOf } from './review.js';
 import { routineNow } from './routines.js';
 
 export const STALE_DAYS = 7; // a pull request not updated for this long has waited too long
+export const QUIET = 20 * 60; // seconds an agent at work may say nothing before it is called quiet
+export const WORN = 2; // times a conversation was shortened to fit before a fresh start is offered
+const WARN = new Set(['pr', 'quiet', 'worn']); // warnings: nothing failed
 
 const first = (text) => String(text || '').trim().split('\n')[0].trim();
 const end = (text) => (/[.?!"]$/.test(text) ? text : `${text}.`);
@@ -22,7 +27,21 @@ const quoted = (text) => String(text ?? '').replace(/"/g, "'"); // so a title ca
 export function healthOf(project, { conversations = [], routines = [], pullRequests = [] } = {}, now = Date.now() / 1000) {
   const problems = [];
   for (const c of conversations) {
-    if (!c || c.project !== project || c.working) continue;
+    if (!c || c.project !== project) continue;
+    const title = c.title || 'A conversation';
+    const quiet = c.working && Number(c.at) > 0 ? now - Number(c.at) : 0;
+    if (quiet >= QUIET) {
+      problems.push({ kind: 'quiet', id: `quiet:${c.id}`, key: c.id, line: `"${title}" has said nothing for ${Math.round(quiet / 60)} minutes while at work. A long command may still be running, or it may be stuck.`, job: null });
+    }
+    if (Number(c.compacted) >= WORN) {
+      const files = (Array.isArray(c.files) ? c.files : []).map((f) => f?.path).filter(Boolean).slice(-8);
+      problems.push({ kind: 'worn', id: `worn:${c.id}`, key: c.id, line: `"${title}" has run so long its conversation was shortened ${Number(c.compacted)} times to fit, and long ones tend to get worse.`,
+        job: `Carry on from another conversation in this project, "${quoted(title)}", which has run so long it was shortened ${Number(c.compacted)} times.`
+          + (c.asked ? ` It was asked: "${quoted(c.asked)}".` : '') + (c.says?.now ? ` It said last: "${quoted(first(c.says.now))}".` : '')
+          + (files.length ? ` It changed ${files.join(', ')}.` : '')
+          + ` Look at its work, finish what is left of what it was asked, and say what you did.${AS_DATA}` });
+    }
+    if (c.working) continue;
     const pr = proofOf(c, now);
     const rv = reviewOf(c, now);
     if (pr?.state === 'failed') {
@@ -47,16 +66,21 @@ export function healthOf(project, { conversations = [], routines = [], pullReque
     problems.push({ kind: 'pr', id: `pr:${p.number}`, line: `Pull request #${p.number} "${p.title}" has waited ${days} days.`,
       job: `Look at pull request #${p.number} "${quoted(p.title)}", which has waited ${days} days, and say what it needs before it can be merged or closed. Don't merge or close it yourself.${AS_DATA}` });
   }
-  const bad = problems.some((p) => p.kind !== 'pr');
+  const bad = problems.some((p) => !WARN.has(p.kind));
   return { state: bad ? 'bad' : problems.length ? 'warn' : 'good', problems };
 }
 
 // The floor's chip: null when it is well.
 export function healthChip(h) {
   if (h.state === 'good') return null;
-  const fix = h.problems.filter((p) => p.kind !== 'pr').length;
+  const fix = h.problems.filter((p) => !WARN.has(p.kind)).length;
   if (h.state === 'bad') return { text: fix === 1 ? 'One thing to fix' : `${fix} things to fix`, kind: 'failed' };
-  return { text: h.problems.length === 1 ? 'A pull request waiting' : `${h.problems.length} pull requests waiting`, kind: 'needs' };
+  const n = (kind) => h.problems.filter((p) => p.kind === kind).length;
+  const [quiet, worn, prs] = [n('quiet'), n('worn'), n('pr')];
+  const text = quiet ? (quiet === 1 ? 'An agent gone quiet' : `${quiet} agents gone quiet`)
+    : worn ? (worn === 1 ? 'An agent running long' : `${worn} agents running long`)
+      : prs === 1 ? 'A pull request waiting' : `${prs} pull requests waiting`;
+  return { text, kind: 'needs' };
 }
 
 // Every floor's health in words, for the receptionist. floors: [{ project, label }].
