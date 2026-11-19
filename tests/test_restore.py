@@ -106,6 +106,21 @@ class RestoreTest(unittest.TestCase):
         self.hook(hook_event_name="PreToolUse", tool_name="MultiEdit", tool_input={"file_path": "notes.md"})
         self.assertEqual(len(self.points()), 3)  # a new message: a new turn
 
+    def test_codex_edits_and_bulk_deletes_take_a_point_too(self):
+        codex = os.path.join(os.path.dirname(HOOK), "codex.py")
+
+        def hook(**event):
+            event = {"session_id": "019a-codex-thread", "cwd": self.lantern, **event}
+            done = subprocess.run([sys.executable, codex], input=json.dumps(event), capture_output=True, text=True, env=self.env, timeout=60)
+            self.assertEqual(done.returncode, 0, done.stderr)
+            self.assertEqual(done.stdout.strip(), "")  # never blocks or changes what Codex does
+
+        hook(hook_event_name="UserPromptSubmit", prompt="Tidy the app")
+        hook(hook_event_name="PreToolUse", tool_name="apply_patch", tool_input={"command": "*** Begin Patch\n*** End Patch"})
+        self.assertEqual(len(self.points()), 1)  # its file edit, as Codex names it
+        hook(hook_event_name="PreToolUse", tool_name="Bash", tool_input={"command": ["rm", "-rf", "build"]})
+        self.assertEqual(len(self.points()), 2)  # a bulk delete, given as a list of words
+
     def test_go_back_from_the_building(self):
         self.hook(hook_event_name="UserPromptSubmit", prompt="Tidy the app")
         self.write("draft.txt", "a draft\n")
@@ -394,6 +409,9 @@ class RestoreTest(unittest.TestCase):
         for command in ("ls -la", "rm file.txt", "git status", "git checkout main", "python3 -m unittest", "grep -r x .",
                         "git stash list", "git stash show", "git restore --staged app.py", "rm -f notes.txt"):
             self.assertFalse(restore.risky(command), command)
+        self.assertTrue(restore.risky(["rm", "-rf", "build"]))  # Codex can hand its command as a list of words
+        self.assertTrue(restore.risky(["git", "reset", "--hard"]))
+        self.assertFalse(restore.risky(["git", "status"]))
 
 
 SCRIPT = """

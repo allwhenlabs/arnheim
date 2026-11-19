@@ -1,0 +1,17 @@
+{
+  "name": "arnheim",
+  "description": "Arnheim: your AI coding agents as a building you can walk through, with one list of what needs you. Everything stays on your computer.",
+  "owner": {
+    "name": "Allwhen Labs",
+    "url": "https://github.com/allwhenlabs/arnheim"
+  },
+  "plugins": [
+    {
+      "name": "arnheim",
+      "source": "./plugins/arnheim",
+      "description": "Sets up Arnheim from inside Claude Code: copies it to a folder you choose, starts it and opens the page where you connect your agents. It asks before each change.",
+      "category": "productivity",
+      "tags": ["agents", "dashboard", "local", "codex"]
+    }
+  ]
+}

@@ -64,7 +64,8 @@ class ReviewLineTest(unittest.TestCase):
             handle.write(READER)
         self.answer(PASS)
         self.env = dict(os.environ, ARNHEIM_DATA=self.data, CLAUDECODE="1",
-                        ARNHEIM_CLAUDE=f"{shlex.quote(sys.executable)} {shlex.quote(os.path.join(self.tools, 'reader.py'))}")
+                        ARNHEIM_CLAUDE=f"{shlex.quote(sys.executable)} {shlex.quote(os.path.join(self.tools, 'reader.py'))}",
+                        ARNHEIM_CODEX=os.path.join(self.tools, "not-installed"))  # no Codex here: Claude Code reads (tests/test_cross_review.py has both)
         self.env.pop("ARNHEIM_REVIEWER", None)
 
     def tearDown(self):
@@ -117,7 +118,8 @@ class ReviewLineTest(unittest.TestCase):
         talk = self.talk()
         self.assertEqual((talk["working"], talk["check"], talk["says"]["now"]), (False, True, "I made it blue."))
         self.assertEqual({k: talk["review"][k] for k in ("state", "by", "said", "times", "most")},
-                         {"state": "passed", "by": "The reader", "said": "It does what was asked, and the change is small and clear.", "times": 0, "most": 2})
+                         {"state": "passed", "by": "Claude Code", "times": 0, "most": 2,
+                          "said": "Claude Code reviewed it, since Codex isn't installed here: It does what was asked, and the change is small and clear."})
         self.assertEqual(talk["spent"], {"day": budget.local_day(), "tokens": 175})  # the reader's new tokens count towards the floor
 
         [call] = self.asked()
@@ -204,7 +206,7 @@ class ReviewLineTest(unittest.TestCase):
             self.assertIsNone(self.finish())
             talk = self.talk()
             self.assertEqual((talk["review"]["state"], talk["working"], talk["check"]), ("error", False, True))
-            self.assertIn("The reader gave no verdict", talk["review"]["said"])
+            self.assertIn("Claude Code gave no verdict", talk["review"]["said"])
 
     def test_outside_git(self):
         shutil.rmtree(os.path.join(self.lantern, ".git"))
@@ -222,8 +224,8 @@ class WordsTest(unittest.TestCase):
     def test_a_floor_says_what_it_wants(self):
         self.assertIsNone(review.review_of({}))
         self.assertIsNone(review.review_of({"review": False}))
-        self.assertEqual(review.review_of({"review": True}), {"read": True, "times": 2, "timeout": 300})
-        self.assertEqual(review.review_of({"review": {"read": False, "times": 9, "timeout": "x"}}), {"read": False, "times": 5, "timeout": 300})
+        self.assertEqual(review.review_of({"review": True}), {"read": True, "times": 2, "timeout": 300, "reviewer": "other"})
+        self.assertEqual(review.review_of({"review": {"read": False, "times": 9, "timeout": "x"}}), {"read": False, "times": 5, "timeout": 300, "reviewer": "other"})
 
     def test_the_verdict(self):
         found = lambda text: review.VERDICT.findall(text)

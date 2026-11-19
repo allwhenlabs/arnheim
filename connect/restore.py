@@ -345,6 +345,8 @@ def _keep(point, repo, commit, path, data):
 
 def risky(command):
     """Whether a shell command deletes or overwrites files in bulk."""
+    if isinstance(command, (list, tuple)):  # Codex may hand its shell command as a list of words
+        command = " ".join(str(word) for word in command)
     return bool(RISKY.search(" " + str(command or "")))
 
 

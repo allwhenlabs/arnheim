@@ -68,6 +68,7 @@ import standing  # noqa: E402  (beside this file: commands you allow for good)
 import usage  # noqa: E402  (beside this file: your plan's limits, for the forecast)
 import handover  # noqa: E402  (beside this file: finished work, handed to the next agent on a floor)
 import switches  # noqa: E402  (beside this file: each feature on or off, data/serve.json)
+import carry_on  # noqa: E402  (beside this file: carrying a conversation on in the other agent at a limit)
 
 DATA = os.environ.get("ARNHEIM_DATA") or os.path.join(os.path.dirname(HERE), "data")
 FEED = os.path.join(DATA, "feeds", "claude-code.json")
@@ -228,6 +229,8 @@ def change(event, feed, project, now, extra=None):
                     asked=said, asked_at=now)
         talk.pop("review", None)  # a new piece of work: the review line starts afresh
         drop(ask)
+        if said and not talk.get("first"):  # what the conversation was for, for a hand-over at a limit (connect/carry_on.py)
+            talk["first"] = line(event.get("prompt"), 200)
     elif name == "PostToolUse" and extra.get("stopped"):
         talk.update(working=False, check=True, says={"now": "I stopped, as you asked.", "next": "It's your turn now."})
         drop(ask)
@@ -292,6 +295,13 @@ def change(event, feed, project, now, extra=None):
         if talk.get("heard"):  # what it just said answers your message
             talk["answered"] = talk.pop("heard")
         talk["stopped"] = now
+        drop(ask)
+    elif name == "StopFailure":  # Claude Code: the turn ended on an error from the API instead of Stop, a plan's limit among them
+        error = line(event.get("last_assistant_message") or event.get("error") or "an error", 160)
+        said = sentences(carry_on.last_words(event.get("transcript_path")))
+        talk.update(working=False, check=True, stopped=now, says={"now": said or f"I stopped: {error.rstrip('.')}.", "next": "It's your turn now."})
+        if event.get("error") == "rate_limit":  # the page offers to carry it on in Codex (src/carry-on.js)
+            talk["limit"] = {"at": now, "said": error}
         drop(ask)
     elif name == "Interrupt":  # Codex: you stopped it there
         talk.update(working=False, check=True, says={"now": "I stopped, as you asked.", "next": "It's your turn now."})
@@ -656,10 +666,12 @@ def review(event):
         said = dict(talk.get("says") or {})
         before = dict(talk.get("review") or {}) if isinstance(talk.get("review"), dict) else {}
         until = now + (check["timeout"] if check else 0) + (given["timeout"] if given["read"] else 0)
+        # who reads it, named on the page while it waits: Codex for Claude Code's work, and the other way round
+        reads = {"reviewer": line.reviewer(given, line.writer_of(event, talk))[0]} if given["read"] else {}
 
         def held(t):
             t.update(working=True, check=False, says={"now": "The review line is checking my work before it reaches you."},
-                     review={**before, "state": "reviewing", "at": now, "until": until})
+                     review={**before, "state": "reviewing", "at": now, "until": until, **reads})
             if check:
                 t["proof"] = {"state": "checking", "check": check["label"], "at": now, "until": now + check["timeout"]}
         edit_talk(event, held)
@@ -673,7 +685,7 @@ def review(event):
         why = result.get("why") or ""
 
         def done(t):
-            t["review"] = {k: result[k] for k in ("state", "by", "said", "why", "times", "most", "at") if result.get(k) not in (None, "")}
+            t["review"] = {k: result[k] for k in ("state", "by", "said", "why", "times", "most", "at", "reviewer", "writer") if result.get(k) not in (None, "")}
             t["review"]["done"] = time.time()
             if result.get("proof"):
                 t["proof"] = result["proof"]

@@ -5,6 +5,7 @@
   python3 connect/setup.py --yes           the same, taking every suggestion without asking
   python3 connect/setup.py --folder PATH   use this project folder instead of looking (give it again for more)
   python3 connect/setup.py --undo          take Arnheim's hooks out of Claude Code's and Codex's settings again
+  python3 connect/setup.py --well          set your agents up well too, without asking (connect/agent_setup.py)
 
 It finds the folders your recent Claude Code and Codex conversations ran in, from the first lines of
 each conversation's file (which name its folder), never from what was said in it. Each project
@@ -26,6 +27,11 @@ import sys
 import tempfile
 import time
 
+try:
+    from . import agent_setup  # as connect.setup, from serve.py: setting your agents up well (connect/agent_setup.py)
+except ImportError:
+    import agent_setup  # beside this file, run as a script
+
 HERE = os.path.dirname(os.path.realpath(__file__))
 ROOT = os.path.dirname(HERE)
 DATA = os.environ.get("ARNHEIM_DATA") or os.path.join(ROOT, "data")
@@ -41,15 +47,21 @@ NO = re.compile(r"^(n|no|nope|q|quit|stop|cancel)[.!]?$", re.I)
 # Claude Code's moments that Arnheim hears (docs/connect.md, step 2), and the permission request that
 # control answers (step 4). Without --control, nobody is waiting in the building, so a permission
 # request is passed straight back and Claude Code asks as it always does.
-EVENTS = ("SessionStart", "UserPromptSubmit", "PostToolUse", "Notification", "Stop", "TaskCreated",
-          "TaskCompleted", "SessionEnd", "PermissionRequest")
+EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Notification", "Stop", "TaskCreated",
+          "TaskCompleted", "SessionEnd", "PermissionRequest", "StopFailure")  # StopFailure: a turn cut off by a plan's limit (connect/carry_on.py)
 TIMEOUTS = {"PermissionRequest": 150}
+# PreToolUse is for restore points only (docs/connect.md, step 16): just before a tool that changes files, or a
+# command that could delete them in bulk, so it never runs for the many tools that only read.
+MATCHERS = {"PreToolUse": "Edit|MultiEdit|Write|NotebookEdit|Bash"}
 # Codex's hooks have the same names (docs/connect.md, step 9). It has no Notification: it asks through
 # PermissionRequest. Interrupt is you stopping it. SessionEnd and Interrupt may take 3 seconds at most there.
-CODEX_EVENTS = ("SessionStart", "UserPromptSubmit", "PostToolUse", "PermissionRequest", "Stop", "SessionEnd", "Interrupt")
+CODEX_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Stop", "SessionEnd",
+                "Interrupt")
 CODEX_TIMEOUTS = {"PermissionRequest": 150, "SessionEnd": 3, "Interrupt": 3}
+# Codex reports its file edits as apply_patch and lets Edit and Write match them too; its shell is Bash.
+CODEX_MATCHERS = {"PreToolUse": "apply_patch|Edit|Write|Bash"}
 CODEX_HOOKS = (0, 124)  # the Codex that brought hooks
-FEEDS = ["feeds/claude-code.json", "feeds/agents.json", "feeds/projects.json"]
+FEEDS = ["feeds/claude-code.json", "feeds/agents.json", "feeds/projects.json", "feeds/restore.json"]
 ROOMS = [
     {"id": "work", "label": "Work", "about": "Tasks, and what an agent is waiting on you for. A desk glows amber when it needs you."},
     {"id": "conversations", "label": "Conversations", "about": "Claude Code conversations, a seat each. Someone sits in it while the agent works."},
@@ -408,9 +420,11 @@ def codex_hooks_path():
 def plan_hooks(settings, codex=False):
     """(the settings to write or None, [events added], [(event, command) replaced]): Claude Code's, or with
     codex, Codex's hooks.json. This copy's hook only for some tools (a matcher), or by a relative path that
-    works in one folder only, is replaced by one for everything. Refuses when another copy of Arnheim
+    works in one folder only, is replaced by one for everything, or for PreToolUse by one for the tools that
+    change files (MATCHERS). Refuses when another copy of Arnheim
     already has hooks there."""
     events, script, timeouts = (CODEX_EVENTS, CODEX_SCRIPT, CODEX_TIMEOUTS) if codex else (EVENTS, SCRIPT, TIMEOUTS)
+    matchers = CODEX_MATCHERS if codex else MATCHERS
     name, who = os.path.basename(script), "Codex" if codex else "Claude Code"
     settings = json.loads(json.dumps(settings or {}))
     hooks = settings.setdefault("hooks", {})
@@ -429,7 +443,7 @@ def plan_hooks(settings, codex=False):
                 elif absolute(found) and not same_file(found, script):
                     others.add(found)
                     kept.append(hook)
-                elif absolute(found) and group.get("matcher") in CATCH_ALL:
+                elif absolute(found) and (group.get("matcher") in CATCH_ALL or group.get("matcher") == matchers.get(event)):
                     covered = True
                     kept.append(hook)
                 else:
@@ -440,7 +454,7 @@ def plan_hooks(settings, codex=False):
             hook = {"type": "command", "command": command}
             if event in timeouts:
                 hook["timeout"] = timeouts[event]
-            groups.append({"hooks": [hook]})
+            groups.append({"matcher": matchers[event], "hooks": [hook]} if event in matchers else {"hooks": [hook]})
             added.append(event)
         if event in hooks or groups:
             hooks[event] = groups
@@ -755,6 +769,7 @@ def can_always():
 def undo(say=print, page=False):
     """Takes Arnheim's hooks and status line out again. From the page (serve.py's /setup/undo), `say` gets the
     lines, and the page says itself what becomes of the building."""
+    agent_setup.undo(sys.modules[__name__], say)  # setting your agents up well, first: it changed files after the hooks went in
     changed = 0
     for path, who, name in ((settings_path(), "Claude Code", "claude_code.py"), (codex_hooks_path(), "Codex", "codex.py")):
         path, settings = read_settings(path, who)
@@ -852,6 +867,8 @@ def setup(args, say=print, control=None, page=False):
         for folder in already:
             say(f"  {shown(folder)} already has a floor.")
         say("Everything is already set up: nothing changed.")
+        if not page:
+            well(projects, args, say)
         return 0
     if not page:
         say("This will:")
@@ -945,6 +962,8 @@ def setup(args, say=print, control=None, page=False):
         say(f"Wrote {shown(serve_file)}: control {'on' if serve_choice['control'] else 'off'} each time Arnheim starts "
             "(python3 serve.py --no-control leaves it off once).")
     say("")
+    if not page:
+        well(projects, args, say)
     if page:
         say("Conversations you start in these folders from now on show in the building.")
         return 0
@@ -962,6 +981,18 @@ def setup(args, say=print, control=None, page=False):
     return 0
 
 
+def well(projects, args, say):
+    """Set your agents up well too (connect/agent_setup.py): shown, then asked once, after connecting. --well says yes
+    without asking, --no-well no; --no-hooks leaves your agents' settings alone, so it leaves this too."""
+    if getattr(args, "no_hooks", False):
+        return
+    try:
+        agent_setup.offer(sys.modules[__name__], [p["folder"] for p in projects], args, say, ask_yes)
+    except Refused as why:
+        say(str(why))
+    say("")
+
+
 def main(argv=None):
     for stream in (sys.stdout, sys.stderr):
         try:
@@ -974,6 +1005,8 @@ def main(argv=None):
     parser.add_argument("--name", help="what the building is called, if it is new (My company if left out)")
     parser.add_argument("--no-hooks", action="store_true", help="only make the building: leave Claude Code's and Codex's settings alone")
     parser.add_argument("--undo", action="store_true", help="take Arnheim's hooks out of Claude Code's and Codex's settings")
+    parser.add_argument("--well", action="store_true", help="set your agents up well too, without asking (docs/connect.md, step 23)")
+    parser.add_argument("--no-well", action="store_true", help="don't offer to set your agents up well")
     args = parser.parse_args(argv)
     try:
         return undo() if args.undo else setup(args)

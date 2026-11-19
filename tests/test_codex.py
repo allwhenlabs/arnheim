@@ -281,7 +281,7 @@ class CodexSetupTest(unittest.TestCase):
         code, out = self.run_setup("--yes")
         self.assertEqual(code, 0, out)
         hooks = self.hooks()["hooks"]
-        self.assertEqual(sorted(hooks), sorted(["SessionStart", "UserPromptSubmit", "PostToolUse", "PermissionRequest", "Stop", "SessionEnd", "Interrupt"]))
+        self.assertEqual(sorted(hooks), sorted(["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Stop", "SessionEnd", "Interrupt"]))
         command = hooks["Stop"][0]["hooks"][0]["command"]
         self.assertTrue(command.endswith("connect/codex.py"), command)
         self.assertEqual((hooks["PermissionRequest"][0]["hooks"][0]["timeout"], hooks["SessionEnd"][0]["hooks"][0]["timeout"]), (150, 3))
@@ -315,7 +315,8 @@ class CodexSetupTest(unittest.TestCase):
         code, out = self.run_setup("--yes")
         self.assertEqual(code, 0, out)
         hooks = self.hooks()["hooks"]
-        self.assertEqual(hooks["PreToolUse"], mine["hooks"]["PreToolUse"])
+        self.assertEqual(hooks["PreToolUse"][0], mine["hooks"]["PreToolUse"][0])  # yours first, as it was
+        self.assertEqual(hooks["PreToolUse"][1]["matcher"], "apply_patch|Edit|Write|Bash")  # Arnheim's, for restore points
         self.assertEqual(hooks["Stop"][0], mine["hooks"]["Stop"][0])
         self.assertEqual(len(hooks["Stop"]), 2)
         self.assertIn("hooks = false", out)  # what keeps them from running is said

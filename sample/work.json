@@ -31,10 +31,12 @@
       "says": { "now": "I stopped: Studio's agents have used today's budget.", "next": "It's your turn now." } },
     { "id": "cs2", "project": "Studio", "title": "Sorting the subscriptions", "check": true, "spent": { "tokens": 300000 }, "says": { "now": "I sorted the studio's subscriptions into keep and cancel. Three can go." },
       "proof": { "state": "passed", "check": "The spending check" },
-      "review": { "state": "passed", "by": "The reader", "said": "The keep and cancel lists match the statements, and nothing was cancelled without asking." } },
+      "review": { "state": "passed", "by": "Codex", "reviewer": "Codex", "writer": "Claude Code", "said": "Codex reviewed Claude Code's work: The keep and cancel lists match the statements, and nothing was cancelled without asking." } },
     { "id": "cl1", "ago": 420, "project": "Lantern", "title": "Why the bookmark jumps", "working": true, "spent": { "tokens": 900000 }, "files": [{ "path": "reader/bookmark.js" }, { "path": "reader/page-turn.js" }], "says": {"now": "I'm finding out why the bookmark jumps back a page. It saves your place before the page has finished turning, so it keeps the page you were leaving.", "next": "Next I'll save it once the turn ends, then try it on a long book.", "when": "About an hour, if the long book behaves.", "needs": "Nothing yet."} },
     { "id": "cl2", "project": "Lantern", "title": "Reading streak ideas", "agent": "Codex", "check": true, "files": [{ "path": "reader/page-turn.js" }, { "path": "reader/streak.js" }],
-      "says": { "now": "I added a streak counter to the page turn." } },
+      "says": { "now": "I added a streak counter to the page turn. Keeping it when the app closes is next." }, "ago": 900,
+      "first": "Add a reading streak, so readers see how many days in a row they have read.",
+      "asked": "Keep the streak when the app is closed and opened again.", "limit": { "said": "You've hit your usage limit." } },
     { "id": "cl3", "project": "Lantern", "title": "Pictures for the app store", "check": true, "says": { "now": "I made the five pictures for the app store." },
       "proof": { "state": "failed", "check": "The picture sizes check", "tail": "phone-1.png: 1290 x 2796, right\nphone-2.png: 1290 x 2796, right\ntablet-1.png: 2048 x 2732, should be 2064 x 2752\n1 of 5 pictures is the wrong size." },
       "review": { "state": "failed", "by": "The picture sizes check", "times": 2, "most": 2, "why": "The picture sizes check failed: tablet-1.png is 2048 x 2732 and should be 2064 x 2752." } },
@@ -117,6 +119,12 @@
     { "id": "sample-ask-tests", "key": "cl1", "tool": "Bash", "what": "Bash: npm test -- reader", "ago": 240 },
     { "id": "sample-ask-read", "key": "ck1", "tool": "Read", "what": "Read: ../field-tests/run-3.csv", "ago": 95 }
   ],
+  "secrets": [
+    { "id": "sample-secret-1", "project": "Kitefield", "floor": "kitefield", "file": ".claude/settings.local.json", "line": 7, "count": 1,
+      "kind": "github", "what": "A GitHub token", "hint": "ghp_…k7Wd", "place": "an agent's allow list", "state": "open", "remote": null,
+      "tracked": false, "fix": { "out": true, "exclude": true },
+      "says": "A GitHub token is saved in an agent's allow list in .claude/settings.local.json, and git would commit that file." }
+  ],
   "usage": {
     "about": "Made up: the plan's limits as Claude Code and Codex would report them, seconds back from when the page opened (connect/usage.py).",
     "sources": {
@@ -129,7 +137,7 @@
         "seven_day": [{ "ago": 3600, "used": 29, "resets_in": 264600 }, { "ago": 60, "used": 31, "resets_in": 264600 }]
       },
       "Codex": {
-        "five_hour": [{ "ago": 3000, "used": 12, "resets_in": 9000 }, { "ago": 60, "used": 15, "resets_in": 9000 }]
+        "five_hour": [{ "ago": 3000, "used": 74, "resets_in": 9000 }, { "ago": 1800, "used": 89, "resets_in": 9000 }, { "ago": 900, "used": 100, "resets_in": 9000 }]
       }
     }
   },

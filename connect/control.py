@@ -61,6 +61,14 @@ except ImportError:
         restore = _beside("restore")
         standing = _beside("standing")
 
+try:
+    from . import carry_on  # never stop at a limit: carrying a conversation on in the other agent
+except ImportError:
+    try:
+        import carry_on
+    except ImportError:
+        carry_on = _beside("carry_on")
+
 HERE = os.path.dirname(os.path.realpath(__file__))
 DATA = os.environ.get("ARNHEIM_DATA") or os.path.join(os.path.dirname(HERE), "data")
 JSON = "application/json; charset=utf-8"
@@ -438,6 +446,7 @@ class Control:
         self.box = Box(data)
         self.token = secrets.token_urlsafe(24)
         self.claude = list(claude) if claude else shlex.split(os.environ.get("ARNHEIM_CLAUDE") or "claude")
+        self.codex = shlex.split(os.environ.get("ARNHEIM_CODEX") or "codex")  # for carrying on in Codex (connect/carry_on.py)
         self.lock = threading.Lock()
         self.going_back = threading.Lock()  # one restore at a time, apart from the lock every request takes
         self.runs = {}
@@ -506,6 +515,8 @@ class Control:
                 return answer(200, self.run_routine(given.get("key")))
             if name == "restore":
                 return answer(200, self.restore(given.get("id")))
+            if name == "carry_on":
+                return answer(200, self.carry_on(given))
         except Refused as why:
             return answer(400, {"error": str(why)})
         return answer(404, {"error": "No such request."})
@@ -516,6 +527,8 @@ class Control:
             runs = [{k: run.get(k) for k in ("key", "project", "title", "state", "said", "answered", "at")} for run in runs[:KEEP_RUNS]]
         return {
             "on": True,
+            "agents": carry_on.installed(self.claude, self.codex),  # which agents a conversation can carry on in
+            "carried": sorted(carry_on.carried(self.data)),
             "wait": wait_seconds(),
             "asks": [{k: row.get(k) for k in ("id", "key", "tool", "what", "at", "until", "before", "standable", "project")} for row in self.box.asks()],
             "always": standing.rows(self.data),
@@ -692,6 +705,8 @@ class Control:
 
     def spawn(self, run, extra, text, answering=None):
         """Starts `claude -p` in the run's folder, with the words on stdin. Under the lock."""
+        if run.get("agent") == "Codex":  # one carried on in Codex: started and resumed Codex's way
+            return self.spawn_codex(run, text, resume=extra[1] if extra[:1] == ["--resume"] else None, answering=answering)
         os.makedirs(self.box.path("runs"), exist_ok=True)
         log = open(self.box.path("runs", run["key"] + ".log"), "ab")  # what Claude Code says went wrong, if anything
         args = self.claude + ["-p", "--output-format", "stream-json", "--verbose"] + extra
@@ -742,6 +757,87 @@ class Control:
                 run["answered"] = answering
             if self.procs.get(run["key"]) is proc:
                 del self.procs[run["key"]]
+            self.save(run)
+
+    # ---------- carrying on in Codex at a limit (connect/carry_on.py) ----------
+
+    def carry_on(self, given):
+        """Carries a conversation on in the other agent, Claude Code or Codex, when its plan's limit has run out or soon
+        will: a new agent on the same floor, handed the page's hand-over. Once for each conversation."""
+        try:
+            return carry_on.start(self, given)
+        except ValueError as why:
+            raise Refused(str(why))
+
+    def spawn_codex(self, run, text, resume=None, answering=None):
+        """Starts Codex without a window (`codex exec --json`) in the run's folder, with the words on stdin, or carries its
+        thread on with your next message. Codex's hooks show it on its floor, as any Codex conversation. Under the lock."""
+        os.makedirs(self.box.path("runs"), exist_ok=True)
+        log = open(self.box.path("runs", run["key"] + ".log"), "ab")  # what Codex says went wrong, if anything
+        try:
+            proc = subprocess.Popen(carry_on.codex_args(self.codex, resume), cwd=run["folder"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                                    stderr=log, start_new_session=hasattr(os, "setsid"))
+        except OSError as error:
+            log.close()
+            raise Refused(f"Codex didn't start ({error.strerror or error}). Is its codex command installed? ARNHEIM_CODEX can name another.")
+        try:
+            proc.stdin.write(text.encode("utf-8"))
+            proc.stdin.close()
+        except OSError:
+            pass
+        run.update(state="working", pid=proc.pid, at=time.time(), stopping=False, agent="Codex")
+        self.runs[run["key"]] = run
+        self.procs[run["key"]] = proc
+        self.save(run)
+        threading.Thread(target=self.follow_codex, args=(run, proc, log, answering), daemon=True).start()
+
+    def follow_codex(self, run, proc, log, answering):
+        """Reads Codex's events as it goes: its thread's id, which names the conversation, and its last words."""
+        said = ""
+        try:
+            for raw in proc.stdout:
+                try:
+                    got = carry_on.codex_event(json.loads(raw))
+                except ValueError:
+                    continue
+                if got and got[0] == "thread":
+                    self.rekey(run, got[1])
+                elif got:
+                    said = got[1] or said
+        except (OSError, ValueError):
+            pass
+        finally:
+            proc.wait()
+            proc.stdout.close()
+            log.close()
+        with self.lock:
+            run["state"] = "stopped" if run.get("stopping") else "done" if proc.returncode == 0 else "failed"
+            run.update(said=one_line(said, 1200), at=time.time(), pid=None)
+            if answering:
+                run["answered"] = answering
+            if self.procs.get(run["key"]) is proc:
+                del self.procs[run["key"]]
+            self.save(run)
+
+    def rekey(self, run, thread):
+        """Codex names its thread once it starts: the run takes the key its hooks give that conversation, so the building
+        shows it once, and stopping or talking to it there reaches this run."""
+        key = carry_on.key_of(thread)
+        with self.lock:
+            old = run["key"]
+            run["sid"] = thread
+            if key != old and KEY.match(key) and key not in self.runs:
+                proc = self.procs.pop(old, None)
+                self.runs.pop(old, None)
+                run["key"] = key
+                self.runs[key] = run
+                if proc is not None:
+                    self.procs[key] = proc
+                try:
+                    os.replace(self.box.path("runs", old + ".log"), self.box.path("runs", key + ".log"))
+                except OSError:
+                    pass
+                gone(self.box.path("runs", old + ".json"))
             self.save(run)
 
     def alive(self, run):

@@ -54,6 +54,21 @@ On a Mac, the Arnheim app does this without a terminal: it sits in the menu bar,
 the page, and can start it each time you log in. For now you build it once with `mac/build.sh`
 ([docs/mac.md](docs/mac.md) says how, and how to open it the first time).
 
+**From inside Claude Code.** Type these two lines in Claude Code, choosing **Install for you** when it
+asks, then type `/arnheim:setup`:
+
+```text
+/plugin marketplace add allwhenlabs/arnheim
+/plugin install arnheim@arnheim
+```
+
+It asks where to keep Arnheim, copies it there, starts it and opens the page where you connect your
+agents, asking you before each change. `/arnheim:open` opens the page, and `/arnheim:status` says
+whether it is running. In Codex, run `codex plugin marketplace add allwhenlabs/arnheim`, install
+Arnheim from `/plugins`, and ask it to set up Arnheim in a new chat. Any other agent can do the
+same if you paste in: "Set up Arnheim for me: follow
+github.com/allwhenlabs/arnheim/blob/main/docs/agent-setup.md".
+
 On Windows, run `py serve.py`. For another port, `python3 serve.py 8741`. On a Mac, the first
 `python3` may offer to install Apple's command line tools, which bring Python: say yes. Arnheim has
 been used on macOS in Chrome and Safari. On Linux (Ubuntu 24.04), its tests, setup, starting at login
@@ -281,7 +296,7 @@ Codex, from the folder each recent
 conversation ran in (never from what was said), lists them, and asks before it changes anything.
 Then it gives each project a floor in `data/company.json` and adds Arnheim's hooks to Claude Code's
 settings, and to Codex's if it is here, keeping a copy of each file first. Codex runs new hooks once
-you trust them: type `/hooks` in Codex and trust Arnheim's, once. It never changes your projects' files, running it again
+you trust them: type `/hooks` in Codex and trust Arnheim's, once. Unless you say yes to setting your agents up well (below), it never changes your projects' files, running it again
 changes nothing, and `python3 connect/setup.py --undo` takes the hooks out. `--yes` takes every
 suggestion without asking, and `--folder ~/code/my-app` names a project yourself.
 
@@ -292,6 +307,17 @@ an answer, and the list marks it when it is your turn. `serve.py` also looks in 
 every minute, for changes not yet committed and, with GitHub's `gh` signed in, open pull requests
 (switch it off under Switches, below). [docs/connect.md](docs/connect.md) does each step by hand instead,
 and says what each piece does.
+
+**Set your agents up well.** Connect also offers to set Claude Code and Codex up the same way in each
+project, each step ticked and said in plain words before anything changes: one instructions file both
+read (an AGENTS.md written from what the project's own files say, and a CLAUDE.md that brings it in),
+the project's tests as its floor's check, so done means proven, Claude Code's own tools kept from
+opening .env files, keys, `~/.ssh` and `~/.aws` (a script it runs can still read them), that check
+allowed to run without asking, and the same MCP servers in both (only those set up for every project,
+and never one that carries a key). **Show the exact changes** lists every file and line. In the terminal it asks once, and
+`--well` does it without asking. In Settings, **Your agents' setup** shows what each floor has in place
+and sets up what is missing. Undo, or `python3 connect/setup.py --undo`, puts every file back as it was
+([docs/connect.md](docs/connect.md), step 23).
 
 With control on (say yes in the setup, switch it on under Switches, or start Arnheim with `python3 serve.py --control`), you can
 talk to your agents from the building for real, answer their permission requests with Allow or Deny,
@@ -306,26 +332,30 @@ Every feature can be switched on or off in Settings, under **Switches**: answeri
 agents from the building, hand-overs, the company's memory, how-tos, Always allow, proving the work,
 the review line, the budget brake, restore points, warnings when two agents change one file, the
 receptionist thinking with Claude, routines, pings, looking in project folders, looking for a newer
-Arnheim, and the Your plan card.
+Arnheim, the Your plan card, and carrying on at a limit.
 A change works at once and holds for every start (`data/serve.json`). A word given to `serve.py` as it
 starts, such as `--routines`, holds its switch for that start. Phones, the network and starting at
 login stay in the terminal (`--remote`, `--lan`, `--share`, `--always`) ([docs/connect.md](docs/connect.md), step 20).
 
-Fourteen things no single agent can do for itself:
+Eighteen things no single agent can do for itself:
 
 - **Claude Code and Codex together.** OpenAI's Codex CLI is a full member: at work, asking, answered
   and stopped from the building like Claude Code, in the same list of what waits on you. Any other
   agent or script that can run a command sits there too ([docs/connect.md](docs/connect.md), step 9).
+- **One setup for both agents.** Connect gives each project one instructions file both agents read,
+  its tests as the proof that work is done, secret files kept from Claude Code, and the same MCP servers in
+  both, each step shown first and undone with one button ([docs/connect.md](docs/connect.md), step 23).
 - **One list of what waits on you.** The Needs you tab puts every agent's permission requests and
   questions, your own tasks, and agents that have just finished in one list, most urgent first, each
   with its answer beside it.
 - **Done means proven.** Give a floor a check, such as its tests, and Arnheim runs it each time an
   agent there changes files. The work shows as proven with a green tick, not proven in red with what failed,
   or merely claimed ([docs/connect.md](docs/connect.md), step 5).
-- **A review line.** A floor can say every change gets checked before it reaches you: its check,
-  then a second Claude Code that reads what changed. Work that isn't ready goes back to the agent
-  with the reason; after two sends back it reaches you anyway, marked with what the review found
-  ([docs/connect.md](docs/connect.md), step 12).
+- **A review line, where the other agent checks the work.** A floor can say every change gets
+  checked before it reaches you: its check, then a second agent that reads what changed. Codex
+  reviews Claude Code's work and Claude Code reviews Codex's, or the one you name. Work that isn't
+  ready goes back to the agent with the reason; after two sends back it reaches you anyway, marked
+  with what the review found and who reviewed it ([docs/connect.md](docs/connect.md), step 12).
 - **A company memory.** Tell the receptionist "remember that we never push on a Friday", and every
   agent in the company's folders is told it as it starts, and one already at work with your next
   message. When an agent asks something you've decided before, the list shows your decision with a
@@ -341,9 +371,20 @@ Fourteen things no single agent can do for itself:
   twenty minutes, and one whose conversation was shortened to fit so often it starts to forget, each
   with a button to send an agent, stop it, or start fresh with a hand-over
   ([docs/connect.md](docs/connect.md), step 14).
+- **Secrets out of your agents' settings.** "Yes, and don't ask again" saves the command word for word,
+  token and all. Arnheim reads each floor's agent settings, Claude Code's and Codex's, for passwords,
+  tokens and keys, says how far git has taken each (pushed, committed, about to be, or ignored), and
+  offers **Take it out**, with Undo, and **Keep git out of it**. It never shows the secret itself
+  ([docs/connect.md](docs/connect.md), step 22).
 - **Your plan's limits, before you reach them.** Claude Code and Codex say how much of your 5-hour
   and weekly limits is used. Arnheim tells you when you'd reach each at this pace, if that's before
   it starts again, and which floor spent most ([docs/connect.md](docs/connect.md), step 18).
+- **Never stop at a limit.** When Claude Code is about to reach your plan's limit, or has, and Codex has
+  room (or the other way round), Needs you offers to carry that conversation on in the other one, once:
+  "Claude Code's 5-hour limit runs out in about 20 minutes, before it starts again at 16:10. Carry on in
+  Codex?" With control on, one button starts it on the same floor, handed what the first was asked, its
+  tasks, the files it changed and its last words; with it off, you copy that hand-over
+  ([docs/connect.md](docs/connect.md), step 21).
 - **Always allow what you always allow.** Allow the same test, check or build command, or one that
   only looks, twice on a floor (`npm test`, `pytest`, `git status`), and the next request offers to
   allow it there for good, for every agent. Anything else always asks
@@ -354,6 +395,10 @@ Fourteen things no single agent can do for itself:
 - **A morning brief, and pings on your phone.** The receptionist tells you what happened since you
   were last here and what waits on you, out loud on a walk. Your phone gets the brief in the morning,
   and later only the decisions that wait on you ([docs/connect.md](docs/connect.md), step 15).
+- **Undo what an agent did.** Before an agent, Claude Code or Codex, first changes a project's files after
+  your message, and before any command that deletes in bulk, Arnheim keeps how the files were. **Go back
+  to here** on the conversation's page puts them back, and can be undone too
+  ([docs/connect.md](docs/connect.md), step 16).
 - **Collision warnings.** When two agents change the same file, the second is told at once, and the
   building shows the pair, with a button to make one wait ([docs/connect.md](docs/connect.md), step 10).
 - **Replay the day.** Drag a slider back through today and the building shows who was at work then,

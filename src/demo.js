@@ -11,9 +11,10 @@ import { hasLead, isLeadHref, leadUpdate, voiceAnswer } from './leads.js';
 import { WAITING, createLeadDesk } from './lead-desk.js';
 import { allowReadsAsked, sayWaiting, together, waitingOnYou } from './queue.js';
 import { inner, proofMood, proofOf } from './proof.js';
-import { reviewMood, reviewOf, reviewSaid } from './review.js';
+import { reviewMood, reviewOf, reviewSaid, reviewerOf, reviewersSaid } from './review.js';
 import { ROUTINES_ASKED, routineNow, sayRoutines, timesOf } from './routines.js';
 import { HEALTH_ASKED, healthChip, healthOf, sayHealth } from './health.js';
+import { SERIOUS, secretMood, secretSub, secretsIn } from './secret-check.js';
 import { BRIEF_ASKED, briefOf, sayBrief, sinceOf, sinceSaid } from './brief.js';
 import { MEMORY_ASKED, decidedFor, rememberAsked, sayMemory } from './memory.js';
 import { floorSpend, localDay, tokensSaid } from './budget.js';
@@ -29,7 +30,9 @@ import { exactOf, kindWord, meaningOf, riskOf } from './risk.js';
 import { createPoe, has, insertAfter, needWord, norm, poeBadge } from './poe-desk.js';
 import { createGoalStand, isStandHref, standFloor, standHref } from './goal-stand.js';
 import { forecastOf, pressing, usageLine, usageWords } from './usage.js';
+import { HIDDEN as CARRY_HIDDEN, carryBrief, carryOnLine, carryOnOf, hideFor } from './carry-on.js';
 import { CONNECTED, FIRST, UNDONE, answeringWords, codexLine, connectRequest, connectStart, firstMoment, floorFolders, updateLine } from './welcome.js';
+import { wellChanges, wellLine, wellMerge, wellMissing, wellNotes, wellRequest, wellStart, wellStatus, wellTicked } from './agent-setup.js';
 import { TOUR as TOUR_SEEN, createTour, tourWanted } from './tour.js';
 import { createAlerts, freshAlerts } from './alerts.js';
 import { setVoiceSaved, voiceSaved, voiceWanted } from './voice.js';
@@ -179,7 +182,8 @@ const waitingNow = () => {
   const { asks, runs } = control.on ? control.state() : { asks: work.asks || [], runs: [] };
   // a floor's budget question goes as soon as it is under budget again, without waiting for the hook
   const tasks = openTasks().filter((t) => !t.budget || spendOf(floorOf(t.budget))?.over !== false);
-  return waitingOnYou({ asks: asks.filter((a) => !answered.has(a.id)), runs, conversations: work.conversations, tasks, hushed: answeredKeys });
+  return waitingOnYou({ asks: asks.filter((a) => !answered.has(a.id)), runs, conversations: work.conversations, tasks, hushed: answeredKeys })
+    .filter((i) => i.kind !== 'turn' || !carryingOn(i.key)); // one stopped at its limit shows once, as the offer to carry it on
 };
 // Permissions answered here, left out of the list before the next look at control catches up, and their
 // conversations' keys with the time, so the count drops at once instead of the request coming back as its question.
@@ -636,6 +640,7 @@ function brainFacts() {
       goals.length ? ['Goals:', some(goals, (g) => `- ${q(g.title)}: ${g.status === 'reached' ? 'reached' : 'open'}`)] : 'No goals written yet.',
       prs.length > 0 && ['Open pull requests:', some(prs, (x) => `- #${x.number} ${q(x.title)}${x.draft ? ', a draft' : ''}`)],
       copies.length > 0 && ['Working copies with unsaved changes:', some(copies, (c) => `- ${c.name}: ${count(c.changes, 'change', 'changes')}`)],
+      reviewerOf(floor) && `Review line: every change is checked before it reaches the person. ${reviewerOf(floor).line}`,
     ]);
     // The people at work on this floor: each conversation's agent, and agents started from here.
     const convos = work.conversations.filter((c) => c.project === p);
@@ -1148,17 +1153,18 @@ const switchOn = (name, otherwise = true) => {
 // The switches in the groups a person thinks in, each one line (the rest of its words on hover or focus).
 const SWITCH_SETS = [
   ['Answering your agents', ['control', 'always']],
-  ['Guardrails', ['checks', 'review', 'budget', 'restore', 'clash']],
+  ['Guardrails', ['checks', 'review', 'budget', 'restore', 'clash', 'secrets']],
   ['What every agent is told', ['handovers', 'memory', 'howtos']],
   ['While Arnheim runs', ['brain', 'routines', 'pings', 'git', 'updates']],
-  ['On this page', ['forecast']],
+  ['On this page', ['forecast', 'carry_on']],
 ];
 // The words sit outside the label, so tapping them to read them all (a phone has no pointing) never flips the switch.
 const aboutLine = (text) => h('span.small.muted.switch-about', text); // in full: rows that open on a hover move under the pointer
 function switchRow(s) {
   return h('li.switch-row', h('label.switch',
     h('input', { type: 'checkbox', checked: !!s.on, disabled: !!s.set_by, onchange: (event) => flip(s.name, event.currentTarget.checked) }),
-    h('span', h('b', s.label), s.set_by && h('span.small', ` Set by ${s.set_by} for this start.`))), aboutLine(s.about));
+    h('span', h('b', s.label), s.set_by && h('span.small', ` Set by ${s.set_by} for this start.`))), aboutLine(s.about),
+  s.name === 'review' && reviewersSaid(org.floors) && aboutLine(reviewersSaid(org.floors))); // who reads on each floor (review.js)
 }
 // Speaking out loud on this device: the same as the Voice button in Talk, here too, where a person looks for it.
 window.addEventListener('arnheim-voice', () => { if (document.querySelector('#content .switch-list')) render(); });
@@ -1514,6 +1520,103 @@ function usageCard() {
     h('p.small.muted', dir === 'data' ? 'As Claude Code and Codex report it. A 5-hour limit goes by the last hour\'s pace, a weekly one by its average.' : 'Made up, like the rest of the company.'));
 }
 
+// Never stop at a limit (carry-on.js): a conversation whose agent will soon reach its plan's limit, or has, is offered to
+// carry on in the other agent, once, when that one is here with room left. With control on, Carry on starts it on the same
+// floor and stops the first at its next step (connect/carry_on.py); with it off, the hand-over is there to copy. Not now
+// hides it in this browser until that limit starts again.
+let carryHidden = keptJson(CARRY_HIDDEN) || {};
+let carryAgents = null; // whether Claude Code and Codex are on this computer, as /setup/here says while control is off
+let carryAsked = false;
+let carryMemo = null; // { at, work, items }: worked out at most once a second for the same work
+const carryOpen = new Set(); // whose hand-over is open to read, kept through each redraw
+function carryAgentsNow() {
+  if (madeUp()) return { 'Claude Code': true, Codex: true }; // the made-up company shows the moment, and nothing runs
+  if (control.on) return control.state().agents || null;
+  if (!carryAsked && dir === 'data' && !fromAway()) {
+    carryAsked = true;
+    setupGet('here').then((got) => { // null where it can't be asked: then the readings and conversations decide
+      if (!got) return;
+      carryAgents = { 'Claude Code': !!got.claude, Codex: !!got.codex };
+      carryMemo = null;
+      refresh();
+    });
+  }
+  return carryAgents;
+}
+function carryOnNow() {
+  if (!switchOn('carry_on') || fromAway() || replayAt != null) return [];
+  const now = Date.now();
+  if (carryMemo && carryMemo.work === work && now - carryMemo.at < 1000) return carryMemo.items;
+  const items = carryOnOf({ conversations: work.conversations, usage: work.usage, agents: carryAgentsNow(), hidden: carryHidden,
+    carried: control.on ? control.state().carried || [] : [], now: now / 1000 });
+  carryMemo = { at: now, work, items };
+  return items;
+}
+const carryingOn = (key) => carryOnNow().some((i) => i.key === key);
+// Secrets git has shared, or would, count among what needs you (one ignored by git is only a warning on its floor).
+const secretsNeeding = () => secretsIn(work.secrets).filter((f) => SERIOUS.has(f.state));
+const carryWords = (i) => carryBrief(convoNow(i.key) || { id: i.key, title: i.title }, work.tasks, i, floorOf(i.project)?.label || i.project);
+function carryNotNow(i) {
+  carryHidden = hideFor(carryHidden, i);
+  keep(CARRY_HIDDEN, JSON.stringify(carryHidden));
+  carryMemo = null;
+  controlNote = `Not now: it stays hidden until ${i.from}'s ${i.label || 'limit'} starts again.`;
+  noteFresh = true;
+  refresh();
+}
+function carryStart(i) {
+  controlDone(control.carryOn(i.key, i.to, carryWords(i)).then((r) => {
+    carryHidden = hideFor(carryHidden, i);
+    keep(CARRY_HIDDEN, JSON.stringify(carryHidden));
+    carryMemo = null; // stays on Needs you, so what was done can be read here
+    return r;
+  }), (r) => `${r.agent} is carrying on with "${i.title}" on ${floorOf(r.project)?.label || r.project}. It sits down in its Conversations room once it begins.`
+    + (r.stopped ? ` ${i.from} stops at its next step, so the two never change the same files.` : ''));
+}
+function carryCopy(i) {
+  const text = carryWords(i);
+  const floor = floorOf(i.project)?.label || i.project;
+  const done = (ok) => { controlNote = ok ? `Copied. Start ${i.to} in ${floor}'s folder and paste it in.` : "This browser wouldn't copy it. Select the words and copy them yourself."; noteFresh = true; render(); };
+  const byHand = () => { // where the clipboard isn't offered to the page: the older way, from a hidden box
+    const area = h('textarea', { readonly: true, style: 'position: fixed; opacity: 0' }, text);
+    document.body.append(area);
+    area.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    area.remove();
+    return ok;
+  };
+  if (navigator.clipboard?.writeText) navigator.clipboard.writeText(text).then(() => done(true), () => done(byHand()));
+  else done(byHand());
+}
+function carryOnCard(items) {
+  if (!items.length) return null;
+  const canStart = control.on && dir === 'data';
+  return h('section.panel-card.carry-on',
+    sectHead('repeat', items.length === 1 ? 'Carry on in the other agent' : `Carry on in the other agent (${items.length})`),
+    h('ul.list', items.map((i) => {
+      const floor = floorOf(i.project)?.label || i.project;
+      const li = row(convoHref({ id: i.key, project: i.project }), i.title, `${floor}. ${carryOnLine(i)}`, 'needs');
+      const words = carryWords(i);
+      li.append(canStart
+        ? h('div.waiting-do',
+          h('div.control-row', btn(`Carry on in ${i.to}`, () => carryStart(i), '.primary'), btn('Not now', () => carryNotNow(i))),
+          i.working && h('p.small.muted', `${i.from} stops at its next step, so the two never change the same files.`),
+          h('details.explain.carry-what', { open: carryOpen.has(i.key), ontoggle: (event) => { if (event.currentTarget.open) carryOpen.add(i.key); else carryOpen.delete(i.key); } },
+            h('summary', `What ${i.to} is told`), h('pre.carry-brief', words),
+            h('div.control-row', btn('Copy', () => carryCopy(i)))))
+        : h('div.waiting-do',
+          h('div.control-row', btn(`Copy what ${i.to} is told`, () => carryCopy(i), '.primary'), btn('Not now', () => carryNotNow(i))),
+          h('p.small', `Then start ${i.to} in ${floor}'s folder and paste it in.`),
+          // folded, like the button's own: the hand-over is long, and the list stays one look long
+          h('details.explain.carry-what', { open: carryOpen.has(i.key), ontoggle: (event) => { if (event.currentTarget.open) carryOpen.add(i.key); else carryOpen.delete(i.key); } },
+            h('summary', `What ${i.to} is told`), h('pre.carry-brief', words)),
+          h('p.small.muted', madeUp() ? 'Made up, like the rest of the company. With your own, and control on, Carry on starts it for you.'
+            : 'With control on, Carry on starts it for you, on the same floor.')));
+      return li;
+    })));
+}
+
 function spendCard() {
   const list = org.floors.map((f) => [f, spendOf(f)]).filter(([, s]) => s);
   if (!list.length) return null;
@@ -1535,6 +1638,7 @@ function spendCard() {
 function healthItems(floor, hh) {
   const WHAT = { pr: 'Waiting too long', routine: 'A routine', review: 'The review line', quiet: 'Gone quiet', worn: 'Running long' };
   return hh.problems.map((p) => {
+    if (p.finding) return secretItem(p.finding); // a secret in an agent's settings: its own buttons
     const li = row(p.key ? convoHref({ id: p.key, project: floor.project }) : null, p.line, WHAT[p.kind] || 'A check',
       ['pr', 'quiet', 'worn'].includes(p.kind) ? 'needs' : 'failed');
     if (control.on && dir === 'data') {
@@ -1583,6 +1687,85 @@ function floorHealth(floor) {
   const hh = healthOf(floor.project, work);
   if (hh.state === 'good') return null;
   return h('section.panel-card', sectHead('heart-pulse', 'Health'), h('ul.list', healthItems(floor, hh)));
+}
+
+// The secrets check (serve.py's /secrets/, connect/secret_scan.py): passwords and tokens saved in your agents'
+// settings, on this computer's own page only, with Take it out, Keep git out of it, and Undo. Needs you lists them
+// all; each floor's health counts its own. The made-up company shows its one from its work.json, and changes nothing.
+let secretsState = null; // what /secrets/ said: { token, on, findings, taken }
+let secretsAsked = 0;
+let secretNote = '';
+let secretBusy = false;
+async function readSecrets(now, force = false) {
+  if (dir !== 'data') return secretsIn(now?.secrets);
+  if (fromAway()) return [];
+  if (force || Date.now() - secretsAsked > 15000) { // what it found changes once a minute at most
+    secretsAsked = Date.now();
+    try {
+      const r = await fetch('secrets/', { cache: 'no-store', credentials: 'same-origin' });
+      if (r.ok) secretsState = await r.json();
+    } catch { /* keeps what it said last */ }
+  }
+  return secretsIn(secretsState?.findings);
+}
+async function secretDo(name, body, again = false) {
+  if (dir !== 'data') {
+    secretNote = 'The made-up company changes nothing. With your own, Take it out takes only the rules holding the secret out of the file and keeps a copy, so Undo can put it back.';
+    render();
+    return;
+  }
+  if (secretBusy) return;
+  secretBusy = true;
+  render();
+  let out;
+  try {
+    const r = await fetch(`secrets/${name}`, {
+      method: 'POST', cache: 'no-store', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-Arnheim-Switches': secretsState?.token || '' }, body: JSON.stringify(body),
+    });
+    if (r.status === 403 && !again) { // Arnheim started again since: a new token
+      secretBusy = false;
+      await readSecrets(work, true);
+      return secretDo(name, body, true);
+    }
+    out = await r.json().catch(() => ({}));
+    if (!r.ok && !out.error) out.error = `Arnheim answered ${r.status}. Reload the page and try again.`;
+  } catch { out = { error: 'Arnheim didn\'t answer. Is it still running?' }; }
+  if (Array.isArray(out.findings)) secretsState = { ...secretsState, ...out, token: out.token || secretsState?.token };
+  secretNote = out.error || out.said || '';
+  secretBusy = false;
+  work.secrets = secretsIn(secretsState?.findings);
+  refresh();
+}
+const secretButton = (label, onclick, cls = '.quiet') => h(`button.btn${cls}`, { type: 'button', disabled: secretBusy, onclick }, label);
+function secretItem(f) {
+  const li = row(null, f.says, secretSub(f, floorOf(f.project)?.label || f.project), secretMood(f));
+  if (dir === 'data' && fromAway()) return li;
+  const buttons = [
+    f.fix?.out && secretButton('Take it out', () => secretDo('out', { id: f.id }), '.primary'),
+    f.fix?.exclude && secretButton('Keep git out of it', () => secretDo('exclude', { id: f.id })),
+  ].filter(Boolean);
+  if (buttons.length) li.append(h('div.control-row.waiting-do', buttons));
+  return li;
+}
+function takenItem(t) {
+  const li = row(null, t.says, [floorOf(t.project)?.label || t.project, t.remind].filter(Boolean).join('. '), t.remind ? 'failed' : 'ok');
+  li.append(h('div.control-row.waiting-do',
+    secretButton('Undo', () => secretDo('undo', { undo: t.undo })),
+    t.kind === 'out' && secretButton('Delete the copy now', () => secretDo('forget', { undo: t.undo }))));
+  return li;
+}
+function secretsCard() {
+  const list = secretsIn(work.secrets);
+  const taken = dir === 'data' && !fromAway() && Array.isArray(secretsState?.taken) ? secretsState.taken : [];
+  if (!list.length && !taken.length && !secretNote) return null;
+  return h('section.panel-card.secrets-card',
+    sectHead('shield-check', list.length ? `Secrets in your agents' settings (${list.length})` : 'Secrets in your agents\' settings'),
+    list.length > 0 && h('ul.list', list.map(secretItem)),
+    secretNote && h('p.small.note', { role: 'status' }, secretNote),
+    taken.length > 0 && [h('p.small.muted', 'Taken out lately. Undo puts the file back exactly as it was. Each copy is deleted after a week.'), h('ul.list', taken.map(takenItem))],
+    h('p.small.muted', 'Only what kind each secret is and where it is show here, with a short hint, never the secret itself.'),
+    dir === 'data' && !fromAway() && h('div.control-row', secretButton(secretBusy ? 'Checking...' : 'Check again', () => secretDo('check', {}))));
 }
 
 // Routines (routines.js): each, its schedule and what its last run came to, with "Run it now" when control is
@@ -1845,10 +2028,15 @@ function viewOverview() {
   const blocked = waiting.filter((i) => (i.kind === 'permission' || i.kind === 'question') && i.at > 0);
   const oldest = blocked.length ? Math.max(...blocked.map((i) => now - i.at)) : 0;
   const moving = talking.length + jobs.length;
-  const heading = waiting.length ? count(waiting.length, 'thing needs you', 'things need you') : 'Nothing needs you';
+  const carrying = carryOnNow(); // conversations to carry on in the other agent at a limit (carry-on.js)
+  const secretsOut = secretsNeeding();
+  const needs = waiting.length + carrying.length + secretsOut.length;
+  const heading = needs ? count(needs, 'thing needs you', 'things need you') : 'Nothing needs you';
   const sub = waiting.length
     ? (oldest > 0 ? `The longest an agent has waited is ${waitFor(oldest)}.` : 'The first is below, with its answer.')
-    : 'All quiet. Anything that stops for you shows here first.';
+    : carrying.length ? 'An agent is reaching its plan\'s limit: carry its work on in the other one, below.'
+      : secretsOut.length ? 'A password or token is saved in an agent\'s settings: take it out, below.'
+        : 'All quiet. Anything that stops for you shows here first.';
   const reads = control.on ? together(waiting) : null;
   return {
     top: true,
@@ -1862,7 +2050,9 @@ function viewOverview() {
       firstCard(),
       updateCard(),
       first && focusCard(first),
+      carryOnCard(carrying),
       clashCard(),
+      secretsCard(),
       agentsRest.length > 0 && h('section.panel-card.home-more',
         sectHead('bell', `More agents waiting (${agentsRest.length})`),
         reads && h('div.control-row', { style: 'margin-bottom: 8px' }, btn(reads.label, () => controlDone(allowReads(reads.ids), (said) => said), '.primary')),
@@ -2000,6 +2190,7 @@ async function openFlow() {
   if (!plan) { flow = { step: 'failed' }; render(); return; }
   if (plan.token) setupHere = { ...(setupHere || {}), token: plan.token };
   flow = connectStart(plan);
+  flow.wellState = wellStart(plan.well); // Set your agents up well: every step ticked (agent-setup.js)
   render();
   $('connect-flow')?.focus({ preventScroll: true });
 }
@@ -2011,7 +2202,7 @@ async function connectNow() {
   flow.step = 'working';
   flow.error = '';
   render();
-  const out = await setupPost('connect', connectRequest(flow));
+  const out = await setupPost('connect', { ...connectRequest(flow), well: wellRequest(flow.plan?.well, flow.wellState, wellFolders(flow)) });
   if (out.error) {
     flow.step = 'form';
     flow.error = out.error;
@@ -2036,7 +2227,7 @@ function connectFlow() {
   const plan = f.plan;
   const working = f.step === 'working';
   const projects = plan.projects;
-  const tick = (folder) => (event) => { if (event.currentTarget.checked) f.ticked.add(folder); else f.ticked.delete(folder); };
+  const tick = (folder) => (event) => { if (event.currentTarget.checked) f.ticked.add(folder); else f.ticked.delete(folder); render(); }; // its steps below follow
   return [head,
     h('form.connect-form', { onsubmit: (event) => { event.preventDefault(); connectNow(); }, 'aria-busy': working ? 'true' : null },
       h('fieldset.connect-set',
@@ -2048,13 +2239,15 @@ function connectFlow() {
           : h('p.small.muted', 'Found none: no recent Claude Code or Codex conversation ran in a project folder that is still there. Type a project\'s folder below.')),
       h('label.connect-typed', h('span.small', projects.length ? 'Add another project\'s folder (optional)' : 'A project\'s folder'),
         h('input', { id: 'connect-typed', type: 'text', name: 'typed', value: f.typed, placeholder: '~/code/my-project', autocomplete: 'off',
-          autocapitalize: 'off', spellcheck: 'false', disabled: working, oninput: (event) => { f.typed = event.currentTarget.value; } })),
+          autocapitalize: 'off', spellcheck: 'false', disabled: working, oninput: (event) => { f.typed = event.currentTarget.value; },
+          onchange: () => wellTyped() })),
       h('fieldset.connect-set',
         h('legend', 'Answer your agents from the building too?'),
         h('label.switch', h('input', { type: 'radio', name: 'control', value: 'yes', checked: f.control, disabled: working, onchange: () => { f.control = true; } }),
           h('span', h('b', 'Yes'), h('span.small.muted', 'Allow or Deny their permission requests, and send them messages, from this page on this computer. A phone can join later, in Settings, under Your phone.'))),
         h('label.switch', h('input', { type: 'radio', name: 'control', value: 'no', checked: !f.control, disabled: working, onchange: () => { f.control = false; } }),
           h('span', h('b', 'No'), h('span.small.muted', 'Each agent asks in its own window, as usual. You can switch it on later, in Settings, under Switches.')))),
+      wellSection(f),
       h('ul.connect-found',
         h('li', plan.claude ? 'Claude Code: found.' : 'Claude Code: not found on this computer.'),
         h('li', codexLine(plan.codex)),
@@ -2063,7 +2256,7 @@ function connectFlow() {
       h('div.control-row',
         h('button.btn.primary', { id: 'connect-go', type: 'submit', disabled: working }, working ? 'Connecting...' : 'Connect'),
         h('button.btn', { id: 'connect-cancel', type: 'button', disabled: working, onclick: closeFlow }, 'Cancel')),
-      h('p.small.muted', `It writes your building to data/, a floor for each project, and adds Arnheim's hooks and status line to Claude Code's settings${plan.codex?.hooks ? ', and its hooks to Codex\'s' : ''}, keeping a copy of each file first. It never changes your projects' files, and Undo takes it out again. To start Arnheim each time you log in, run `, h('code.nowrap', 'python3 serve.py --always'), ' in a terminal on this computer.'))];
+      h('p.small.muted', `It writes your building to data/, a floor for each project, and adds Arnheim's hooks and status line to Claude Code's settings${plan.codex?.hooks ? ', and its hooks to Codex\'s' : ''}, keeping a copy of each file first. It changes your projects' files only for the steps you tick under Set your agents up well, and Undo takes it all out again. To start Arnheim each time you log in, run `, h('code.nowrap', 'python3 serve.py --always'), ' in a terminal on this computer.'))];
 }
 
 function setupCard() {
@@ -2095,7 +2288,7 @@ function setupCard() {
   if (flow) return h('section.panel-card.setup-card.connect-flow', { id: 'connect-flow', tabindex: '-1', 'aria-label': 'Connect my agents' }, connectFlow());
   const terminal = [
     h('div.setup-run', h('code', command), btn('Copy', copy), setupNote && h('span.small.muted', { role: 'status' }, setupNote)),
-    h('p.small.muted', 'It finds the projects you have worked on with Claude Code or Codex and asks before it changes anything. It writes your building to data/, a floor for each project, and adds Arnheim\'s hooks to Claude Code\'s settings and Codex\'s, keeping a copy of each file first. It never changes your projects\' files, and python3 connect/setup.py --undo takes the hooks out again. Then reload this page. On Windows, type py instead of python3.'),
+    h('p.small.muted', 'It finds the projects you have worked on with Claude Code or Codex and asks before it changes anything. It writes your building to data/, a floor for each project, and adds Arnheim\'s hooks to Claude Code\'s settings and Codex\'s, keeping a copy of each file first. It changes your projects\' files only if you say yes to setting your agents up well, and python3 connect/setup.py --undo takes it all out again. Then reload this page. On Windows, type py instead of python3.'),
   ];
   const here = !fromAway() && setupHere;
   return h('section.panel-card.setup-card',
@@ -2150,7 +2343,7 @@ function connectedCard() {
     n.error && h('p.banner.fail', { role: 'alert' }, n.error),
     undoAsk
       ? h('div.connect-undo',
-        h('p.small', 'Take Arnheim\'s hooks and status line out of Claude Code\'s and Codex\'s settings, and put your building aside in data/backups/, so this goes back to the made-up company?'),
+        h('p.small', 'Take Arnheim\'s hooks and status line out of Claude Code\'s and Codex\'s settings, put back every file Set your agents up well changed, and put your building aside in data/backups/, so this goes back to the made-up company?'),
         h('div.control-row',
           h('button.btn.primary', { id: 'undo-go', type: 'button', disabled: !!n.working, onclick: undoConnect }, n.working ? 'Undoing...' : 'Undo'),
           h('button.btn', { id: 'undo-keep', type: 'button', disabled: !!n.working, onclick: () => { undoAsk = false; render(); } }, 'Keep it')))
@@ -2275,6 +2468,7 @@ function viewCompany() {
       title('Settings'),
       firstRun && setupCard(),
       agentsCard(),
+      wellCard(),
       memoryCard(),
       alwaysCard(),
       switchesCard(),
@@ -2297,11 +2491,144 @@ function agentsCard() {
     n.error && h('p.banner.fail', { role: 'alert' }, n.error),
     undoAsk
       ? h('div.connect-undo',
-        h('p.small', 'Take Arnheim\'s hooks and status line out of Claude Code\'s and Codex\'s settings, and put your building aside in data/backups/, so this goes back to the made-up company?'),
+        h('p.small', 'Take Arnheim\'s hooks and status line out of Claude Code\'s and Codex\'s settings, put back every file Set your agents up well changed, and put your building aside in data/backups/, so this goes back to the made-up company?'),
         h('div.control-row',
           h('button.btn.primary', { id: 'undo-go', type: 'button', disabled: !!n.working, onclick: undoConnect }, n.working ? 'Undoing...' : 'Undo'),
           h('button.btn', { id: 'undo-keep', type: 'button', disabled: !!n.working, onclick: () => { undoAsk = false; render(); } }, 'Keep it')))
       : h('div.control-row', h('button.btn.quiet', { id: 'undo-ask', type: 'button', onclick: () => { undoAsk = true; render(); $('undo-keep')?.focus(); } }, 'Undo connecting')));
+}
+
+/* ---------- set your agents up well (connect/agent_setup.py, through serve.py's /setup/) ---------- */
+
+// The steps for each project, each ticked, its check a box you can change, and the exact changes a press away.
+// Connect my agents and Settings' card both draw it. `folders`: the projects shown, by the names the plan gives.
+function wellSteps(well, st, folders, { busy = false, recheck = null } = {}) {
+  const projects = folders.map((f) => (well?.projects || []).find((p) => p.folder === f)).filter(Boolean);
+  const said = (item) => (item.state === 'done' ? `In place. ${item.says}` : item.says);
+  const line = (name, item, ticked, onchange, extra = null) => (item.state === 'todo'
+    ? h('li', h('label.switch', h('input', { type: 'checkbox', checked: ticked, disabled: busy, onchange }),
+      h('span', h('b', name), h('span.small.muted', item.says), item.codex && h('span.small.muted', item.codex))), extra)
+    : h('li.well-step', h('b', name), h('span.small.muted', said(item)), item.codex && h('span.small.muted', item.codex), extra));
+  const tick = (k) => (event) => { if (event.currentTarget.checked) st.ticked.add(k); else st.ticked.delete(k); render(); };
+  const blocks = projects.map((p) => {
+    const item = (id) => (p.items || []).find((i) => i.id === id);
+    // The project's name is in each step's name, unseen, so a screen reader hears whose it is and a redraw keeps the focus.
+    const step = (id, name, extra = null) => item(id) && line([h('span.well-who', `${p.label}: `), name], { ...item(id), codex: null },
+      st.ticked.has(`${p.folder}|${id}`), tick(`${p.folder}|${id}`), extra);
+    const check = item('check');
+    const box = check && check.state !== 'done' && h('label.connect-typed.well-check',
+      h('span.small', check.state === 'todo' ? 'The check, which you can change' : 'A check of your own (optional)'),
+      h('input', { type: 'text', value: st.checks[p.folder] ?? '', placeholder: 'npm test', autocomplete: 'off', autocapitalize: 'off',
+        spellcheck: 'false', disabled: busy, 'aria-label': `${p.label}: its check`,
+        oninput: (event) => { st.checks[p.folder] = event.currentTarget.value; }, onchange: () => recheck?.(p.folder) }));
+    return h('div.well-project',
+      h('p.well-name', h('b', p.label), h('span.small.muted', ` ${p.folder}`)),
+      h('ul.switch-list',
+        step('instructions', 'One instructions file both agents read'),
+        step('check', 'Its check, so done means proven'),
+        box && h('li', box),
+        step('allow', 'Its check runs without asking')));
+  });
+  const once = (id, name) => well?.[id] && line(name, well[id], !!st[id], (event) => { st[id] = event.currentTarget.checked; render(); });
+  const changes = wellChanges(well, st, folders);
+  const codexAllow = projects.map((p) => (p.items || []).find((i) => i.id === 'allow')?.codex).find(Boolean); // said once, not per project
+  return [blocks,
+    h('p.small.well-once', h('b', 'For every project, once')),
+    h('ul.switch-list', once('secrets', 'Secret files kept from Claude Code'), once('mcp', 'The same MCP servers in both')),
+    codexAllow && h('p.small.muted', codexAllow),
+    changes.length > 0 && h('details.connect-log.well-exact', { open: st.open, ontoggle: (event) => { st.open = event.currentTarget.open; } },
+      h('summary', 'Show the exact changes'),
+      changes.map((c) => h('div.well-change', h('p.small', c.how, ' ', c.file ? h('code', c.file) : `(${c.label})`), h('pre.connect-lines', c.text))))];
+}
+
+// The projects Connect sets up: those ticked, and the folder typed once its plan has come.
+const wellFolders = (f) => [
+  ...(f?.plan?.projects || []).map((p) => p.folder).filter((folder) => f.ticked.has(folder)),
+  ...(f?.typedWell && String(f.typed || '').trim() === f.typedFor ? [f.typedWell] : []),
+];
+// A fresh plan for some folders (one typed, or a check changed), merged into what Connect or Settings shows.
+async function wellFresh(well, st, body) {
+  const out = await setupPost('well', body);
+  return out.error || !out.well ? null : wellMerge(well, out.well, st);
+}
+async function wellTyped() {
+  const f = flow;
+  const said = String(f?.typed || '').trim();
+  if (!f?.wellState || !said || f.typedFor === said) return;
+  f.typedFor = said;
+  f.typedWell = null;
+  const out = await setupPost('well', { folders: [said] });
+  if (flow !== f || f.typedFor !== said || out.error || !out.well?.projects?.length) return;
+  f.plan.well = wellMerge(f.plan.well, out.well, f.wellState);
+  f.typedWell = out.well.projects[0].folder;
+  render();
+}
+function wellSection(f) {
+  if (!f.plan?.well || !f.wellState) return null;
+  const recheck = async (folder) => {
+    const merged = await wellFresh(f.plan.well, f.wellState, { folders: [folder], checks: { [folder]: f.wellState.checks[folder] || '' } });
+    if (merged && flow === f) { f.plan.well = merged; render(); }
+  };
+  return h('fieldset.connect-set.well-set',
+    h('legend', 'Set your agents up well'),
+    h('p.small.muted', 'So Claude Code and Codex work the same way in each project. Untick anything you don\'t want. Nothing changes until you press Connect, and Undo takes it all back.'),
+    wellSteps(f.plan.well, f.wellState, wellFolders(f), { busy: f.step === 'working', recheck }));
+}
+
+// Settings: what each floor has in place, and a way to set up what is missing, shown step by step first.
+let wellNow = null; // { well, state, open, working, lines, error } once /setup/agents has answered
+let wellAsked = 0; // when it was last asked: again after a minute, unless you are choosing what to set up
+async function wellGo() {
+  const w = wellNow;
+  const folders = wellStatus(w.well).map((x) => x.folder);
+  w.working = true;
+  w.error = '';
+  render();
+  const out = await setupPost('agents', wellRequest(w.well, w.state, folders));
+  w.working = false;
+  if (out.error) {
+    w.error = out.error;
+    render();
+    return;
+  }
+  wellNow = { well: out.well, state: wellStart(out.well), open: false, lines: out.lines || [] };
+  render();
+}
+function wellCard() {
+  if (!ownCompany() || fromAway() || route.floor !== 'company') return null;
+  if (Date.now() - wellAsked > 60000 && !wellNow?.open && !wellNow?.working) {
+    wellAsked = Date.now();
+    setupGet('agents').then((got) => {
+      if (got?.token) setupHere = { ...(setupHere || {}), token: got.token };
+      if (wellNow?.open || wellNow?.working) return; // you are choosing: what you see stays put
+      wellNow = got?.well ? { well: got.well, state: wellStart(got.well), open: false, lines: wellNow?.lines } : null;
+      render();
+    });
+  }
+  const w = wellNow;
+  const floors = w ? wellStatus(w.well) : [];
+  if (!floors.length) return null;
+  const folders = floors.map((x) => x.folder);
+  const recheck = async (folder) => {
+    const merged = await wellFresh(w.well, w.state, { folders: [folder], checks: { [folder]: w.state.checks[folder] || '' } });
+    if (merged && wellNow === w) { w.well = merged; render(); }
+  };
+  return h('section.panel-card.well-card',
+    sectHead('shield-check', 'Your agents\' setup'),
+    h('p.small.muted', 'What each floor has in place for Claude Code and Codex: one instructions file both read, a check so done means proven, secret files kept from Claude Code, its check allowed without asking, and the same MCP servers in both.'),
+    h('ul.list', floors.map((x) => h('li', h('div.row', dot(x.steps.every((s) => s.state === 'done') ? 'ok' : 'quiet'), // amber stays for what needs you
+      h('span.row-main', h('span.row-title', x.label), h('span.row-sub', wellLine(x))))))),
+    wellNotes(w.well).map((n) => h('p.small.muted', h('b', `${n.who}: `), n.says)),
+    w.error && h('p.banner.fail', { role: 'alert' }, w.error),
+    w.lines?.length > 0 && doneLog(w.lines),
+    w.open
+      ? [wellSteps(w.well, w.state, folders, { busy: !!w.working, recheck }),
+        h('div.control-row',
+          h('button.btn.primary', { id: 'well-go', type: 'button', disabled: !!w.working || !wellTicked(w.well, w.state, folders), onclick: wellGo },
+            w.working ? 'Setting up...' : 'Set up'),
+          h('button.btn', { id: 'well-cancel', type: 'button', disabled: !!w.working, onclick: () => { w.open = false; render(); } }, 'Cancel'))]
+      : wellMissing(w.well) && h('div.control-row',
+        h('button.btn', { id: 'well-open', type: 'button', onclick: () => { w.open = true; w.state = wellStart(w.well); render(); } }, 'Set up what is missing')));
 }
 
 // The commands you allowed for good (connect/standing.py), each a press away from asking again.
@@ -2398,6 +2725,7 @@ function viewFloor(floor) {
       floor === org.lobby && pauseCard(),
       h('p.states', floorLines(floor).map(chip)),
       org.floors.includes(floor) && floorHealth(floor),
+      org.floors.includes(floor) && reviewCard(floor),
       floor.about && h('p', floor.about),
       org.floors.includes(floor) && restoreCard(pointsOf(work.restore, { project: floor.project }), { titles: true }),
       org.floors.includes(floor) && howtoCard(floor),
@@ -2411,6 +2739,17 @@ function viewFloor(floor) {
       })),
     ],
   };
+}
+
+// The floor's review line (review.js): who reads its agents' work before it reaches you.
+function reviewCard(floor) {
+  const rv = reviewerOf(floor);
+  if (!rv) return null;
+  return h('section.panel-card.review-card',
+    sectHead('shield-check', 'Review line'),
+    h('p', `Every change an agent makes here is checked before it reaches you${floor.check ? ', its check first' : ''}. ${rv.line}`),
+    ownCompany() && !switchOn('review') && h('p.small.note', 'The review line is switched off under Switches, in Settings, so nothing is held for now.'),
+    ownCompany() && h('p.small.muted', 'Who reviews is set in data/company.json, in this floor\'s "review" (docs/connect.md, step 12).'));
 }
 
 function roomItems(floor, room, info) {
@@ -2644,7 +2983,7 @@ function refresh() {
 
 // One count everywhere: the top bar's pill, the Needs you tab and the building's filters.
 function showCounts() {
-  const n = waitingNow().length;
+  const n = waitingNow().length + carryOnNow().length + secretsNeeding().length;
   const moving = work.conversations.filter((c) => c.working).length + work.jobs.filter((j) => j.state === 'running').length;
   const pill = $('needs-pill');
   pill.hidden = n === 0;
@@ -3266,6 +3605,7 @@ async function readWork() {
   }
   now.memory = await readMemory();
   now.usage = await readUsage(now);
+  now.secrets = await readSecrets(now); // the secrets check (secret-check.js)
   if (dir !== 'data') now.pullRequests = now.pullRequests.map((p) => (p.waited ? { ...p, updated: OPENED - p.waited * 86400 } : p)); // the sample's: days waited
   if (dir !== 'data') now.restore = now.restore.map((p) => (Number.isFinite(p.ago) ? { ...p, at: OPENED - p.ago } : p)); // the sample's: seconds ago
   if (dir !== 'data') now.conversations = now.conversations.map((c) => (Number.isFinite(c.ago) ? { ...c, at: OPENED - c.ago } : c));

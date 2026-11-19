@@ -1,0 +1,14 @@
+{
+  "name": "arnheim",
+  "version": "1.0.0",
+  "description": "Sets up Arnheim, the building that shows your Claude Code and Codex agents, from inside Codex. It asks before each change, and Arnheim's own setup shows what it changes and can undo it.",
+  "author": {
+    "name": "Allwhen Labs",
+    "url": "https://github.com/allwhenlabs/arnheim"
+  },
+  "homepage": "https://github.com/allwhenlabs/arnheim",
+  "repository": "https://github.com/allwhenlabs/arnheim",
+  "license": "MIT",
+  "keywords": ["agents", "dashboard", "local", "claude-code"],
+  "skills": "./skills/"
+}

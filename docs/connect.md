@@ -80,6 +80,9 @@ told; the Switches in Settings change it (step 20), and `python3 serve.py --no-c
 Arnheim now and each time you log in, so it keeps running when you close the window: that is
 `python3 serve.py --always`, and `python3 serve.py --always off` takes it out again.
 
+Before that, it offers to set your agents up well (step 23): it shows what it would do in each project and
+asks once. `--well` says yes without asking, `--no-well` doesn't ask, and `--yes` alone leaves it.
+
 **From the page.** On the made-up company's welcome card, or in Settings, on the computer that runs `serve.py` (never a
 phone, `--lan` or `--share`), **Connect my agents** does the same without a terminal. It lists the
 projects setup finds, each ticked, takes one more folder you type (it must be there, and not your home
@@ -133,6 +136,7 @@ and when it ends. These are its hooks. Add Arnheim's to Claude Code's settings: 
   "hooks": {
     "SessionStart": [{ "hooks": [{ "type": "command", "command": "python3 /path/to/arnheim/connect/claude_code.py" }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "python3 /path/to/arnheim/connect/claude_code.py" }] }],
+    "PreToolUse": [{ "matcher": "Edit|MultiEdit|Write|NotebookEdit|Bash", "hooks": [{ "type": "command", "command": "python3 /path/to/arnheim/connect/claude_code.py" }] }],
     "PostToolUse": [{ "hooks": [{ "type": "command", "command": "python3 /path/to/arnheim/connect/claude_code.py" }] }],
     "Notification": [{ "hooks": [{ "type": "command", "command": "python3 /path/to/arnheim/connect/claude_code.py" }] }],
     "Stop": [{ "hooks": [{ "type": "command", "command": "python3 /path/to/arnheim/connect/claude_code.py" }] }],
@@ -363,7 +367,7 @@ Other agents can sit in the building too, in the same rooms, the same list of wh
 the same replay. Add their feed to `data/company.json`'s `feeds`, beside Claude Code's:
 
 ```json
-"feeds": ["feeds/claude-code.json", "feeds/agents.json", "feeds/projects.json"]
+"feeds": ["feeds/claude-code.json", "feeds/agents.json", "feeds/projects.json", "feeds/restore.json"]
 ```
 
 **OpenAI's Codex CLI** is a full member, like Claude Code. Since version 0.124 it has hooks with the
@@ -374,6 +378,7 @@ the same file:
 {"hooks": {
   "SessionStart": [{"hooks": [{"type": "command", "command": "python3 /path/to/arnheim/connect/codex.py"}]}],
   "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "python3 /path/to/arnheim/connect/codex.py"}]}],
+  "PreToolUse": [{"matcher": "apply_patch|Edit|Write|Bash", "hooks": [{"type": "command", "command": "python3 /path/to/arnheim/connect/codex.py"}]}],
   "PostToolUse": [{"hooks": [{"type": "command", "command": "python3 /path/to/arnheim/connect/codex.py"}]}],
   "PermissionRequest": [{"hooks": [{"type": "command", "command": "python3 /path/to/arnheim/connect/codex.py", "timeout": 150}]}],
   "Stop": [{"hooks": [{"type": "command", "command": "python3 /path/to/arnheim/connect/codex.py"}]}],
@@ -389,7 +394,8 @@ warnings and its floor's check), amber while it waits for your permission, what 
 what it spends against the floor's budget. With control on, you answer its permissions, send it
 messages and stop it from the building, as for Claude Code. Two things differ: Codex can't be
 interrupted while it asks, so "stop" there denies the request and it stops at its next step; and
-starting a new agent from the building starts Claude Code.
+starting a new agent from the building starts Claude Code, unless it carries a Claude Code conversation on at
+a limit (step 21).
 
 An older Codex, without hooks, can still show when a turn ends, through its `notify` setting, in
 `~/.codex/config.toml`:
@@ -445,35 +451,52 @@ A floor can say that every change gets checked before it reaches you:
   "check": { "run": ["npm", "test"], "label": "The tests" } }
 ```
 
-Then, when a Claude Code conversation there finishes a turn in which it changed files, Arnheim holds
-the turn while the work goes through the line:
+Then, when a Claude Code or Codex conversation there finishes a turn in which it changed files,
+Arnheim holds the turn while the work goes through the line:
 
 1. the floor's check (step 5), if it has one, and, if that passes,
-2. a reader: a second Claude Code, which can only read files, is shown what changed (from git) and
-   what you asked for, and says whether the work is ready for you.
+2. a reader: a second agent, which can only read files, is shown what changed (from git) and what
+   you asked for, and says whether the work is ready for you.
 
-Work that passes reaches you as usual, and its page says it passed and what the reader thought.
-Work that doesn't goes back to the agent with the reason, and it carries on fixing it; meanwhile it
-isn't listed as waiting on you. After two sends back it reaches you anyway, marked as having failed,
-so nothing goes round for ever.
+Work that passes reaches you as usual, and its page says it passed, who reviewed it and what they
+thought, such as "Codex reviewed Claude Code's work: ...". Work that doesn't goes back to the agent
+with the reason, and it carries on fixing it; meanwhile it isn't listed as waiting on you. After two
+sends back it reaches you anyway, marked as having failed, so nothing goes round for ever.
+
+**Who reviews.** Out of the box the other agent does: Codex reads Claude Code's work, and Claude Code
+reads Codex's, since a reviewer from another maker catches what the writer's own kind misses. When
+the other one isn't installed, the same agent reads it, and the result says so. To pick one for a
+floor, whoever wrote the work, add `"reviewer"`:
+
+```json
+"review": { "reviewer": "codex" }
+```
+
+`"other"` is the usual, `"claude"` is always Claude Code, and `"codex"` is always Codex. The floor's
+page and Settings say who reviews on each floor, and every result names who reviewed it.
 
 `"review": { "read": false }` leaves the reader out, so only the check decides. `"times"` sets how
 often work can be sent back (0 to 5, two if left out), and `"timeout"` the reader's time limit in
-seconds (five minutes if left out). The reader runs with Claude Code's `claude` command
-(`ARNHEIM_CLAUDE` names another), in the floor's folder, with only the tools that read and search
-files, no MCP servers, and nothing saved to your Claude Code history. What it spends counts towards
-the floor's budget (step 7): a few thousand new tokens for a small change.
+seconds (five minutes if left out). Claude Code reads with its `claude` command (`ARNHEIM_CLAUDE`
+names another), in the floor's folder, with only the tools that read and search files, no MCP
+servers, and nothing saved to your Claude Code history. Codex reads with `codex exec`
+(`ARNHEIM_CODEX` names another), in the floor's folder, in a read-only sandbox, never asking for
+approval, without your `config.toml` (so none of your MCP servers), your rules or hooks, and nothing
+saved to your Codex history. It still uses your Codex sign-in. Either way, what it spends counts
+towards the floor's budget (step 7): a few thousand new tokens for a small change.
 
-The line runs while Claude Code waits for the turn to end, so give step 2's Stop hook a time limit
-longer than the check's and the reader's together:
+The line runs while the agent waits for the turn to end, so give its Stop hook a time limit longer
+than the check's and the reader's together: step 2's for Claude Code, and step 9's `hooks.json` for
+Codex, which waits ten minutes if it isn't told:
 
 ```json
 "Stop": [{ "hooks": [{ "type": "command", "command": "python3 /path/to/arnheim/connect/claude_code.py", "timeout": 1200 }] }]
 ```
 
 If the limit runs out first, the turn ends as usual and the building says the work wasn't reviewed.
-A conversation you stop from the building isn't reviewed. Agents other than Claude Code (step 9)
-aren't held, since the building only hears from them once they have finished.
+A conversation you stop from the building isn't reviewed. Other agents (step 9), and a Codex that
+shows only through `notify`, aren't held, since the building only hears from them once they have
+finished.
 
 ## 13. Routines
 
@@ -525,7 +548,8 @@ looking at while:
 
 - an agent's work there failed its check (step 5), and the agent isn't back at work on it,
 - work failed the review line (step 12),
-- a routine needs you (step 13).
+- a routine needs you (step 13),
+- an agent's settings hold a secret that git has shared, or would (step 22).
 
 It has a warning while:
 
@@ -536,6 +560,8 @@ It has a warning while:
   were doing. With control on, **Start fresh with a hand-over** starts a new agent on the floor,
   handed what the old one was asked, the files it changed and its last words; stop the old one once
   the new one has it.
+- an agent's settings hold a secret that stays on this computer: git ignores the file, or the folder
+  isn't in git (step 22).
 
 The floor's label says "Something to fix" (or how many), its page
 lists each thing in words, and the "Project health" card in Activity puts
@@ -584,14 +610,10 @@ waits for its first time, and a time missed while the computer slept sends once.
 
 ## 16. Restore points
 
-Before an agent changes a project's files, Arnheim can keep how they were, so you can go back. Add
-this hook beside step 2's, in the same settings file:
-
-```json
-"PreToolUse": [{ "matcher": "Edit|MultiEdit|Write|NotebookEdit|Bash", "hooks": [{ "type": "command", "command": "python3 /path/to/arnheim/connect/claude_code.py" }] }]
-```
-
-and `"feeds/restore.json"` to `feeds` in `company.json`. Then, before the first file an agent changes
+Before an agent changes a project's files, Claude Code or Codex, Arnheim keeps how they were, so you can
+go back. `python3 connect/setup.py` (or Connect my agents on the page) sets this up for both: the
+`PreToolUse` hooks in step 2 and step 9, which run only for tools that change files and for shell
+commands, and `"feeds/restore.json"` in `feeds` in `company.json`. Then, before the first file an agent changes
 after each message you send it, and before any command that deletes or overwrites files in bulk (`rm
 -r`, `git reset --hard`, `git clean -f`, `git checkout -- ...`, `git stash` and the like), the hook
 saves the floor's files as a restore point: every file in the floor's own folder that git doesn't
@@ -669,8 +691,8 @@ change needs that page's own token.
 - **While Arnheim runs:** the receptionist and your assistant thinking with Claude (`--brain`),
   routines (`--routines`, step 13), pings (`--pings`, step 15), looking in project folders
   (`--no-git` turns it off, step 3), and looking for a newer Arnheim (below).
-- **On this page:** the Your plan card (step 18), and, on this device, desktop alerts (step 4) and
-  the talking switches, which are each browser's own.
+- **On this page:** the Your plan card (step 18), carrying on at a limit (step 21), and, on this device,
+  desktop alerts (step 4) and the talking switches, which are each browser's own.
 
 **Look for a newer Arnheim** is on unless you switch it off. When Arnheim's folder is a git checkout
 of github.com/allwhenlabs/arnheim, `serve.py` asks GitHub as it starts and once a day whether `main`
@@ -687,11 +709,162 @@ holds its switch for that start, and the page shows it as set by that word. With
 control and the brain stay off. Phones (`--remote`), the network (`--lan`, `--share`) and starting at
 login (`--always`) are only ever in the terminal.
 
+## 21. Carry on at a limit
+
+Reaching your plan's limit in the middle of the work is the loudest complaint about every coding agent,
+and the usual way round it is to keep both Claude Code and Codex and switch to the other. Arnheim does the
+switching with you. When a conversation's agent will reach its 5-hour or weekly limit within about half
+an hour at this pace (step 18), or has reached it, and the other agent is on this computer with room
+left, Needs you shows one item for that conversation:
+
+> Claude Code's 5-hour limit runs out in about 20 minutes, before it starts again at 16:10. Carry on in Codex?
+
+It works both ways, Codex to Claude Code too. It is offered for each conversation at work in the agent that
+is running out, and for one that stopped on its limit in the last two hours, once for each.
+
+- **Carry on in Codex** (with control on, step 4) starts the other agent on the same floor, in the floor's
+  folder, with a hand-over: what the conversation was for (its first request), the latest request, its
+  task list, the files it changed, its last words, and that the first agent reached its limit, so it
+  carries on from there and doesn't redo finished work. As in step 11, it is also told it was started from
+  the building, and the floor's check. If the first one is still at work, it stops at its next step, so
+  the two never change the same files. **What Codex is told** shows the hand-over before you press.
+- **With control off**, the item shows the hand-over instead, with **Copy**: start the other agent in the
+  floor's folder and paste it in.
+- **Not now** hides it for that conversation, in this browser, until that limit starts again.
+
+Codex starts without a window, as `codex exec --json --sandbox workspace-write -`, with the hand-over on
+its standard input: it may change files in the floor's folder, and nothing outside it, without the network
+unless your Codex settings allow it. Codex works only in a folder kept in git: on a floor that isn't, the
+button says so, and **Copy**, under What Codex is told, gives you the hand-over. Codex's hooks (step 9) show it on its floor like any Codex conversation, and you
+talk to it and stop it from the building as you would a Claude Code one started there. `ARNHEIM_CODEX`
+names another `codex` command, as `ARNHEIM_CLAUDE` does Claude Code's.
+
+To know when a Claude Code conversation stopped on its limit, `connect/setup.py` adds one more hook,
+`StopFailure`, which Claude Code runs instead of Stop when a turn ends on an error from its service. By
+hand, beside step 2's:
+
+```json
+"StopFailure": [{ "hooks": [{ "type": "command", "command": "python3 /path/to/arnheim/connect/claude_code.py" }] }]
+```
+
+For the hand-over, the feed also keeps the first words of each conversation's first message. It is a
+switch in Settings (step 20), **Carry on at a limit**, on unless you switch it off.
+
+## 22. Secrets in your agents' settings
+
+When you choose "Yes, and don't ask again", Claude Code saves the command as a rule in
+`.claude/settings.local.json`, word for word, so a command that named a token or a password keeps it
+there. Copies of that file with passwords and tokens in them have been found in public repositories on
+GitHub. Codex's rules, and the MCP servers your agents use, can hold keys too.
+
+When it starts, and every minute while it runs, `serve.py` reads the files where agents keep their
+settings, in each floor's folder and at the top of its repository, where newer Claude Code keeps the
+local file:
+
+- `.claude/settings.json` and `.claude/settings.local.json`: Claude Code's allow rules, environment
+  and hooks,
+- `.mcp.json`: the project's MCP servers,
+- `.codex/config.toml` and `.codex/rules/*.rules`: Codex's settings and command rules.
+
+It looks for keys in the shapes Anthropic, OpenAI, GitHub, GitLab, Slack, AWS, Google, Stripe, Hugging
+Face, npm and others give them, private key blocks, a bearer token, a password in an address
+(`user:password@`), a password or token given to a flag (`--password ...`) or to a name
+(`DB_PASSWORD=...`), and long random strings. A reference to a secret kept elsewhere, such as `$TOKEN`
+or `${TOKEN}`, isn't one.
+
+Then it asks git how far each has gone, and Needs you lists them, worst first. Each floor's health
+counts its own (step 14):
+
+- **Pushed**: the secret is in a commit already pushed. Change it now: taking it out here doesn't take
+  it out of the history on GitHub, or wherever you pushed it.
+- **Committed**: it is in a commit not pushed yet. Take it out before you push, out of that commit too.
+- **Git would commit it**: the file isn't committed yet, and git doesn't ignore it.
+- **Ignored**: git keeps the file out, so it stays on this computer, but any program that reads it can
+  see it.
+
+Each says what it is, the file and line, and a hint (`ghp_…1a2b`, or for a password only how long it
+is), and never the secret itself. Only the page on the computer that runs `serve.py` gets them: never a
+phone, `--lan` or `--share`.
+
+**Take it out** takes only the rules or entries that hold it out of the file, and leaves every other
+byte as it was, after keeping a copy of the file in `data/.secrets/undo/`, readable by you alone.
+**Undo** puts the file back exactly, byte for byte, unless it has changed since. The copy holds the
+secret, so it is deleted after a week, or at once with **Delete the copy now**. An agent that needs the
+key can be given it from an environment variable instead: `${NAME}` in `.mcp.json`, or
+`bearer_token_env_var` in Codex's settings.
+
+**Keep git out of it**, for a file git doesn't track yet, adds it to the repository's
+`.git/info/exclude`, which belongs to this copy of the repository alone and changes no tracked file.
+Undo takes the line out again. For a file git already tracks, an exclude line does nothing: take the
+secret out instead.
+
+**Check again** looks at once. No agent is ever sent to fix one, since it would read the secret. Switch
+the check off under Switches (step 20). `python3 connect/secret_scan.py --show` checks and says in the
+terminal what it found, never the secrets.
+
+## 23. Set your agents up well, both at once
+
+Claude Code and Codex each want setting up, in different files. Connect my agents offers to do it for both,
+in each project you connect, and `python3 connect/setup.py` asks once. Each step is ticked and said in
+plain words first, and **Show the exact changes** lists every file and line. Untick anything you don't
+want. In Settings, **Your agents' setup** shows what each floor has in place, and **Set up what is
+missing** does the rest the same way.
+
+It looks at a few of the project's own files to see what it is: package.json and its lock file,
+pyproject.toml, go.mod, Cargo.toml, Package.swift, a Makefile's targets, Gradle and Maven files and the
+like. It never opens .env files, keys or anything private, and it never guesses: what the files don't say
+plainly is left out.
+
+- **One instructions file both agents read.** Codex reads AGENTS.md. Claude Code reads CLAUDE.md, where a
+  line `@AGENTS.md` brings AGENTS.md in. With neither file, it writes a short AGENTS.md from what it found
+  (the language, the package manager, how to run the tests and build, the main folders, and to run the
+  tests before saying a change is done) and a CLAUDE.md that is only `@AGENTS.md`. With AGENTS.md alone,
+  it adds that CLAUDE.md. With CLAUDE.md alone, nothing in your project changes: Codex is told to read
+  CLAUDE.md where a folder has no AGENTS.md, with one line at the top of `~/.codex/config.toml`,
+  `project_doc_fallback_filenames = ["CLAUDE.md"]`. Codex reads it as it is, so files it brings in with
+  `@` stay Claude Code's. With both, and neither bringing in the other, it offers one line, `@AGENTS.md`,
+  at the end of CLAUDE.md.
+- **Its check.** The project's own test command becomes its floor's check (step 5), only when it is sure
+  of it: package.json's `test` script (never npm's placeholder), pytest or unittest, `go test ./...`,
+  `cargo test`, `swift test`, a Makefile's `test` target, Gradle, Maven, `dotnet test` or rspec. Change
+  it before you connect, or type one where none was found.
+- **Secrets kept from Claude Code.** Deny rules in your own `~/.claude/settings.json`, once for every
+  project, beside whatever is there: `Read(**/.env)` and `Read(**/.env.*)`, keys (`*.pem`, `*.key`,
+  `id_rsa` and the like), and the folders that hold your logins (`~/.ssh`, `~/.aws`, `~/.gnupg`,
+  `~/.config/gcloud`, `~/.kube`, `~/.netrc`, `~/.npmrc` and a few more). A Read rule stops Claude's own
+  file tools and the file commands it knows, such as cat; a program it runs, such as your tests, can still
+  read them. `.env.example` is kept from it too: take `Read(**/.env.*)` out if your agents need it.
+  Codex has no safe setting for this yet. Its permission profiles can deny files, but they are in beta,
+  replace its whole sandbox for every conversation, and would stop your tests reading .env, so that stays
+  yours to choose.
+- **Its check without asking.** One exact rule, such as `Bash(npm test)`, in the project's own
+  `.claude/settings.local.json`, so Claude Code runs that command there, and only that, without asking.
+  A line in the repository's `.git/info/exclude`, which is never committed, keeps the file out of git.
+  Only a plain test, check or build command qualifies, from the same short list as Always allow (step 4):
+  never one that deletes, pushes, installs or reaches the network, so `uv run pytest` keeps asking.
+  Codex runs the check in its sandbox without asking already; its rules would run a command outside that
+  sandbox, so its settings stay as they are.
+- **The same MCP servers in both.** It lists the servers each agent has for every project, Claude Code's
+  in `~/.claude.json` and Codex's in `~/.codex/config.toml`, and adds one that only one of them has to the
+  other, with that agent's own command: `codex mcp add NAME -- COMMAND ARGS` (or `--url URL`), or
+  `claude mcp add-json --scope user NAME JSON`. A project's own `.mcp.json` servers stay with that project:
+  Claude Code waits for your OK there, and Codex would start them in every folder. A server with keys,
+  headers, a sign-in or a folder of its own, or a key the secrets check (step 22) sees in its command, words
+  or address, is only named, for you to add. A key in a shape that check doesn't know could still be copied,
+  so keep keys in each agent's env settings.
+
+Everything it changes is written down in `data/.secrets/agent-setup.json`, with each file as it was: a
+hidden folder `serve.py` never serves, readable by you alone, since those files can hold tokens. Undo on the
+page, or `python3 connect/setup.py --undo`, puts each file back byte for byte. A file you changed since
+loses only what this added (a rule, a line, a check), and one you rewrote is left as yours. MCP servers
+come out with each agent's own command, or Codex's config.toml put back. Running it again changes nothing.
+
 ## What is kept, and where
 
 `connect/setup.py` keeps a copy of each file before it changes it: `data/backups/company.before-arnheim-<when>.json`
 for your building, and `settings.before-arnheim-<when>.json` beside Claude Code's settings. The page's
-Undo moves your building to `data/backups/company.undone-<when>.json`.
+Undo moves your building to `data/backups/company.undone-<when>.json`. Setting your agents up well keeps
+`data/.secrets/agent-setup.json`, what it changed and each file as it was, until Undo (step 23).
 
 The connectors write `data/feeds/claude-code.json` and `data/feeds/projects.json`. From Claude Code
 they keep, for each conversation: its title, or the first line of your first message; the first
@@ -714,6 +887,10 @@ under `refs/arnheim/restore/`.
 
 The usage forecast keeps `data/feeds/usage.json`: the limits' readings, twelve hours back. Hand-overs
 keep `data/control/handover.json`: a few pieces of finished work for each floor, three days back.
+Carrying on at a limit keeps `data/control/carry-on.json`, which conversations were carried on, six hours back.
+The secrets check keeps what it found in `data/.secrets/found.json` (each secret's kind, file, line and
+hint, never the secret), and each copy for Undo in `data/.secrets/undo/`, for a week. `serve.py` never
+serves that folder.
 Always allow keeps `data/control/allowed.json`, what you allowed two weeks back, and
 `data/control/always.json`, the commands you allow for good. `data/serve.json` keeps the switches (step 20),
 setup's answer about control among them.

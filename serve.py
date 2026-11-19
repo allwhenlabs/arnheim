@@ -55,6 +55,7 @@ import json
 import os
 import re
 import secrets
+import shlex
 import shutil
 import signal
 import socket
@@ -72,7 +73,9 @@ from html import escape as html_escape
 from urllib.parse import parse_qs, unquote
 
 from connect import always, switches
+from connect import secret_scan
 from connect import setup as connect_setup
+from connect import agent_setup  # setting your agents up well, from the page (/setup/well, /setup/agents)
 from connect.brain import Brain
 from connect.control import Control
 from connect.remote import COOKIE as PHONE_COOKIE, LIFE as PHONE_LIFE, Remote
@@ -486,6 +489,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 return self.json_answer(200, {"token": self.server.board.token, **setup_here(data)})
             if name == "plan":
                 return self.json_answer(200, {"token": self.server.board.token, **setup_plan(data)})
+            if name == "agents":  # Settings' card: what is in place on each floor
+                return self.json_answer(200, {"token": self.server.board.token, **well_status(data)})
             return self.json_answer(404, {"error": "No such request."})
         if not self.token_ok():
             return self.json_answer(403, {"error": "This page can't connect your agents. Reload it."})
@@ -499,6 +504,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.json_answer(*setup_connect(given, data, self.server.board))
         if name == "undo":
             return self.json_answer(*setup_undo(data))
+        if name == "well":  # a plan only, for a folder typed or a check changed: nothing changes
+            return self.json_answer(*well_plan(given, data))
+        if name == "agents":  # Settings' Set up: what is missing on floors already connected
+            return self.json_answer(*well_apply(given, data))
         return self.json_answer(404, {"error": "No such request."})
 
     def update_route(self, body=None):
@@ -519,6 +528,16 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.json_answer(200, {"said": words, "restarting": True})
         self.server.update = None
         return self.json_answer(200, {"said": words})
+
+    def secrets_route(self, path, body=None):
+        """/secrets/: the secrets check (connect/secret_scan.py), for this computer's own page only, never a phone, --lan
+        or --share. GET gives what it found; POST check, out, exclude, undo and forget, with the page's token."""
+        if not self.own_page():
+            return self.json_answer(403, {"error": "The secrets check is only on this computer's own page."})
+        if body is not None and not self.token_ok():
+            return self.json_answer(403, {"error": "This page can't change that. Reload it."})
+        code, said = secret_scan.handle(path[len("/secrets/"):], body, os.path.dirname(SAVED), self.server.board.on("secrets"))
+        return self.json_answer(code, {"token": self.server.board.token, **said})
 
     def look(self):
         """/look: which look the page opens in, and, when it is the drawn one but wasn't asked for, why in one line."""
@@ -620,6 +639,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         except ValueError:
             self.send_error(400)
             return
+        if path.startswith("/secrets/"):  # the secrets check's fixes (connect/secret_scan.py)
+            reply = self.secrets_route(path, self.rfile.read(size)) if 0 <= size <= 100_000 else self.json_answer(413, {"error": "Too big."})
+            self.wfile.write(reply.getvalue())
+            return
         known = path.startswith(("/voice/", "/control/", "/brain/", "/remote/", "/setup/")) or path in ("/switches", "/update")
         if not known or not 0 <= size <= 2_000_000:
             self.send_error(404 if not known else 413)
@@ -663,6 +686,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             return self.setup_route(path)
         if path == "/update":
             return self.update_route()
+        if path.startswith("/secrets/"):
+            return self.secrets_route(path)
         if path in ("/", "/index.html"):
             path = "/index.html"
         else:
@@ -835,7 +860,8 @@ def setup_here(data):
     """What the made-up company's card needs at once: whether Claude Code is on this computer."""
     tool = connect_setup
     return {"claude": tool.claude_code_here(), "install": CLAUDE_CODE_URL,
-            "company": os.path.isfile(os.path.join(data, "company.json"))}
+            "company": os.path.isfile(os.path.join(data, "company.json")),
+            "codex": tool.codex_here()}  # with control off, Carry on at a limit offers Codex only where it is (src/carry-on.js)
 
 
 def setup_plan(data):
@@ -853,7 +879,9 @@ def setup_plan(data):
             kept = tool.saved_choices().get("control")
         except tool.Refused:
             kept = None
+        well = agent_setup.shown_plan(agent_setup.plan([p["folder"] for p in found], tool), tool)  # Set your agents up well
     return {
+        "well": well,
         "claude": tool.claude_code_here(), "install": CLAUDE_CODE_URL,
         "codex": {"here": codex, "version": f"{version[0]}.{version[1]}" if version else None, "hooks": codex and not old, "notes": notes},
         "projects": [{"folder": tool.shown(p["folder"]), "label": tool.label_of(p["folder"]), "when": tool.ago(p["at"]),
@@ -897,13 +925,17 @@ def setup_connect(given, data, board=None):
         chosen = list(dict.fromkeys(chosen))
         if not chosen:
             return 400, {"error": "Choose at least one project, or type a project's folder."}
+        well, why = well_choice(given.get("well"), {name: f for f in chosen for name in (f, tool.shown(f))})  # Set your agents up well
+        if why:
+            return 400, {"error": why}
         args = argparse.Namespace(folder=chosen, yes=True, name=None, no_hooks=False, undo=False)
         try:
             tool.setup(args, say=lines.append, control=control, page=True)
         except tool.Refused as why:
             return 409, {"error": str(why), "lines": home_said(lines, tool)}
         kept = switches.saved(data).get("control")
-    note = None
+        well_note = well_after(well, tool, lines)
+    note = well_note
     if board is not None and isinstance(kept, bool) and (board.server is None or (board.server.control is not None) != kept):
         try:
             board.switch("control", kept)
@@ -939,6 +971,120 @@ def setup_undo(data):
             lines.append(f"Moved your building to {tool.shown(aside)}, so the page shows the made-up company again. "
                          "Move it back to data/company.json to have it again.")
     return 200, {"lines": home_said(lines, connect_setup)}
+
+
+# ---------- setting your agents up well, from the page (connect/agent_setup.py) ----------
+
+def well_choice(given, names):
+    """(what to set up, or None; why the request doesn't make sense, or None): the page's ticks, for folders it
+    named by the names it was shown (`names` maps each to its whole path). A check comes as the words typed."""
+    if given is None:
+        return None, None
+    projects = given.get("projects", []) if isinstance(given, dict) else None
+    if not isinstance(projects, list) or len(projects) > SETUP_MOST_FOLDERS \
+            or not isinstance(given.get("secrets", False), bool) or not isinstance(given.get("mcp", False), bool):
+        return None, "That request doesn't make sense."
+    out = []
+    for p in projects:
+        if not isinstance(p, dict) or p.get("folder") not in names or not isinstance(p.get("items", []), list) \
+                or not all(i in agent_setup.ITEMS for i in p.get("items", [])):
+            return None, "That request doesn't make sense. Reload the page and try again."
+        check = p.get("check")
+        if check is not None:
+            try:
+                check = shlex.split(check) if isinstance(check, str) and len(check) <= 1000 and "\0" not in check else None
+            except ValueError:
+                return None, "The check has a quote that isn't closed."
+            if check is None or len(check) > 64:
+                return None, "That check doesn't make sense."
+        out.append({"folder": names[p["folder"]], "items": list(p.get("items", [])), "check": check})
+    return {"projects": out, "secrets": given.get("secrets", False), "mcp": given.get("mcp", False)}, None
+
+
+def well_after(choice, tool, lines):
+    """Sets your agents up well as the page chose, once setup has connected them. Gives a note when it couldn't."""
+    if not choice:
+        return None
+    try:
+        agent_setup.apply(choice, tool, say=lines.append)
+    except tool.Refused as why:
+        lines.append(str(why))
+        return f"Your agents are connected, but setting them up well didn't finish: {why}"
+    return None
+
+
+def well_floors(tool, data):
+    """{name the page shows: whole path}: each floor's first folder on this computer."""
+    company = None
+    try:
+        company = tool.read_json(os.path.join(data, "company.json"), "data/company.json")
+    except tool.Refused:
+        pass
+    out = {}
+    for floor in (company or {}).get("floors") or [] if isinstance(company, dict) else []:
+        folders = [f for f in tool.floor_folders(floor) if os.path.isdir(f)][:1]
+        for f in folders:
+            out[tool.shown(f)] = out[f] = f
+    return out
+
+
+def well_status(data):
+    """Settings' card: what is in place on each floor, and what could be set up, changing nothing."""
+    with SETUP_LOCK:
+        tool = setup_tool(data)
+        folders = list(dict.fromkeys(well_floors(tool, data).values()))
+        return {"well": agent_setup.shown_plan(agent_setup.plan(folders, tool), tool)}
+
+
+def well_plan(given, data):
+    """The plan for folders the page names (projects setup found, floors, or one typed), with checks as typed,
+    changing nothing. Gives (code, answer)."""
+    names, checks = given.get("folders"), given.get("checks") or {}
+    if not isinstance(names, list) or not 0 < len(names) <= SETUP_MOST_FOLDERS or not all(isinstance(n, str) for n in names) \
+            or not isinstance(checks, dict):
+        return 400, {"error": "That request doesn't make sense."}
+    with SETUP_LOCK:
+        tool = setup_tool(data)
+        known = well_floors(tool, data)
+        for p in tool.find_projects()[:tool.MOST]:
+            known[tool.shown(p["folder"])] = known[p["folder"]] = p["folder"]
+        folders = []
+        for name in names:
+            full = known.get(name)
+            if full is None:
+                said = name.strip().strip("'\"")
+                path = os.path.expanduser(said)
+                if "\0" in said or not os.path.isabs(path) or not os.path.isdir(path) or tool.too_wide(os.path.realpath(path)):
+                    return 400, {"error": f"There is no project folder at {said}."}
+                full = os.path.realpath(path)
+            folders.append(full)
+            known[name] = full
+        typed = {}
+        for name, words in checks.items():
+            if name in known and isinstance(words, str) and len(words) <= 1000:
+                try:
+                    typed[known[name]] = shlex.split(words)
+                except ValueError:
+                    return 400, {"error": "The check has a quote that isn't closed."}
+        return 200, {"well": agent_setup.shown_plan(agent_setup.plan(folders, tool, typed), tool)}
+
+
+def well_apply(given, data):
+    """Settings' Set up: what was ticked, on floors already connected. Gives (code, answer) with the fresh plan."""
+    lines = []
+    with SETUP_LOCK:
+        tool = setup_tool(data)
+        names = well_floors(tool, data)
+        choice, why = well_choice(given, names)
+        if why or not choice:
+            return 400, {"error": why or "That request doesn't make sense."}
+        try:
+            agent_setup.apply(choice, tool, say=lines.append)
+        except tool.Refused as why:
+            return 409, {"error": str(why), "lines": home_said(lines, tool)}
+        folders = list(dict.fromkeys(names.values()))
+        return 200, {"lines": home_said(lines, tool) or ["Everything chosen was in place already: nothing changed."],
+                     "well": agent_setup.shown_plan(agent_setup.plan(folders, tool), tool)}
 
 
 # ---------- a newer Arnheim (the "Look for a newer Arnheim" switch) ----------
@@ -1585,6 +1731,8 @@ def main():
     threading.Thread(target=every_minute, args=("routines.py", lambda: board.on("routines")), daemon=True).start()
     threading.Thread(target=every_minute, args=("ping.py", lambda: board.on("pings")), daemon=True).start()
     threading.Thread(target=look_for_newer, args=(server, board), daemon=True).start()  # once a day, while its switch is on
+    # The secrets check: at the start, then with the minute's look in project folders (connect/secret_scan.py).
+    threading.Thread(target=every_minute, args=("secret_scan.py", lambda: board.on("secrets") and floors_have_folders()), daemon=True).start()
     if board.on("git") and floors_have_folders():
         print("Looking at your floors' folders every minute for unsaved changes and open pull requests "
               "(connect/projects.py).", flush=True)

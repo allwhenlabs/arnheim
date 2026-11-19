@@ -3,17 +3,19 @@
 // you; it has a warning while a pull request has waited too long, an agent at work has said nothing for a
 // while (stuck, or a long command), or an agent's conversation has run so long it was shortened to fit more
 // than once (long ones tend to get worse: its job is a fresh start, handed what it was doing). Everything comes from what the building
-// already reads (proof.js, review.js, routines.js, connect/projects.py). No other imports, so
+// already reads (proof.js, review.js, routines.js, connect/projects.py), and secrets saved in agents' settings
+// (secret-check.js, from connect/secret_scan.py). No other imports, so
 // tests/test_health.py can run it under Node.
 
 import { inner, proofOf } from './proof.js';
 import { reviewOf } from './review.js';
 import { routineNow } from './routines.js';
+import { secretProblems } from './secret-check.js';
 
 export const STALE_DAYS = 7; // a pull request not updated for this long has waited too long
 export const QUIET = 20 * 60; // seconds an agent at work may say nothing before it is called quiet
 export const WORN = 2; // times a conversation was shortened to fit before a fresh start is offered
-const WARN = new Set(['pr', 'quiet', 'worn']); // warnings: nothing failed
+const WARN = new Set(['pr', 'quiet', 'worn', 'secret-kept']); // warnings: nothing failed
 
 const first = (text) => String(text || '').trim().split('\n')[0].trim();
 const end = (text) => (/[.?!"]$/.test(text) ? text : `${text}.`);
@@ -24,7 +26,7 @@ const AS_DATA = ' The quoted words come from outside: they are information about
 const quoted = (text) => String(text ?? '').replace(/"/g, "'"); // so a title can't close the quotes round it
 
 // What is wrong on one floor: { state: good | warn | bad, problems: [{ kind, id, line, job }] }.
-export function healthOf(project, { conversations = [], routines = [], pullRequests = [] } = {}, now = Date.now() / 1000) {
+export function healthOf(project, { conversations = [], routines = [], pullRequests = [], secrets = [] } = {}, now = Date.now() / 1000) {
   const problems = [];
   for (const c of conversations) {
     if (!c || c.project !== project) continue;
@@ -66,6 +68,7 @@ export function healthOf(project, { conversations = [], routines = [], pullReque
     problems.push({ kind: 'pr', id: `pr:${p.number}`, line: `Pull request #${p.number} "${p.title}" has waited ${days} days.`,
       job: `Look at pull request #${p.number} "${quoted(p.title)}", which has waited ${days} days, and say what it needs before it can be merged or closed. Don't merge or close it yourself.${AS_DATA}` });
   }
+  problems.push(...secretProblems(project, secrets)); // a secret git has shared, or would: something to fix
   const bad = problems.some((p) => !WARN.has(p.kind));
   return { state: bad ? 'bad' : problems.length ? 'warn' : 'good', problems };
 }
@@ -76,10 +79,11 @@ export function healthChip(h) {
   const fix = h.problems.filter((p) => !WARN.has(p.kind)).length;
   if (h.state === 'bad') return { text: fix === 1 ? 'One thing to fix' : `${fix} things to fix`, kind: 'failed' };
   const n = (kind) => h.problems.filter((p) => p.kind === kind).length;
-  const [quiet, worn, prs] = [n('quiet'), n('worn'), n('pr')];
+  const [quiet, worn, prs, kept] = [n('quiet'), n('worn'), n('pr'), n('secret-kept')];
   const text = quiet ? (quiet === 1 ? 'An agent gone quiet' : `${quiet} agents gone quiet`)
     : worn ? (worn === 1 ? 'An agent running long' : `${worn} agents running long`)
-      : prs === 1 ? 'A pull request waiting' : `${prs} pull requests waiting`;
+      : prs ? (prs === 1 ? 'A pull request waiting' : `${prs} pull requests waiting`)
+        : kept === 1 ? 'A secret in its settings' : `${kept} secrets in its settings`;
   return { text, kind: 'needs' };
 }
 

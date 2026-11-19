@@ -45,11 +45,17 @@ SWITCHES = (
      "The morning brief, and decisions that wait on you, at the times \"pings\" in data/company.json gives.", False),
     ("git", "running", "Look in project folders",
      "Every minute: each floor's changes not yet committed, and its open pull requests.", True),
+    ("secrets", "running", "Secrets check",
+     "Every minute: passwords and tokens saved in your agents' settings in each floor's folder, and whether git would "
+     "share them. Only what kind each is and where shows, never the secret.", True),
     ("updates", "running", "Look for a newer Arnheim",
      "Once a day, ask GitHub whether a newer Arnheim is out, and say so in the Needs you list. GitHub is sent the commit this copy "
      "is at, and nothing else about you.", True),
     ("forecast", "page", "Your plan",
      "The card in Activity that says when you'd reach your plan's limits. The receptionist still answers if you ask.", True),
+    ("carry_on", "page", "Carry on at a limit",
+     "When Claude Code or Codex is about to reach your plan's limit, or has, Needs you offers to carry the conversation on in "
+     "the other one, with what it was doing.", True),
 )
 NAMES = tuple(s[0] for s in SWITCHES)
 DEFAULTS = {s[0]: s[4] for s in SWITCHES}

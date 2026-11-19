@@ -195,7 +195,9 @@ class SetupTest(unittest.TestCase):
         self.assertEqual({k: got[k] for k in ("model", "env", "permissions")}, {k: mine[k] for k in ("model", "env", "permissions")})
         self.assertEqual(got["hooks"]["Stop"][0], mine["hooks"]["Stop"][0])  # beside yours, not instead
         self.assertEqual(len(got["hooks"]["Stop"]), 2)
-        self.assertEqual(got["hooks"]["PreToolUse"], mine["hooks"]["PreToolUse"])
+        self.assertEqual(got["hooks"]["PreToolUse"][0], mine["hooks"]["PreToolUse"][0])  # yours first, as it was
+        self.assertEqual(got["hooks"]["PreToolUse"][1]["matcher"], setup.MATCHERS["PreToolUse"])  # restore points: file changes only
+        self.assertEqual(len(got["hooks"]["PreToolUse"]), 2)
         self.assertEqual(len(self.backups()), 1)
         code, out = self.h.run("--undo")
         self.assertEqual(code, 0, out)
@@ -203,6 +205,18 @@ class SetupTest(unittest.TestCase):
         self.assertIn("Took Arnheim's hooks out", out)
         code, out = self.h.run("--undo")
         self.assertIn("none of Arnheim's hooks", out)
+
+    def test_restore_points_hook_only_for_tools_that_change_files_for_both_agents(self):
+        out, added, _ = setup.plan_hooks({})
+        self.assertIn("PreToolUse", added)
+        self.assertEqual(out["hooks"]["PreToolUse"], [{"matcher": "Edit|MultiEdit|Write|NotebookEdit|Bash",
+                                                      "hooks": out["hooks"]["PreToolUse"][0]["hooks"]}])
+        self.assertIsNone(setup.plan_hooks(out)[0])  # already there: nothing changes
+        out, added, _ = setup.plan_hooks({}, codex=True)
+        self.assertIn("PreToolUse", added)
+        self.assertEqual(out["hooks"]["PreToolUse"][0]["matcher"], "apply_patch|Edit|Write|Bash")
+        self.assertIsNone(setup.plan_hooks(out, codex=True)[0])
+        self.assertIn("feeds/restore.json", setup.FEEDS)  # the building lists the restore points
 
     def test_a_broken_settings_file_is_refused_and_nothing_changes(self):
         path = os.path.join(self.h.claude, "settings.json")

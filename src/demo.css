@@ -440,6 +440,15 @@ a.room-tile:hover { transform: translateY(-1px); }
 .connected-card, .first-card.arrived { border-color: rgba(var(--ok-rgb), .45); }
 .connected-card p, .first-card p, .update-card p, .undone-note p { margin: 0 0 10px; }
 .connect-undo { padding: 10px 12px; border-radius: 10px; background: var(--surface-2); }
+/* Set your agents up well: each project's steps, then the ones for every project, then the exact changes. */
+.well-project { display: grid; gap: 8px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2); min-width: 0; }
+.well-name { margin: 0; overflow-wrap: anywhere; }
+.well-step { display: grid; gap: 2px; padding-left: 28px; }
+.well-check { margin: 6px 0 0 28px; }
+.well-once { margin: 6px 0 0; }
+.well-change p { margin: 10px 0 0; overflow-wrap: anywhere; }
+.well-card .switch-list { margin-top: 10px; }
+.well-who { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; } /* the project's name, for screen readers */
 .undone-note { margin: 0 0 12px; padding: 10px 12px; border-radius: 10px; background: var(--ok-bg); }
 .panel-card .note, p.note { color: var(--text); }
 
@@ -513,3 +522,8 @@ code.nowrap { white-space: nowrap; }
 @media (pointer: coarse) { .kbd { display: none; } } /* a touch screen has no A, D and L keys to press */
 .setup-terminal { margin-top: 10px; }
 .setup-terminal summary { cursor: pointer; }
+
+/* Carry on at a limit (carry-on.js): the hand-over, to read before it goes, or to copy. */
+.carry-brief { margin: 6px 0 8px; padding: 10px 12px; max-height: 200px; overflow: auto; border-radius: 10px; background: var(--surface-2);
+  color: var(--text); font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+.carry-on .carry-what { margin: 8px 0 0; }

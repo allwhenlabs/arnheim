@@ -4,28 +4,36 @@
 A floor in data/company.json can say every change gets checked first (docs/connect.md, "A review line"):
 
     "review": true
-    "review": {"read": true, "times": 2, "timeout": 300}
+    "review": {"read": true, "times": 2, "timeout": 300, "reviewer": "other"}
 
-When a Claude Code conversation on that floor ends a turn in which it changed files, the hook
+When a Claude Code or Codex conversation on that floor ends a turn in which it changed files, the hook
 (connect/claude_code.py) holds the turn there and runs the line:
 
 1. the floor's check, if it has one (connect/prove.py), and then, if that passes,
-2. a reader: a second Claude Code, which can only read, is shown what changed and what was asked,
+2. a reader: a second agent, which can only read, is shown what changed and what was asked,
    and says whether the work is ready for you. "read": false leaves the reader out.
 
 Work that passes reaches you as usual, marked as passed. Work that fails goes back to the agent with
 the reason, and it carries on; after `times` sends back (two if left out) it reaches you anyway,
 marked as failed, so nothing loops for ever. `timeout` is the reader's time limit in seconds.
 
-The reader runs with Claude Code's `claude` command (ARNHEIM_CLAUDE names another), in the floor's
-folder, with only the tools that read files, no MCP servers, nothing saved to its history, and
-ARNHEIM_REVIEWER set, so the building's own hook leaves it alone. What it spends counts towards the
-floor's budget. Standard library only.
+`reviewer` says who reads: "other" (the usual), so Codex reads Claude Code's work and Claude Code reads
+Codex's, since a second pair of eyes from another maker catches what the first one's own kind misses;
+"claude" for Claude Code whoever wrote it; or "codex" for Codex. With "other", when the other agent
+isn't installed here, the same agent reads it, and the result says why. Every result names who read it.
+
+The Claude Code reader runs with the `claude` command (ARNHEIM_CLAUDE names another), in the floor's
+folder, with only the tools that read files, no MCP servers and nothing saved to its history. The Codex
+reader runs `codex exec` (ARNHEIM_CODEX names another) in a read-only sandbox, never asking for approval,
+without your config.toml (so none of your MCP servers), rules or hooks, and nothing saved to its history.
+Both have ARNHEIM_REVIEWER set, so the building's own hook leaves them alone, and what they spend counts
+towards the floor's budget. Standard library only.
 """
 import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -43,10 +51,23 @@ CHANGES_MOST = 40_000  # characters of what changed shown to the reader
 NEW_FILE_MOST = 6_000
 TOOLS = "Read,Grep,Glob"  # all the reader may use
 VERDICT = re.compile(r"^[\s*_#>-]*VERDICT[\s*_]*:[\s*_]*(PASS|SEND BACK)\b[\s*_:.,-]*(.*)$", re.I | re.M)
+CLAUDE, CODEX = "Claude Code", "Codex"
+# How `codex exec` reads without changing anything (OpenAI's Codex docs, "Non-interactive mode" and the exec
+# flags): a read-only sandbox, never asking for approval (no one is there to answer), none of your config.toml
+# (whose MCP servers could act outside the sandbox) nor your rules (which could let a command out of it), no
+# hooks, nothing saved, any folder, plain text, and its events as JSON lines, which carry what it spent.
+CODEX_READ_ONLY = ["--sandbox", "read-only", "-c", 'approval_policy="never"', "-c", "features.hooks=false",
+                   "--ignore-user-config", "--ignore-rules", "--ephemeral", "--skip-git-repo-check", "--color", "never", "--json"]
+
+
+def reviewer_choice(given):
+    """Who a floor wants to read its work: "other", "claude" or "codex". Anything else is the other agent."""
+    word = re.sub(r"[\s_-]+", " ", str(given or "")).strip().lower()
+    return {"claude": "claude", "claude code": "claude", "codex": "codex"}.get(word, "other")
 
 
 def review_of(floor):
-    """A floor's review line, from data/company.json: {"read", "times", "timeout"}, or None for none."""
+    """A floor's review line, from data/company.json: {"read", "times", "timeout", "reviewer"}, or None for none."""
     given = floor.get("review") if isinstance(floor, dict) else None
     if given is True:
         given = {}
@@ -58,7 +79,38 @@ def review_of(floor):
             return max(low, min(high, int(given.get(name, default))))
         except (TypeError, ValueError):
             return default
-    return {"read": given.get("read", True) is not False, "times": number("times", TIMES, 0, 5), "timeout": number("timeout", READ_WAIT, 30, 1800)}
+    return {"read": given.get("read", True) is not False, "times": number("times", TIMES, 0, 5), "timeout": number("timeout", READ_WAIT, 30, 1800),
+            "reviewer": reviewer_choice(given.get("reviewer"))}
+
+
+def command_of(agent):
+    """The command that runs an agent, as words: ARNHEIM_CLAUDE or ARNHEIM_CODEX names another."""
+    if agent == CODEX:
+        return shlex.split(os.environ.get("ARNHEIM_CODEX") or "codex")
+    return shlex.split(os.environ.get("ARNHEIM_CLAUDE") or "claude")
+
+
+def installed(agent):
+    """Whether this computer can run that agent's command."""
+    command = command_of(agent)
+    return bool(command) and bool(shutil.which(command[0]))
+
+
+def writer_of(event, talk):
+    """Whose work it is: Codex's when its connector said so (connect/codex.py), else Claude Code's."""
+    said = (event or {}).get(claude_code.AGENT) or (talk or {}).get("agent")
+    return CODEX if str(said or "") == CODEX else CLAUDE
+
+
+def reviewer(line, writer):
+    """Who reads this writer's work on a floor with this line: (the agent, why it is the writer too, or "")."""
+    choice = (line or {}).get("reviewer") or "other"
+    if choice in ("claude", "codex"):
+        return (CLAUDE if choice == "claude" else CODEX), ""
+    other = CLAUDE if writer == CODEX else CODEX
+    if installed(other):
+        return other, ""
+    return writer, f"{other} isn't installed here"
 
 
 def floor_of(project, data=None):
@@ -129,11 +181,9 @@ def asked(talk, project, said, paths, shown, sent_back):
             "and the reason, in one sentence the agent can act on.\n\n" + what)
 
 
-def read(folder, prompt, timeout, claude=None):
-    """Asks the reader. {"state": passed | sent back | error, "said", "why", "tokens"}."""
-    command = list(claude) if claude else shlex.split(os.environ.get("ARNHEIM_CLAUDE") or "claude")
-    args = command + ["-p", "--output-format", "json", "--tools", TOOLS, "--permission-mode", "dontAsk",
-                      "--strict-mcp-config", "--no-session-persistence"]
+def ask(args, folder, prompt, timeout, who):
+    """Runs a reader in the floor's folder with the prompt on its stdin: (its exit code, what it printed), or,
+    when it didn't start or ran too long, the error result saying so."""
     env = {name: value for name, value in os.environ.items() if name != "CLAUDECODE"}  # a fresh Claude Code, not one inside this one
     env["ARNHEIM_REVIEWER"] = "1"
     with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as given:
@@ -143,14 +193,38 @@ def read(folder, prompt, timeout, claude=None):
             proc = subprocess.Popen(args, cwd=folder, stdin=given, stdout=out, stderr=subprocess.DEVNULL, env=env,
                                     start_new_session=hasattr(os, "setsid"))
         except OSError as error:
-            return {"state": "error", "said": f"The reader didn't start: {error.strerror or error}.", "why": "", "tokens": 0}
+            return {"state": "error", "said": f"{who} didn't start to review it: {error.strerror or error}.", "why": "", "tokens": 0}
         try:
             code = proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             prove.halt(proc)
-            return {"state": "error", "said": f"The reader took longer than {timeout} seconds and was stopped.", "why": "", "tokens": 0}
+            return {"state": "error", "said": f"{who} took longer than {timeout} seconds to review it and was stopped.", "why": "", "tokens": 0}
         out.seek(0)
-        raw = out.read(2_000_000).decode("utf-8", "replace")
+        return code, out.read(2_000_000).decode("utf-8", "replace")
+
+
+def verdict(who, text, ok, tokens, wrong=""):
+    """What a reader's last message comes to: {"state": passed | sent back | error, "said", "why", "tokens"}."""
+    found = VERDICT.findall(text)
+    if not ok or not found:
+        why = claude_code.line(wrong or text, 200) if (wrong or text).strip() else "it said nothing"
+        return {"state": "error", "said": f"{who} gave no verdict ({why}).", "why": "", "tokens": tokens}
+    word, why = found[-1]
+    said = claude_code.sentences(VERDICT.sub("", text).strip(), 400)
+    passed = word.upper() == "PASS"
+    return {"state": "passed" if passed else "sent back", "said": said, "why": "" if passed else claude_code.line(why.strip(" *_") or "It isn't ready yet.", 300),
+            "tokens": tokens}
+
+
+def read(folder, prompt, timeout, claude=None):
+    """Asks Claude Code to read it. {"state": passed | sent back | error, "said", "why", "tokens"}."""
+    command = list(claude) if claude else command_of(CLAUDE)
+    args = command + ["-p", "--output-format", "json", "--tools", TOOLS, "--permission-mode", "dontAsk",
+                      "--strict-mcp-config", "--no-session-persistence"]
+    got = ask(args, folder, prompt, timeout, CLAUDE)
+    if isinstance(got, dict):
+        return got
+    code, raw = got
     try:
         answer = json.loads(raw)
     except ValueError:
@@ -161,21 +235,76 @@ def read(folder, prompt, timeout, claude=None):
     tokens = sum(int(usage.get(name) or 0) for name in ("input_tokens", "cache_creation_input_tokens", "output_tokens")
                  if isinstance(usage.get(name), (int, float)))
     text = str(answer.get("result") or "")
-    found = VERDICT.findall(text)
-    if code != 0 or answer.get("is_error") or not found:
-        why = claude_code.line(text, 200) if text.strip() else f"it ended with code {code}"
-        return {"state": "error", "said": f"The reader gave no verdict ({why}).", "why": "", "tokens": tokens}
-    word, why = found[-1]
-    said = claude_code.sentences(VERDICT.sub("", text).strip(), 400)
-    passed = word.upper() == "PASS"
-    return {"state": "passed" if passed else "sent back", "said": said, "why": "" if passed else claude_code.line(why.strip(" *_") or "It isn't ready yet.", 300),
-            "tokens": tokens}
+    ok = code == 0 and not answer.get("is_error")
+    return verdict(CLAUDE, text, ok, tokens, "" if ok or text.strip() else f"it ended with code {code}")
 
 
-def run(event, talk, project, data=None, claude=None):
+def codex_said(raw):
+    """From `codex exec --json`'s lines: (its last message, the new tokens it spent, what went wrong or "").
+    New tokens are what it read fresh, not from its cache, and what it wrote, as the budget counts Codex's."""
+    text, tokens, wrong = "", 0, ""
+    for row in raw.splitlines():
+        try:
+            event = json.loads(row)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        kind = event.get("type")
+        item = event.get("item") if isinstance(event.get("item"), dict) else {}
+        if kind == "item.completed" and item.get("type") == "agent_message":
+            text = str(item.get("text") or "")
+        elif kind == "turn.completed" and isinstance(event.get("usage"), dict):
+            usage = event["usage"]
+            try:
+                fresh = max(0, int(usage.get("input_tokens") or 0) - int(usage.get("cached_input_tokens") or 0))
+                tokens += fresh + max(0, int(usage.get("output_tokens") or 0))
+            except (TypeError, ValueError):
+                pass
+        elif kind in ("turn.failed", "error"):
+            error = event.get("error")
+            wrong = str((error.get("message") if isinstance(error, dict) else error) or event.get("message") or "it failed")
+    return text, tokens, wrong
+
+
+def read_codex(folder, prompt, timeout, codex=None):
+    """Asks Codex to read it, with `codex exec` and nothing that could change a file (CODEX_READ_ONLY).
+    {"state": passed | sent back | error, "said", "why", "tokens"}."""
+    command = list(codex) if codex else command_of(CODEX)
+    handle, last = tempfile.mkstemp(prefix="arnheim-review-", suffix=".txt")  # its last message, outside the floor's folder
+    os.close(handle)
+    try:
+        args = command + ["exec", *CODEX_READ_ONLY, "--cd", folder, "--output-last-message", last, "-"]
+        got = ask(args, folder, prompt, timeout, CODEX)
+        if isinstance(got, dict):
+            return got
+        code, raw = got
+        text, tokens, wrong = codex_said(raw)
+        try:
+            with open(last, encoding="utf-8", errors="replace") as given:
+                text = given.read(200_000).strip() or text
+        except OSError:
+            pass
+        ok = code == 0 and not wrong
+        return verdict(CODEX, text, ok, tokens, wrong or ("" if ok else f"it ended with code {code}"))
+    finally:
+        try:
+            os.unlink(last)
+        except OSError:
+            pass
+
+
+def named(who, writer, why_same, said):
+    """A verdict's words, starting with who read it: "Codex reviewed Claude Code's work: ..."."""
+    head = f"{who} reviewed {writer}'s work" if who != writer else f"{who} reviewed it" + (f", since {why_same}" if why_same else "")
+    return f"{head}: {said}" if said else f"{head}."
+
+
+def run(event, talk, project, data=None, claude=None, codex=None):
     """Runs the line on this turn's work. What came of it: {"state": passed | sent back | failed | error,
-    "by", "why", "said", "times", "tokens", "proof"}, or None when this floor has no line or nothing new
-    changed. `failed` is work sent back as often as allowed, which now reaches you anyway."""
+    "by", "why", "said", "times", "tokens", "proof", "reviewer", "writer"}, or None when this floor has no line
+    or nothing new changed. `failed` is work sent back as often as allowed, which now reaches you anyway.
+    `reviewer` is the agent that read it (or would have, had the check passed), and `by` who decided."""
     floor = floor_of(project, data)
     line = review_of(floor)
     if not line or not due(talk):
@@ -191,12 +320,17 @@ def run(event, talk, project, data=None, claude=None):
             word = {"timeout": "ran too long", "error": "couldn't run"}.get(result["state"], "failed")
             out.update(state="sent back", by=check["label"], said=f"{check['label']} {word}.", why=f"{check['label']} {word}.",
                        tail=result.get("tail") or "(it printed nothing)")
+    writer = writer_of(event, talk)
+    who, why_same = reviewer(line, writer)
+    if line["read"]:
+        out.update(reviewer=who, writer=writer)
     if "state" not in out and line["read"] and os.path.isdir(folder):
         paths = files_of(talk)
         said = (talk.get("says") or {}).get("now") or "I've finished."
         prompt = asked(talk, project, said, paths, changes(folder, paths), times)
-        got = read(folder, prompt, line["timeout"], claude)
-        out.update(state=got["state"], by="The reader", said=got["said"], why=got["why"], tokens=got["tokens"])
+        got = read_codex(folder, prompt, line["timeout"], codex) if who == CODEX else read(folder, prompt, line["timeout"], claude)
+        words = got["said"] if got["state"] == "error" else named(who, writer, why_same, got["said"])
+        out.update(state=got["state"], by=who, said=words, why=got["why"], tokens=got["tokens"])
     out.setdefault("state", "passed")
     out.setdefault("by", check["label"] if check else "The review line")
     out["most"] = line["times"]
@@ -219,7 +353,8 @@ def due(talk):
 
 def sent_back(result):
     """What the agent is told when its work is sent back."""
-    return (f"Arnheim, the building, has a review line on this floor, and it sent your work back (time {result['times']} of "
+    where = f", where {result['by']} reads the work" if result.get("reviewer") and result.get("by") == result["reviewer"] else ""
+    return (f"Arnheim, the building, has a review line on this floor{where}, and it sent your work back (time {result['times']} of "
             f"{result['most']}; after that, your work reaches the person you work for anyway, marked as failed): {result['why']}"
             + (f" Its last lines:\n{result['tail']}" if result.get("tail") else "") + "\n\n"
             "Fix that, check it, then finish your turn again. If you think the review line is wrong, say why plainly in your answer.")

@@ -1,0 +1,20 @@
+{
+  "name": "arnheim",
+  "interface": {
+    "displayName": "Arnheim"
+  },
+  "plugins": [
+    {
+      "name": "arnheim",
+      "source": {
+        "source": "local",
+        "path": "./plugins/arnheim"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
