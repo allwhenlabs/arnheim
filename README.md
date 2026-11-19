@@ -40,11 +40,11 @@ python3 serve.py
 ```
 
 It opens http://127.0.0.1:8740 in your browser (`--no-browser` leaves that to you). It shows
-Fernhollow, a made-up company, until you add your own: press **Connect my agents** on its Overview
+Fernhollow, a made-up company, until you add your own: press **Connect my agents** on its welcome card
 ([Connect your agents](#connect-your-agents)). The first time, it downloads the photo-real
 look's pictures before it opens ([The photo-real look](#the-photo-real-look)), and a one-minute tour
-points out the floors, what waits on you and Walk (**Show the tour again** brings it back). When a
-newer Arnheim is out on GitHub, the Overview says so, with **Update now**.
+points out the floors, what waits on you and Walk (**Show the tour again**, in the ... menu, brings it back). When a
+newer Arnheim is out on GitHub, the Needs you tab says so, with **Update now**.
 
 To keep it running when you close the terminal, and have it start again each time you log in, run
 `python3 serve.py --always` instead, once (on a Mac or Linux). `python3 serve.py --always off`
@@ -75,7 +75,7 @@ Press **Walk** to step inside, at the reception.
 - **Leave** with the Leave button or Esc.
 
 A walk round goes like this. You start at reception: step into the ring in front of the
-receptionist and ask what needs you. Take the lift to a floor lit warm, where work is going on.
+receptionist and ask what needs you. Take the lift to a floor lit blue, where work is going on.
 Its rooms open onto the hall, and each agent at work has a ring beside them: step in, or tap them,
 and ask how it's going. Then the lift again, to the next floor, or up to your office.
 
@@ -124,7 +124,7 @@ answer aloud ("Voice", below).
   the sample they answer from lines written for them in `sample/work.json`. Connected to Claude
   Code, they tell you what Claude last said, and with control on, what you say reaches the agent
   itself (below).
-- **The receptionist**, at the front desk on a walk and in the panel under their name, knows the
+- **The receptionist**, at the front desk on a walk, and on their own page (tap them, or **Ask** them in the ... menu), knows the
   whole company (below). On a walk, talk to them out loud like anyone else: turn on Voice, step
   into their ring and ask.
 - **Your assistant**, at their own desk in your office, if you have one. In the sample they answer
@@ -181,7 +181,7 @@ what you say. It knows how loud each word it plays is, and listens for a voice w
 back from your speakers, held for about a word, so their own voice (soft or loud) or a cough shouldn't
 stop them. If a noisy room does, switch it off.
 
-Each of these is a switch, in the panel (the sliders button) and on the Company page under
+Each of these is a switch, in the panel (the sliders button) and in Settings under
 Switches: talk from any screen, a lead on each floor, answering requests by voice, leads reporting
 back, and cutting in by talking. They're kept in that browser. A company can set its own starting point in `company.json`, such as `"features":
 { "leads": false }`.
@@ -266,10 +266,10 @@ false` leaves a floor without one ([docs/data.md](docs/data.md)).
 
 ## Connect your agents
 
-On the page, on your own computer, press **Connect my agents** on the Overview. It lists the projects
+On the page, on your own computer, press **Connect my agents** on the welcome card, or in Settings. It lists the projects
 you have worked on with Claude Code or Codex, each ticked, lets you add a folder, asks whether to
 answer your agents from the building, and connects them when you press Connect. The page then shows
-your own company, what was done, and **Undo**. Until your first agent arrives, the Overview says which
+your own company, what was done, and **Undo**. Until your first agent arrives, the Needs you tab says which
 folders to open Claude Code in. Or run one command, in Arnheim's folder:
 
 ```bash
@@ -288,7 +288,7 @@ suggestion without asking, and `--folder ~/code/my-app` names a project yourself
 It asks one more thing: whether you want to answer your agents from the building, with Allow and
 Deny and messages (control, below). Then it offers to start Arnheim at once and each time you log in.
 Each Claude Code or Codex conversation in those folders shows on its project's floor: someone sits while it works, the floor turns amber when it needs your permission or
-an answer, and a blue light shows when it is your turn. `serve.py` also looks in each floor's folder
+an answer, and the list marks it when it is your turn. `serve.py` also looks in each floor's folder
 every minute, for changes not yet committed and, with GitHub's `gh` signed in, open pull requests
 (switch it off under Switches, below). [docs/connect.md](docs/connect.md) does each step by hand instead,
 and says what each piece does.
@@ -299,10 +299,10 @@ stop them, and start new ones on a project, by typing or out loud. It answers on
 computer ([docs/connect.md](docs/connect.md), step 4). With it off, a request shows where to answer it.
 While it is on, a light in the top bar says **Answering here** while you use the page, and that agents
 ask in their own windows once you haven't touched it for two minutes. **Desktop alerts**, switched on
-for each browser on the Overview or under Switches, tell you when an agent needs you while the page is
+for each browser on Needs you or under Switches, tell you when an agent needs you while the page is
 in the background.
 
-Every feature can be switched on or off on the Company page, under **Switches**: answering your
+Every feature can be switched on or off in Settings, under **Switches**: answering your
 agents from the building, hand-overs, the company's memory, how-tos, Always allow, proving the work,
 the review line, the budget brake, restore points, warnings when two agents change one file, the
 receptionist thinking with Claude, routines, pings, looking in project folders, looking for a newer
@@ -316,11 +316,11 @@ Fourteen things no single agent can do for itself:
 - **Claude Code and Codex together.** OpenAI's Codex CLI is a full member: at work, asking, answered
   and stopped from the building like Claude Code, in the same list of what waits on you. Any other
   agent or script that can run a command sits there too ([docs/connect.md](docs/connect.md), step 9).
-- **One list of what waits on you.** The Overview puts every agent's permission requests and
+- **One list of what waits on you.** The Needs you tab puts every agent's permission requests and
   questions, your own tasks, and agents that have just finished in one list, most urgent first, each
   with its answer beside it.
 - **Done means proven.** Give a floor a check, such as its tests, and Arnheim runs it each time an
-  agent there changes files. The work shows as proven in green, not proven in red with what failed,
+  agent there changes files. The work shows as proven with a green tick, not proven in red with what failed,
   or merely claimed ([docs/connect.md](docs/connect.md), step 5).
 - **A review line.** A floor can say every change gets checked before it reaches you: its check,
   then a second Claude Code that reads what changed. Work that isn't ready goes back to the agent
@@ -379,8 +379,8 @@ own Claude plan: Sonnet, unless `ARNHEIM_BRAIN_MODEL` names another, such as `ha
 facts and what you say to them go to Claude, through your Claude Code, and nothing is kept on disk.
 Greetings, refusals and "remind me to ..." stay with the building's own rules, and they still never
 merge, publish, run jobs or sign in. With `--control` too, your assistant can pass a clear
-instruction of yours on to an agent at work, and an agent at work takes one for its own work. It is off unless you switch it on, under Switches on
-the Company page or with `--brain`, and off again the same way, with nothing to undo. It never works with `--lan`
+instruction of yours on to an agent at work, and an agent at work takes one for its own work. It is off unless you switch it on, under Switches in
+Settings or with `--brain`, and off again the same way, with nothing to undo. It never works with `--lan`
 ([docs/brain.md](docs/brain.md)).
 
 ## Voice
@@ -396,7 +396,7 @@ python3 serve.py --set-up-voice
 It finds a Python from 3.10 to 3.12 (newer ones can't run Kokoro yet), or has uv fetch one, says how
 much disk it takes (about 1.5 GB on a Mac, 3 GB on Linux) and how much is free, and asks. Then it installs both into `.voice`
 here and downloads their models once (about 470 MB), which takes a few minutes. Turn on Voice on a
-walk; the first answer takes a few seconds while the voice wakes. If a step fails, run it again: it
+walk, in Talk, or with Speak out loud in Settings; the first answer takes a few seconds while the voice wakes. If a step fails, run it again: it
 carries on where it stopped. `python3 voice/install.py --speak-only` leaves out listening. To take
 the voice out, delete `.voice`.
 
@@ -436,7 +436,7 @@ python3 serve.py --remote my-mac.your-tailnet.ts.net
 Everything above, by voice too, from your own phone wherever you are. Arnheim stays on this
 computer, and a private way in that you run yourself gives the phone a real https address, so its
 microphone works. Tailscale does this, free for personal use: [docs/phone.md](docs/phone.md) takes
-about five minutes. A phone gets in only once you pair it with a one-time code from the Company page
+about five minutes. A phone gets in only once you pair it with a one-time code from Settings
 here. It can look round and talk to everyone; answering and instructing agents from it needs
 **Control for 15 minutes** on this computer, and each such request is written down.
 

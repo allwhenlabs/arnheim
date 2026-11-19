@@ -71,12 +71,14 @@ export function createControl({ base = BASE, headers = () => ({}), every = 3000,
   return {
     start() { if (!running) { running = true; poll(); } return this; },
     stop() { running = false; clearTimeout(timer); },
-    // After control was switched on or off (the Company page's Switches): ask the server afresh.
+    // After control was switched on or off (Settings' Switches): ask the server afresh.
     restart() { running = false; clearTimeout(timer); token = null; set(OFF); running = true; poll(); return this; },
     get on() { return !!state.on; },
     state: () => state,
     // Whether the page counts as in use now (the two-minute rule above), so a permission request waits here.
     using,
+    // A touch from just before the page reloaded (Connect my agents reloads it): it still counts.
+    touch(at = Date.now()) { touched = Math.max(touched, Number(at) || 0); },
     watch(fn) { watchers.add(fn); return () => watchers.delete(fn); },
     askFor: (key) => state.asks.find((a) => a.key === key) || null,
     run: (key) => state.runs.find((r) => r.key === key) || null,

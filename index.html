@@ -12,20 +12,32 @@
 <body>
 <header id="top">
   <h1>Arnheim</h1>
-  <span id="made-up" hidden>Sample company: made up</span>
+  <span id="made-up" hidden>Sample<span class="made-up-more">: made up</span></span>
+  <a id="needs-pill" href="#/" hidden><span class="needs-dot" aria-hidden="true"></span><span id="needs-word"><span id="needs-n"></span><span class="needs-more"></span></span></a>
   <span id="answering-wrap" hidden>
     <button id="answering" type="button" aria-expanded="false" aria-controls="answering-why"><span class="answering-dot" aria-hidden="true"></span><span id="answering-word">Answering here</span></button>
     <span id="answering-why" role="note" hidden></span>
   </span>
+  <span class="top-gap"></span>
+  <button id="pause-all" type="button" hidden>Pause all</button>
   <button id="walk" type="button" aria-pressed="false">Walk</button>
-  <button id="live" type="button" aria-pressed="true">Live</button>
-  <button id="theme" type="button">Dark</button>
+  <span id="more-wrap">
+    <button id="more" type="button" aria-expanded="false" aria-controls="more-menu" aria-label="More" title="More"></button>
+    <span id="more-menu" hidden>
+      <button id="desk-open" type="button">Ask the receptionist</button>
+      <button id="pause-all-menu" type="button" hidden>Pause all agents</button>
+      <button id="theme" type="button">Dark</button>
+      <button id="list-mode" type="button">Hide the building</button>
+      <button id="live" type="button" hidden>Pause the sample</button>
+      <button id="tour-again" type="button">Show the tour again</button>
+    </span>
+  </span>
 </header>
 <main id="layout">
   <section id="stage" tabindex="0" aria-label="3D model of the company. Everything in it is also in the list. Arrow keys turn it, plus and minus zoom, 0 resets.">
     <canvas id="scene" aria-hidden="true"></canvas>
     <div id="labels" aria-hidden="true"></div>
-    <div id="scenes" role="group" aria-label="Scenes: relight the building"></div>
+    <div id="scenes" role="group" aria-label="Show on the building"></div>
     <div id="view-tools">
       <button id="view-back" type="button" hidden>Back to the building</button>
       <button id="zoom-in" type="button" aria-label="Zoom in">+</button>
@@ -42,19 +54,18 @@
       <p id="look-note" role="status" hidden></p>
       <p id="stage-help">Tap a floor to bring it out. Drag to turn, scroll to zoom.</p>
       <ul id="stage-key" aria-label="What the light means">
-        <li><span class="dot s-working"></span>Warm: working now</li>
-        <li><span class="dot s-needs"></span>Amber: needs you</li>
-        <li><span class="dot s-ok"></span>Green: proven</li>
-        <li><span class="dot s-failed"></span>Red: not proven</li>
-        <li><span class="dot"></span>Dim: quiet</li>
+        <li><span class="dot s-needs"></span>Needs you</li>
+        <li><span class="dot s-working"></span>Working</li>
+        <li><span class="dot s-failed"></span>Something's wrong</li>
+        <li><span class="dot"></span>Quiet</li>
       </ul>
     </div>
   </section>
   <aside id="panel" aria-label="The company, as a list">
     <nav id="tabs" aria-label="Views">
-      <a id="tab-overview" href="#/">Overview</a>
-      <a id="tab-company" href="#/company">Company</a>
-      <a id="tab-poe" href="#/front-desk">Reception</a>
+      <a id="tab-overview" href="#/"><span>Needs you</span><span id="tab-count" class="tab-count" hidden></span></a>
+      <a id="tab-activity" href="#/activity">Activity</a>
+      <a id="tab-company" href="#/company">Settings</a>
     </nav>
     <div id="panel-head" hidden>
       <button id="back" type="button">Back</button>

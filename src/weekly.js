@@ -1,6 +1,6 @@
 // A weekly report: the last seven days of the company's agents, floor by floor, from the history the hook
 // keeps (data/feeds/history/: a file a day, with its moments and what each floor's agents spent that day).
-// The Overview shows it and copies it as text, and the receptionist sums it up. Plain module, so
+// Activity shows it and copies it as text, and the receptionist sums it up. Plain module, so
 // tests/test_weekly.py can run it under Node.
 
 import { tokensSaid } from './budget.js';

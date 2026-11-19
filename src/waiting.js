@@ -1,6 +1,6 @@
 // How long things wait on you: each time an agent stopped to ask (a permission or a question) until it went
 // on, from the day's moments (connect/claude_code.py), and how long each thing waiting now has waited. The
-// Overview's meter fills as the longest wait now grows: amber past five minutes, red and full past fifteen.
+// Activity's meter fills as the longest wait now grows: amber past five minutes, red and full past fifteen.
 // Plain module, so tests/test_waiting.py can run it under Node.
 //
 // A moment: { at (seconds), key, project, title, kind, what }. "asked" starts a wait; the agent's next moment

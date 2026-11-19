@@ -16,7 +16,7 @@ import { ROUTINES_ASKED, routineNow, sayRoutines, timesOf } from './routines.js'
 import { HEALTH_ASKED, healthChip, healthOf, sayHealth } from './health.js';
 import { BRIEF_ASKED, briefOf, sayBrief, sinceOf, sinceSaid } from './brief.js';
 import { MEMORY_ASKED, decidedFor, rememberAsked, sayMemory } from './memory.js';
-import { floorSpend, localDay } from './budget.js';
+import { floorSpend, localDay, tokensSaid } from './budget.js';
 import { clashesOf, sayClash, waitWords } from './clashes.js';
 import { MOMENT_MOOD, conversationsAt, momentsBefore, sayMoment, touchedBy } from './replay.js';
 import { RESTORE_ASKED, pointsOf, sayPoint, sayRestore, wentBack } from './restore.js';
@@ -32,6 +32,7 @@ import { forecastOf, pressing, usageLine, usageWords } from './usage.js';
 import { CONNECTED, FIRST, UNDONE, answeringWords, codexLine, connectRequest, connectStart, firstMoment, floorFolders, updateLine } from './welcome.js';
 import { TOUR as TOUR_SEEN, createTour, tourWanted } from './tour.js';
 import { createAlerts, freshAlerts } from './alerts.js';
+import { setVoiceSaved, voiceSaved, voiceWanted } from './voice.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -42,24 +43,27 @@ const STATUS = { needs_you: 'Needs you', working: 'In progress', waiting: 'Waiti
 const CLOSED = new Set(['done', 'dropped']);
 const PRESENCE_TYPE_OF = { websites: 'website', email: 'email', social: 'social', domains: 'domain' };
 const COMPANY_SECTIONS = ['Money', 'Legal', 'Subscriptions', 'Key dates'];
-const SCENE_NAMES = { all: 'Everything', needs: 'Only what needs me', working: 'Working now' };
+const SCENE_NAMES = { all: 'Everything', needs: 'Needs you', working: 'Working' };
 const SCENE_ICON = { all: 'layers', needs: 'bell-ring', working: 'zap' };
 const ROOM_ICON = {
   goals: 'target', work: 'list-checks', conversations: 'messages-square', code: 'git-pull-request', company: 'briefcase',
   library: 'library', machine: 'server', websites: 'globe', email: 'mail', social: 'at-sign', domains: 'link', lounge: 'shapes',
 };
-const DESK = '#/front-desk'; // the receptionist's tab, and what a tap on them opens
-const TOP_ROUTES = new Set([undefined, 'company', 'front-desk']);
-const TAB_KEYS = { 1: '#/', 2: '#/company', 3: DESK };
+const DESK = '#/front-desk'; // the receptionist's page: a tap on them in the building, or the ... menu
+const TOP_ROUTES = new Set([undefined, 'activity', 'company', 'front-desk']);
+const TAB_KEYS = { 1: '#/', 2: '#/activity', 3: '#/company' };
+const CODEX = 'arnheim-codex'; // whether connecting from the page put Arnheim's hooks into Codex too
+const WELCOMED = 'arnheim-welcomed'; // the sample's welcome card was answered in this browser
+const LIST_ONLY = 'arnheim-list-only'; // Hide the building: the list alone, on this device
 // The receptionist's name, from the company map (receptionist in company.json). With none, they
-// are just the receptionist, and their tab says Reception.
+// are just the receptionist.
 const deskName = () => org?.receptionist?.name?.trim() || '';
-const deskTab = () => deskName() || 'Reception';
+const deskAsk = () => (deskName() ? `Ask ${deskName()}, the receptionist` : 'Ask the receptionist');
 
 let org = null; // the company map: floors and rooms
 let work = null; // what is going on in it
 let dir = 'sample'; // where they came from: data (your own company) or sample (made up)
-let firstRun = false; // no data/company.json yet: the Overview shows the one step to see your own work
+let firstRun = false; // no data/company.json yet: Needs you and Settings show the one step to see your own work
 let feeds = []; // files in data/ that tools keep up to date (docs/connect.md)
 // Control of your Claude Code agents, with serve.py --control and your own company (control.js).
 const control = createControl({ busy: () => !!building?.walking?.() });
@@ -80,10 +84,11 @@ let dock = null; // the Talk panel (talk-dock.js)
 let starting = null; // an agent the receptionist was asked to start, waiting for your word
 let controlNote = ''; // what came of the last thing done from the panel
 let noteUsed = false; // it shows once a page, in the first place that has room for it (render resets this)
+let noteFresh = false; // a note just made: render brings it into view
 const noteOnce = (cls = '') => {
   if (!controlNote || noteUsed) return null;
   noteUsed = true;
-  return h(`p.small.muted${cls}${cls && /^Allowed/.test(controlNote) ? '.ok' : ''}`, { role: 'status' }, controlNote);
+  return h(`p.small.muted.control-note${cls}${cls && /^Allowed/.test(controlNote) ? '.ok' : ''}`, { role: 'status' }, controlNote);
 };
 const lastFeed = new Map();
 let workSig = ''; // the work as last read, to tell when it has changed
@@ -174,15 +179,23 @@ const waitingNow = () => {
   const { asks, runs } = control.on ? control.state() : { asks: work.asks || [], runs: [] };
   // a floor's budget question goes as soon as it is under budget again, without waiting for the hook
   const tasks = openTasks().filter((t) => !t.budget || spendOf(floorOf(t.budget))?.over !== false);
-  return waitingOnYou({ asks: asks.filter((a) => !answered.has(a.id)), runs, conversations: work.conversations, tasks });
+  return waitingOnYou({ asks: asks.filter((a) => !answered.has(a.id)), runs, conversations: work.conversations, tasks, hushed: answeredKeys });
 };
-// Permissions answered here, left out of the list before the next look at control catches up.
+// Permissions answered here, left out of the list before the next look at control catches up, and their
+// conversations' keys with the time, so the count drops at once instead of the request coming back as its question.
 const answered = new Set();
-const answerAsk = (id, behavior) => {
+const answeredKeys = new Map();
+const markAnswered = (id) => {
   answered.add(id);
+  const a = [...(control.on ? control.state().asks : []), ...(work.asks || [])].find((x) => x.id === id);
+  if (a?.key) answeredKeys.set(a.key, Date.now() / 1000);
+  return () => { answered.delete(id); if (a?.key) answeredKeys.delete(a.key); };
+};
+const answerAsk = (id, behavior) => {
+  const undo = markAnswered(id);
   // the sample's own requests are answered here: the company is made up, so nothing runs
   if ((work.asks || []).some((a) => a.id === id && a.sample)) return Promise.resolve({ sample: true });
-  return control.answer(id, behavior).catch((error) => { answered.delete(id); throw error; });
+  return control.answer(id, behavior).catch((error) => { undo(); throw error; });
 };
 const canAnswer = (i) => i.kind === 'permission' && (control.on || !!i.ask?.sample);
 // One answer per request: a quick second press, before the list has redrawn, never answers it again, and the
@@ -254,8 +267,10 @@ function roomModel(floor, room) {
     const reviews = new Map(list.map((c) => [c.id, reviewOf(c)]));
     const failed = list.filter((c) => !c.working && (proofs.get(c.id)?.state === 'failed' || reviews.get(c.id)?.state === 'failed')).length;
     const proven = checks.filter((c) => proofs.get(c.id)?.state === 'proven' || (reviews.get(c.id)?.state === 'passed' && proofs.get(c.id)?.state !== 'failed')).length;
-    // Its light: red while any work there failed its check, green once all that's finished is proven.
-    const state = failed ? 'failed' : checks.length ? (proven === checks.length ? 'ok' : 'check') : working ? 'working' : 'quiet';
+    // Its light: amber while an agent there waits on your answer, red while any work failed its check, plain once
+    // what's finished is checked (the list marks it), blue while one works.
+    const asking = waitingNow().some((i) => i.project === project && (i.kind === 'permission' || i.kind === 'question'));
+    const state = asking ? 'needs' : failed ? 'failed' : checks.length ? (proven === checks.length ? 'ok' : 'check') : working ? 'working' : 'quiet';
     return {
       state, big: list.length, working: working > 0,
       detail: [checks.length ? `open, ${checks.length} to check` : 'open', failed && `${failed} not proven`].filter(Boolean).join(', '),
@@ -306,7 +321,7 @@ function floorLines(floor) {
   const lines = [];
   const health = healthChip(healthOf(floor.project, work));
   if (health) lines.push(health);
-  if (openTasks().some((t) => t.project === floor.project && t.status === 'needs_you')) lines.push({ text: 'Needs you', kind: 'needs' });
+  if (openTasks().some((t) => t.project === floor.project && t.status === 'needs_you') || waitingNow().some((i) => i.project === floor.project && (i.kind === 'permission' || i.kind === 'question'))) lines.push({ text: 'Needs you', kind: 'needs' });
   if (work.conversations.some((c) => c.project === floor.project && c.working)) lines.push({ text: 'Working now', kind: 'working' });
   if (clashesOf(work.conversations).some((c) => c.project === floor.project)) lines.push({ text: 'Two agents on the same files', kind: 'failed' });
   const spend = spendOf(floor);
@@ -314,10 +329,33 @@ function floorLines(floor) {
   return lines.length ? lines : [{ text: 'Quiet', kind: 'quiet' }];
 }
 
+// A floor's label on the building: at most two short words, the most pressing first. The whole line is in Activity.
+const SHORT = [
+  [(l) => l.kind === 'needs', () => 'Needs you'],
+  [(l) => l.kind === 'failed' && /budget/i.test(l.text), () => 'Over budget'],
+  [(l) => l.kind === 'failed' && /same files/i.test(l.text), () => 'Two agents, one file'],
+  [(l) => l.kind === 'failed', (l) => (/to fix/i.test(l.text) ? l.text : 'Something to fix')],
+  [(l) => l.kind === 'working' && /^Working now$/.test(l.text), () => 'Working'],
+];
+function floorShort(lines) {
+  const words = [];
+  let kind = null;
+  for (const [is, say] of SHORT) {
+    const l = lines.find(is);
+    if (!l || words.length >= 2) continue;
+    const w = say(l);
+    if (!words.includes(w)) { words.push(w); kind = kind || l.kind; }
+  }
+  if (words.length) return { label: words.join(' · '), kind };
+  const only = lines.find((l) => !/tokens today$/i.test(l.text)) || { text: 'Quiet', kind: 'quiet' };
+  return { label: only.text, kind: only.kind };
+}
+
 function liveModel() {
   const model = {};
   for (const floor of floors()) {
-    model[`floor:${floor.id}`] = { lines: floorLines(floor) };
+    const lines = floorLines(floor);
+    model[`floor:${floor.id}`] = { lines, ...floorShort(lines) };
     for (const room of roomsOf(floor)) model[`${floor.id}/${room.id}`] = roomModel(floor, room);
   }
   return model;
@@ -410,24 +448,24 @@ function setupDesk() {
   };
   const health = {
     id: 'health',
-    answer: (c) => !c.floor && HEALTH_ASKED.test(c.text) && { lines: [sayHealth(org.floors, work)], go: c.go('#/', 'Show me') },
+    answer: (c) => !c.floor && HEALTH_ASKED.test(c.text) && { lines: [sayHealth(org.floors, work)], go: c.go('#/activity', 'Show me') },
   };
   // "How much usage is left?", "when will I hit my limit?": the plan's limits, from Claude Code and Codex (usage.js).
   const usage = {
     id: 'usage',
-    answer: (c) => USAGE_ASKED.test(c.text) && { lines: [sayUsage()], go: c.go('#/', 'Show me') },
+    answer: (c) => USAGE_ASKED.test(c.text) && { lines: [sayUsage()], go: c.go('#/activity', 'Show me') },
   };
   const label = (p) => floorOf(p)?.label || p;
   const waited = {
     id: 'waited',
     answer: (c) => WAITED_ASKED.test(c.text) && {
       lines: [sayWaited(waits(history, Date.now() / 1000, heldNow()), waitingNow(), label)],
-      go: c.go('#/', 'Show me'),
+      go: c.go('#/activity', 'Show me'),
     },
   };
   const weekly = {
     id: 'weekly',
-    answer: (c) => !c.floor && WEEKLY_ASKED.test(c.text) && { lines: [sayWeek(weekReport(weekDays(), Date.now() / 1000, heldNow()), label)], go: c.go('#/', 'Show me') },
+    answer: (c) => !c.floor && WEEKLY_ASKED.test(c.text) && { lines: [sayWeek(weekReport(weekDays(), Date.now() / 1000, heldNow()), label)], go: c.go('#/activity', 'Show me') },
   };
   const shelf = {
     id: 'howto',
@@ -448,7 +486,7 @@ function setupDesk() {
   };
   const routines = {
     id: 'routines',
-    answer: (c) => ROUTINES_ASKED.test(c.text) && { lines: [sayRoutines(routinesNow(), (p) => floorOf(p)?.label || p)], go: c.go('#/', 'Show me') },
+    answer: (c) => ROUTINES_ASKED.test(c.text) && { lines: [sayRoutines(routinesNow(), (p) => floorOf(p)?.label || p)], go: c.go('#/activity', 'Show me') },
   };
   const waiting = {
     id: 'waiting',
@@ -461,7 +499,7 @@ function setupDesk() {
     id: 'sample',
     answer: (c) => has(c.q, ['real', 'made up', 'fake', 'sample', 'demo', 'invented', 'pretend']) && {
       lines: !madeUp() ? [`This is ${org.company}'s own building, drawn from its own files. I only say what they hold.`]
-        : [sampleLine(), hasStory() && 'The work you see moving is a short story on a loop, so the building has something to show. The Live button at the top pauses it.'].filter(Boolean),
+        : [sampleLine(), hasStory() && 'The work you see moving is a short story on a loop, so the building has something to show. Pause the sample, in the ... menu at the top, stops it.'].filter(Boolean),
     },
   };
   const howTo = {
@@ -490,7 +528,7 @@ function setupDesk() {
       unknown: `I don't know that, and I won't guess. I only know what ${madeUp() ? 'the sample company holds' : `${org.company}'s files hold`}.`,
       note: `${brain.on ? `${called} answers with Claude, through Claude Code on this computer and on your own Claude plan: your questions go there, with the building's facts. Greetings, refusals and tasks stay with the building's own rules. ` : ''}${called} can add a task and undo it, in this tab only. ${dir === 'data' ? `What you ask ${called} to remember is kept for every agent while control is on. ` : 'Nothing is saved. '}${called} never merges, publishes, runs jobs or signs in.`,
       added: 'It is in the Work room now, in this tab only.',
-      keys: `1 Overview, 2 Company, 3 ${deskTab()}. Esc goes back. Arrow keys turn the building, plus and minus zoom. They do nothing while you are typing.`,
+      keys: `1 Needs you, 2 Activity, 3 Settings. Esc goes back. Arrow keys turn the building, plus and minus zoom. They do nothing while you are typing.`,
     },
     topics: (list) => {
       const all = insertAfter(insertAfter(list, 'thanks', [real]), 'tour', [howTo]);
@@ -563,7 +601,7 @@ function brainFacts() {
     `Today is ${new Date().toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}.`,
   ]);
   add('The building', [
-    'Arnheim shows the company as a building you can turn and walk through: each project is a floor, each kind of work a room, and the people at work are its agents. The light shows what is happening: warm is working now, amber needs you, dim is quiet.',
+    'Arnheim shows the company as a building you can turn and walk through: each project is a floor, each kind of work a room, and the people at work are its agents. The light shows what is happening: amber needs you, blue is working now, red means something is wrong, and plain is quiet.',
     'Arnheim is free and open, and named after Edgar Allan Poe\'s story "The Domain of Arnheim", about a man who shapes a landscape into a world of its own.',
     `Floors, top to bottom: ${[org.founder && "the founder's office", ...org.floors.map((f) => f.label)].filter(Boolean).join(', ')}${org.lobby ? `, then ${org.lobby.label} (the lobby)` : ''}${org.basement ? `, and ${org.basement.label} (the basement)` : ''}. A lift joins them.`,
   ]);
@@ -748,9 +786,9 @@ function agentThinks(item, said, otherwise) {
 const TOUR = ['tour', 'show me round', 'show me around', 'look around'];
 
 function poeSays(text) {
-  if (has(norm(text), TOUR)) return `I can show you round from the ${deskTab()} tab, once you leave the walk.`;
+  if (has(norm(text), TOUR)) return 'I can show you round once you leave the walk: ask me again then.';
   const a = poe.answer(text);
-  if (a.offer) return `I can add "${a.offer.title}" as a task from the ${deskTab()} tab, where you pick its project.`;
+  if (a.offer) return `I can add "${a.offer.title}" as a task from my desk, where you pick its project: leave the walk and tap me at the front desk.`;
   const lines = [...a.lines];
   // The things an answer links to belong to its first line, so they are said right after it.
   if (a.links?.length && a.links.length <= 4) lines.splice(1, 0, `${a.links.map((x) => (x.sub ? `${x.title}, on ${x.sub}` : x.title)).join('. ')}.`);
@@ -966,7 +1004,7 @@ function floorAgents(floor) {
   ];
 }
 const momentsOn = (floor) => [...yesterday.moments, ...history].filter((m) => m && m.project === floor.project);
-const notConnected = () => (fromAway() && phoneMe?.phone ? phoneControlOff : "I can't do that here: this building isn't connected to your agents. On your own company's Company page, switch on Answer agents from the building, under Switches, or start Arnheim with serve.py --control.");
+const notConnected = () => (fromAway() && phoneMe?.phone ? phoneControlOff : "I can't do that here: this building isn't connected to your agents. On your own company, switch on Answer agents from the building, in Settings, or start Arnheim with serve.py --control.");
 
 // A permission answered by voice, once it was read back.
 function answerSaid(act) {
@@ -980,7 +1018,7 @@ function showWaiting(item) {
   if (href && !walkOn()) goTo(href);
 }
 
-// Where "take me to ..." can go: every room, every floor, the company page and the front desk.
+// Where "take me to ..." can go: every room, every floor, the three tabs and the front desk.
 function places() {
   const out = [];
   for (const floor of floors()) {
@@ -990,7 +1028,9 @@ function places() {
     }
     out.push({ href: `#/${floor.id}`, label: floor.label, names: [floor.label, floor.project, floor === org.lobby && 'lobby', floor === org.basement && 'basement'].filter(Boolean) });
   }
-  out.push({ href: '#/company', label: 'the company page', names: ['company page', 'company', org.company] });
+  out.push({ href: '#/', label: 'what needs you', names: ['needs you', 'what needs me', 'the list', 'queue'] });
+  out.push({ href: '#/activity', label: 'Activity', names: ['activity', 'company page', 'company', 'projects', org.company] });
+  out.push({ href: '#/company', label: 'Settings', names: ['settings', 'switches', 'connect'] });
   out.push({ href: DESK, label: 'the front desk', names: ['front desk', 'reception', deskName()].filter(Boolean) });
   return out;
 }
@@ -1065,7 +1105,7 @@ function leadCard(floor) {
 }
 
 // Using it from a phone (serve.py --remote): how, and the phones paired with it. Filled in by remote below.
-function phoneCard() { return remoteCard(); }
+function phoneCard() { const card = remoteCard(); return card ? [h('h4.switch-group', 'Your phone'), card] : null; }
 
 // Every feature, on or off, on this computer's own page (serve.py's /switches, connect/switches.py): kept for every
 // start in data/serve.json. A word serve.py started with holds its switch for that start. Elsewhere (the made-up
@@ -1098,32 +1138,79 @@ async function flip(name, on, again = false) {
   if (ok && name === 'control') control.restart();
   if (ok && name === 'brain') brain.recheck().then(() => render());
   render();
+  return ok;
 }
 // Whether a switch is on, as this computer's page last heard; `otherwise` where there are none (HQ, a phone).
 const switchOn = (name, otherwise = true) => {
   const s = switchBoard?.switches?.find((x) => x.name === name);
   return s ? !!s.on : otherwise;
 };
-const SWITCH_GROUPS = [['agents', 'Your agents'], ['running', 'While Arnheim runs'], ['page', 'On this page']];
+// The switches in the groups a person thinks in, each one line (the rest of its words on hover or focus).
+const SWITCH_SETS = [
+  ['Answering your agents', ['control', 'always']],
+  ['Guardrails', ['checks', 'review', 'budget', 'restore', 'clash']],
+  ['What every agent is told', ['handovers', 'memory', 'howtos']],
+  ['While Arnheim runs', ['brain', 'routines', 'pings', 'git', 'updates']],
+  ['On this page', ['forecast']],
+];
+// The words sit outside the label, so tapping them to read them all (a phone has no pointing) never flips the switch.
+const aboutLine = (text) => h('span.small.muted.switch-about', text); // in full: rows that open on a hover move under the pointer
 function switchRow(s) {
-  return h('li', h('label.switch',
+  return h('li.switch-row', h('label.switch',
     h('input', { type: 'checkbox', checked: !!s.on, disabled: !!s.set_by, onchange: (event) => flip(s.name, event.currentTarget.checked) }),
-    h('span', h('b', s.label), h('span.small.muted', s.about),
-      s.set_by && h('span.small', ` Set by ${s.set_by} for this start.`))));
+    h('span', h('b', s.label), s.set_by && h('span.small', ` Set by ${s.set_by} for this start.`))), aboutLine(s.about));
 }
-const talkRows = () => FEATURES.map((f) => h('li', h('label.switch',
-  h('input', { type: 'checkbox', checked: features.get(f.id), onchange: (event) => features.set(f.id, event.currentTarget.checked) }),
-  h('span', h('b', f.label), h('span.small.muted', f.about)))));
+// Speaking out loud on this device: the same as the Voice button in Talk, here too, where a person looks for it.
+window.addEventListener('arnheim-voice', () => { if (document.querySelector('#content .switch-list')) render(); });
+function voiceRow() {
+  if (!voiceWanted()) return h('li.switch-row', h('span.small', h('b', 'Speak out loud: off.'), ' This device keeps the voice off, so everything is written.'));
+  return h('li.switch-row', h('label.switch',
+    h('input', { type: 'checkbox', checked: voiceSaved(), onchange: (event) => setVoiceSaved(event.currentTarget.checked) }),
+    h('span', h('b', 'Speak out loud'))),
+  aboutLine('On: whoever you talk to answers out loud, and listens when you speak. Off: everything is written and nothing is said aloud on this device. The Voice button in Talk does the same.'));
+}
+// These two only work out loud: while the voice is off they wait, and say so, so no ticked box reads as speaking.
+const VOICE_ONLY = new Set(['answers', 'cutin']);
+const talkRows = () => {
+  const quiet = !voiceSaved();
+  return [voiceRow(), ...FEATURES.map((f) => {
+    const waits = quiet && VOICE_ONLY.has(f.id);
+    return h(waits ? 'li.switch-row.needs-voice' : 'li.switch-row', h('label.switch',
+      h('input', { type: 'checkbox', checked: features.get(f.id), onchange: (event) => features.set(f.id, event.currentTarget.checked) }),
+      h('span', h('b', f.label))), aboutLine(waits ? `${f.about} Only while Speak out loud is on.` : f.about));
+  })];
+};
+// The switches Arnheim comes with on that are now off (answering your agents stays as you chose it). Ones that
+// come off, such as the brain or routines, are yours to add and are left alone.
+const offRecommended = (rows) => rows.filter((s) => s.name !== 'control' && !s.set_by && s.default === true && !s.on);
+let resetting = false;
+async function useRecommended() {
+  resetting = true;
+  render();
+  const back = [];
+  let failed = false;
+  for (const s of offRecommended(switchBoard?.switches || [])) { // one at a time: each saves the file
+    if (await flip(s.name, true)) back.push(s.label);
+    else { failed = true; break; } // flip's own words say what went wrong; keep them
+  }
+  resetting = false;
+  if (!failed) switchNote = `Back on: ${back.join(', ')}.`;
+  render();
+}
 function switchesCard() {
   const rows = switchBoard?.switches;
   if (!Array.isArray(rows)) return talkingCard();
+  const named = new Set(SWITCH_SETS.flatMap(([, names]) => names));
+  const sets = [...SWITCH_SETS.map(([label, names]) => [label, names.map((n) => rows.find((s) => s.name === n)).filter(Boolean)]),
+    ['Other', rows.filter((s) => !named.has(s.name))]].filter(([, list]) => list.length);
+  const off = offRecommended(rows);
   return h('section.panel-card.talking-card.switches-card',
     sectHead('sliders-horizontal', 'Switches'),
-    h('p.small.muted', 'Each feature on or off, at once and for every start (data/serve.json). The talking ones are this device\'s own.'),
+    h('p.small.muted', 'Each feature on or off, at once and for every start.'),
     switchNote && h('p.small.note', { role: 'status' }, switchNote),
-    ...SWITCH_GROUPS.flatMap(([group, label]) => [h('h4.switch-group', label), h('ul.switch-list', rows.filter((s) => s.group === group).map(switchRow))]),
-    h('h4.switch-group', 'On this device'),
-    h('ul.switch-list', alertRow()),
+    off.length > 0 && h('div.control-row', btn(resetting ? 'Changing...' : 'Use the recommended settings', resetting ? null : useRecommended, '.quiet', 'rotate-ccw'),
+      h('span.small.muted', `Turns back on ${off.length === 1 ? off[0].label : `${off.length} switches`} that Arnheim comes with on.`)),
+    ...sets.flatMap(([label, list], i) => [h('h4.switch-group', label), h('ul.switch-list', [...list.map(switchRow), i === 0 && alertRow()].filter(Boolean))]),
     h('h4.switch-group', 'Talking, on this device'),
     h('ul.switch-list', talkRows()),
     phoneCard());
@@ -1153,13 +1240,13 @@ async function setAlerts(on) {
   if (alerts.on() || !on) setTimeout(() => { if (alertsNote === said) { alertsNote = ''; render(); } }, 10000); // done: said for a moment
 }
 function alertRow() {
-  return h('li', h('label.switch',
+  const about = 'One alert for each permission request or question that comes while this page is in the background. Clicking it opens what is asked. This browser only.';
+  return h('li.switch-row', h('label.switch',
     h('input', { type: 'checkbox', checked: alerts.on(), onchange: (event) => setAlerts(event.currentTarget.checked) }),
-    h('span', h('b', 'Desktop alerts when an agent needs you'),
-      h('span.small.muted', 'One alert for each permission request or question that comes while this page is in the background. Clicking it opens what is asked. This browser only.'),
-      alertsNote && h('span.small.note', { role: 'status' }, alertsNote))));
+    h('span', h('b', 'Desktop alerts when an agent needs you'), alertsNote && h('span.small.note', { role: 'status' }, alertsNote))),
+  aboutLine(about));
 }
-// Offered under the Overview's first card, on this computer's own company, until it is on or turned down here.
+// Offered under the first card on Needs you, on this computer's own company, until it is on or turned down here.
 function alertOffer() {
   if (ownCompany() && alerts.on() && alertsNote) return h('p.small.note.alert-offer', { role: 'status' }, alertsNote);
   if (!ownCompany() || alerts.on() || alertOfferGone || alerts.state() === 'none') return null;
@@ -1196,7 +1283,7 @@ const remotePost = (name, body = {}) => fetch(`remote/${name}`, {
   headers: { 'Content-Type': 'application/json', 'X-Arnheim-Remote': '1' }, body: JSON.stringify(body),
 }).then((r) => r.json());
 const remoteRedraw = () => readRemote().then(() => { render(); dock?.refresh(); });
-const phoneControlOff = 'Answering and instructing agents from this phone is off. Switch it on for this phone on your computer, on the Company page under Switches.';
+const phoneControlOff = 'Answering and instructing agents from this phone is off. Switch it on for this phone on your computer, in Settings.';
 
 function remoteCard() {
   if (fromAway()) {
@@ -1225,7 +1312,8 @@ function remoteCard() {
 /* ---------- control in the panel (control.js) ---------- */
 
 function controlDone(promise, said) {
-  promise.then((out) => { controlNote = said(out); render(); }, (error) => { controlNote = error.message; render(); });
+  // refresh, not just render: the building's amber goes with the answer too, even while the sample is paused
+  promise.then((out) => { controlNote = said(out); noteFresh = true; refresh(); }, (error) => { controlNote = error.message; noteFresh = true; render(); });
 }
 
 // A conversation's page: its permission request with Allow and Deny, a box to say something to
@@ -1429,16 +1517,20 @@ function usageCard() {
 function spendCard() {
   const list = org.floors.map((f) => [f, spendOf(f)]).filter(([, s]) => s);
   if (!list.length) return null;
+  const total = list.reduce((n, [, s]) => n + (s.spent || 0), 0);
+  const over = list.filter(([, s]) => s.over).length;
   return h('section.panel-card',
     sectHead('gauge', 'Spent today'),
+    h('p.spend-total', h('b', `${tokensSaid(total)} tokens`), ` in all today${over ? `, ${count(over, 'floor', 'floors')} over budget` : ''}.`),
+    h('p.small.muted', `Tokens measure AI work: the words it reads and writes. Arnheim counts them, not money: a plan costs the same each month and has limits${switchOn('forecast') && forecastNow().length ? ' (Your plan, above, shows how close they are)' : ''}, and an API key is billed by the token.`),
     h('ul.list', list.map(([f, s]) => h('li', h('a.row.spend-row', { href: `#/${f.id}` }, dot(s.over ? 'failed' : 'quiet'),
       h('span.row-main', h('span.row-title', f.label), h('span.row-sub', s.text[0].toUpperCase() + s.text.slice(1)),
         s.share != null && h('span.spend-bar', { 'aria-hidden': 'true' }, h(`span${s.over ? '.over' : ''}`, { style: `width: ${Math.round(s.share * 100)}%` }))))))),
-    h('p.small.muted', 'New tokens: what Claude read fresh and wrote. Re-reading its cache is left out.'));
+    h('p.small.muted', 'Counted: what was read fresh and written. Reading the same thing again is left out.'));
 }
 
 // Project health (health.js): what is wrong on each floor, each with a button that sends an agent to fix it
-// when control is on for your own company. The Overview lists every floor that needs looking at; a floor's
+// when control is on for your own company. Needs you lists every floor that needs looking at; a floor's
 // page lists its own.
 function healthItems(floor, hh) {
   const WHAT = { pr: 'Waiting too long', routine: 'A routine', review: 'The review line', quiet: 'Gone quiet', worn: 'Running long' };
@@ -1467,7 +1559,7 @@ function briefCard() {
   const b = briefNow();
   if (b.quiet) return null;
   const label = (p) => floorOf(p)?.label || p;
-  const done = [...b.finished.map((f) => ({ ...f, said: f.proof ? `Finished, ${f.proof}` : 'Finished', mood: f.proof === 'proven' ? 'check' : f.proof ? 'failed' : 'quiet' })),
+  const done = [...b.finished.map((f) => ({ ...f, said: f.proof ? `Finished, ${f.proof}` : 'Finished', mood: f.proof === 'proven' ? 'ok' : f.proof ? 'failed' : 'check' })),
     ...b.stopped.map((f) => ({ ...f, said: 'Stopped', mood: 'failed' }))];
   return h('section.panel-card',
     sectHead('sun', 'Since you were last here'),
@@ -1629,8 +1721,8 @@ function waitingActions(i, { keys = false } = {}) {
         h('p.small', `You've allowed this ${before} times on ${floor} lately. Always allow this exact command there, for every agent?`),
         h('div.control-row', btn('Always allow here', () => {
           if (answered.has(i.ask.id)) return;
-          answered.add(i.ask.id);
-          controlDone(control.always(i.ask.id), () => `Allowed, and from now on on ${floor} without asking. The Company page lists it, to take back.`);
+          markAnswered(i.ask.id);
+          controlDone(control.always(i.ask.id), () => `Allowed, and from now on on ${floor} without asking. Settings lists it, to take back.`);
         }))));
     }
   }
@@ -1698,7 +1790,7 @@ function startForm(floor) {
 /* ---------- the panel ---------- */
 
 function crumbsFor(floor, room, last) {
-  const list = [[org.company, '#/company']];
+  const list = [[org.company, '#/activity']];
   if (floor) list.push([floor.label, `#/${floor.id}`]);
   if (room) list.push([room.label, `#/${floor.id}/${room.id}`]);
   if (last) list.push([last]);
@@ -1725,11 +1817,11 @@ function focusCard(i, { open = true } = {}) {
   const href = waitingHref(i);
   const meaning = meaningOf(i);
   return h('section.focus', { 'aria-label': `First: ${heading}` },
-    h('div.focus-top', h(`span.pill.k-${k.mood}`, k.word), where && h('span', where)),
+    h('div.focus-top', h(`span.pill.k-${k.mood}`, k.word), where && h('span', where), i.ask?.sample && h('span.practice', 'Practice: nothing real runs')),
     h('h3.focus-title', heading),
     what && h('p.focus-what', what),
     exact && h('div.what-code', exact),
-    risk && h('div.risk', h(`span.pill.k-${risk.mood}`, risk.word), h('span', risk.line)),
+    risk && h('p.risk', h(`b.risk-${risk.mood}`, `${risk.word}. `), risk.line),
     meaning && h('details.explain', h('summary', 'What does this mean?'), h('p', meaning)),
     h('div.focus-do',
       ...waitingActions(i, { keys: open }),
@@ -1747,14 +1839,16 @@ function viewOverview() {
   if ((first?.id ?? null) !== focusId) { focusId = first?.id ?? null; focusSince = Date.now(); }
   focusNow = first;
   const rest = waiting.slice(1);
+  const agentsRest = rest.filter((i) => i.kind !== 'task');
+  const yours = rest.filter((i) => i.kind === 'task');
   const now = Date.now() / 1000;
   const blocked = waiting.filter((i) => (i.kind === 'permission' || i.kind === 'question') && i.at > 0);
   const oldest = blocked.length ? Math.max(...blocked.map((i) => now - i.at)) : 0;
   const moving = talking.length + jobs.length;
   const heading = waiting.length ? count(waiting.length, 'thing needs you', 'things need you') : 'Nothing needs you';
   const sub = waiting.length
-    ? [oldest > 0 && `The longest an agent has waited is ${waitFor(oldest)}.`, moving ? `${count(moving, 'other thing is', 'other things are')} moving on ${moving === 1 ? 'its' : 'their'} own.` : null].filter(Boolean).join(' ') || 'The first is below, with its answer.'
-    : moving ? `${count(moving, 'thing is', 'things are')} moving on ${moving === 1 ? 'its' : 'their'} own. Anything that stops for you shows here first.` : 'All quiet. Anything that stops for you shows here first.';
+    ? (oldest > 0 ? `The longest an agent has waited is ${waitFor(oldest)}.` : 'The first is below, with its answer.')
+    : 'All quiet. Anything that stops for you shows here first.';
   const reads = control.on ? together(waiting) : null;
   return {
     top: true,
@@ -1762,32 +1856,52 @@ function viewOverview() {
     body: [
       h('div.home-head', h('h2', { id: 'view-title', tabindex: '-1' }, heading), h('p', sub), noteOnce('.done-note')),
       fromAway() && !phoneMe?.phone && h('p.small', h('strong', 'View only. '), 'You are looking from another device: you can look round and walk in, but nothing here changes anything.'),
+      pausedCard(),
+      firstRun && (flow ? setupCard() : welcomeCard()),
       connectedCard(),
       firstCard(),
-      first ? focusCard(first) : h('div.all-clear', h('b', 'You are clear.'), 'Nothing is waiting on you right now.'),
-      alertOffer(),
-      firstRun && setupCard(),
       updateCard(),
-      usageCard(),
-      pauseCard(),
+      first && focusCard(first),
       clashCard(),
-      rest.length > 0 && h('section.panel-card.home-more',
-        sectHead('bell', `Also waiting (${rest.length})`),
+      agentsRest.length > 0 && h('section.panel-card.home-more',
+        sectHead('bell', `More agents waiting (${agentsRest.length})`),
         reads && h('div.control-row', { style: 'margin-bottom: 8px' }, btn(reads.label, () => controlDone(allowReads(reads.ids), (said) => said), '.primary')),
-        h('ul.list', rest.map(waitingItem)),
-        waitMeter(waiting)),
-      rest.length === 0 && waitMeter(waiting) && h('section.panel-card', waitMeter(waiting)),
+        h('ul.list', agentsRest.map(waitingItem))),
+      yours.length > 0 && h('section.panel-card.home-more',
+        sectHead('list-checks', `Your to-dos (${yours.length})`),
+        h('ul.list', yours.map(waitingItem))),
       h('section.panel-card',
-        sectHead('zap', 'Working now'),
-        talking.length || jobs.length
+        sectHead('zap', moving ? `Working now (${moving})` : 'Working now'),
+        moving
           ? h('ul.list', [
             ...talking.map((c) => row(convoHref(c), c.title, [floorOf(c.project)?.label || c.project, c.agent, c.says?.now].filter(Boolean).join(' · '), 'working')),
             ...jobs.map((j) => row(`#/${org.basement?.id}/${j.machine}`, j.name, `On the ${machineLabel(j.machine)}`, 'working')),
           ])
           : empty('Nothing is working right now.')),
       briefCard(),
+      alertOffer(),
+    ],
+  };
+}
+
+// Activity: what each project is doing, what it has cost, how the day and the week went. Everything that isn't
+// waiting on you lives here, so the Needs you tab stays short.
+function viewActivity() {
+  const all = waitingNow();
+  return {
+    top: true,
+    crumbs: [],
+    body: [
+      title('Activity'),
+      h('p.muted', 'What each project is doing, what it has cost, and how the day went.'),
+      h('section.panel-card', sectHead('layers', 'Floors'), h('ul.list', floors().map((f) => {
+        const lines = floorLines(f);
+        return row(`#/${f.id}`, f.label, lines.map((l) => l.text).join(' · '), lines[0]?.kind || 'quiet');
+      }))),
+      usageCard(),
       spendCard(),
       healthCard(),
+      waitMeter(all) && h('section.panel-card', waitMeter(all)),
       routinesCard(),
       weekCard(),
       replayCard(),
@@ -1795,16 +1909,50 @@ function viewOverview() {
         sectHead('history', 'Just now'),
         happened.length
           ? h('ul.list.happened', happened.map((e) => h('li', h('div.row', dot('quiet'), h('span.row-main', h('span.row-title', e.line), h('span.row-sub', { 'data-at': e.at }, agoText(e.at)))))))
-          : empty(playing ? 'The work starts moving in a few seconds.' : 'Paused. Press Live at the top to let the work move.')),
+          : empty(playing ? 'The work starts moving in a few seconds.' : 'Paused. Choose Resume the sample, in the ... menu at the top, to let the work move.')),
       h('div.intro-small',
         h('p', h('strong', madeUp() ? `${org.company} is made up. ` : `${org.company}. `), madeUp() ? sampleLine() : org.about || ''),
-        h('p', `Each floor of the building is a project and each room holds one kind of thing. Tap a floor to bring it out. Press Walk to go in and talk to the people at work, and to ${deskName() || 'the receptionist'} at the front desk. `,
-          tourLink()),
+        h('p', `Each floor of the building is a project and each room holds one kind of thing. Tap a floor to bring it out. Press Walk to go in and talk to the people at work, and to ${deskName() || 'the receptionist'} at the front desk.`),
         h('p', dir === 'data'
           ? 'Everything here comes from data/company.json (the building), and from data/work.json and any tools connected to it (what is going on in it). A change to the work shows within a few seconds; reload after changing the building.'
-          : 'Everything here comes from two files: sample/company.json (the building) and sample/work.json (what is going on in it). To show your own company, run python3 connect/setup.py in Arnheim\'s folder (README, "Connect your agents").')),
+          : 'Everything here comes from two files: sample/company.json (the building) and sample/work.json (what is going on in it).')),
     ],
   };
+}
+
+// While every agent is paused (Pause all, at the top): say so, with the way to let them go on.
+function pausedCard() {
+  if (!control.on || dir !== 'data' || !control.paused()) return null;
+  const since = new Date(control.paused() * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return h('section.panel-card.pause.paused', { 'aria-live': 'polite' },
+    h('p', h('strong', 'Every agent is paused.'), ` Since ${since}. Each stopped at its next step, and a message sent to one in Claude Code waits until you resume.`),
+    h('div.control-row', btn('Resume all', () => controlDone(control.resumeAll(), () => ''), '.primary', 'rotate-ccw')));
+}
+
+// The sample's first moment: what it is, and the two ways on, before anything else asks for an answer.
+function welcomeCard() {
+  if (!madeUp() || fromAway() || kept(WELCOMED) === '1') return null;
+  if (!setupAsked) { // whether Claude Code is here, so Connect can open here
+    setupAsked = true;
+    setupGet('here').then((got) => { setupHere = got; render(); });
+  }
+  const connect = () => {
+    keep(WELCOMED, '1');
+    if (setupHere?.claude) openFlow();
+    else goTo('#/company');
+  };
+  const look = () => {
+    keep(WELCOMED, '1');
+    keep(TOUR_SEEN, '1');
+    render();
+    if (!walkOn()) tour.open();
+  };
+  return h('section.panel-card.welcome-card', { 'aria-label': 'Welcome' },
+    h('p.welcome-title', 'Welcome to Arnheim'),
+    h('p', `Arnheim shows your AI agents' work as a building: a floor for each project, lit when an agent works or needs you. ${org.company} is a made-up company, so you can try everything here: answer its agents, walk in, ask ${deskName() ? `${deskName()}, the receptionist,` : 'the receptionist'} a question. Nothing you press changes anything real.`),
+    h('div.control-row',
+      h('button.btn.primary', { id: 'welcome-connect', type: 'button', onclick: connect }, icon('zap', 15), 'Connect my agents'),
+      h('button.btn', { id: 'welcome-look', type: 'button', onclick: look }, 'Look around first')));
 }
 
 // With no data/ yet: the one step from the made-up company to your own projects and agents. On this computer's own
@@ -1836,8 +1984,13 @@ async function setupPost(name, body, again = false) {
 let logOpen = false;
 const doneLog = (lines) => h('details.connect-log', { open: logOpen, ontoggle: (event) => { logOpen = event.currentTarget.open; } },
   h('summary', 'What was done'), h('pre.connect-lines', lines.join('\n')));
-// Back to the Overview, freshly loaded: your own company once it is there, or the made-up one again.
-const reloadHome = () => { window.history.replaceState(null, '', location.pathname + location.search); location.reload(); };
+// Back to Needs you, freshly loaded: your own company once it is there, or the made-up one again.
+const reloadHome = () => {
+  window.history.replaceState(null, '', location.pathname + location.search);
+  try { window.history.scrollRestoration = 'manual'; } catch { /* the top anyway */ }
+  window.scrollTo(0, 0); // on a phone the page itself scrolls: start at the top, where the news is
+  location.reload();
+};
 
 async function openFlow() {
   flow = { step: 'loading' };
@@ -1867,6 +2020,7 @@ async function connectNow() {
     return;
   }
   keep(CONNECTED, JSON.stringify({ lines: out.lines || [], note: out.note || '', control: out.control ?? null, at: Date.now() }));
+  keep(CODEX, flow.plan?.codex?.hooks ? '1' : '0'); // the first card names Codex only if its hooks went in
   unkeep(FIRST); // your own company's first agent: waited for afresh
   reloadHome();
 }
@@ -1898,9 +2052,9 @@ function connectFlow() {
       h('fieldset.connect-set',
         h('legend', 'Answer your agents from the building too?'),
         h('label.switch', h('input', { type: 'radio', name: 'control', value: 'yes', checked: f.control, disabled: working, onchange: () => { f.control = true; } }),
-          h('span', h('b', 'Yes'), h('span.small.muted', 'Allow or Deny their permission requests, and send them messages, from this page. It works only on this computer.'))),
+          h('span', h('b', 'Yes'), h('span.small.muted', 'Allow or Deny their permission requests, and send them messages, from this page on this computer. A phone can join later, in Settings, under Your phone.'))),
         h('label.switch', h('input', { type: 'radio', name: 'control', value: 'no', checked: !f.control, disabled: working, onchange: () => { f.control = false; } }),
-          h('span', h('b', 'No'), h('span.small.muted', 'Each agent asks in its own window, as usual. You can switch it on later, under Switches.')))),
+          h('span', h('b', 'No'), h('span.small.muted', 'Each agent asks in its own window, as usual. You can switch it on later, in Settings, under Switches.')))),
       h('ul.connect-found',
         h('li', plan.claude ? 'Claude Code: found.' : 'Claude Code: not found on this computer.'),
         h('li', codexLine(plan.codex)),
@@ -1909,7 +2063,7 @@ function connectFlow() {
       h('div.control-row',
         h('button.btn.primary', { id: 'connect-go', type: 'submit', disabled: working }, working ? 'Connecting...' : 'Connect'),
         h('button.btn', { id: 'connect-cancel', type: 'button', disabled: working, onclick: closeFlow }, 'Cancel')),
-      h('p.small.muted', 'It writes your building to data/, a floor for each project, and adds Arnheim\'s hooks and status line to Claude Code\'s settings, and its hooks to Codex\'s, keeping a copy of each file first. It never changes your projects\' files, and Undo takes it out again. To start Arnheim each time you log in, run python3 serve.py --always in a terminal.'))];
+      h('p.small.muted', `It writes your building to data/, a floor for each project, and adds Arnheim's hooks and status line to Claude Code's settings${plan.codex?.hooks ? ', and its hooks to Codex\'s' : ''}, keeping a copy of each file first. It never changes your projects' files, and Undo takes it out again. To start Arnheim each time you log in, run `, h('code.nowrap', 'python3 serve.py --always'), ' in a terminal on this computer.'))];
 }
 
 function setupCard() {
@@ -1953,7 +2107,7 @@ function setupCard() {
     here?.claude
       ? [h('p', `${org.company} is made up. To see your own projects, and the Claude Code and Codex conversations working in them, connect your agents. Nothing changes until you press Connect.`),
         h('div.control-row.setup-go', h('button.btn.primary', { id: 'connect-open', type: 'button', onclick: openFlow }, icon('zap', 15), 'Connect my agents')),
-        h('p.small.muted.setup-or', 'Or run this in a terminal, in Arnheim\'s folder:'), terminal]
+        h('details.setup-terminal', h('summary.small.muted', 'Or use a terminal instead'), h('p.small.muted.setup-or', 'Run this in Arnheim\'s folder:'), terminal)]
       : here && here.claude === false
         ? [h('p', `${org.company} is made up. Claude Code isn't on this computer, so there are no agents to connect yet. `,
           h('a', { href: here.install || 'https://claude.com/claude-code', target: '_blank', rel: 'noopener' }, 'Install Claude Code'), ', then reload this page.'),
@@ -1964,6 +2118,8 @@ function setupCard() {
 // Once Connect my agents has done it: your own company, what was done, and Undo (hooks and status line out, and your
 // building put aside in data/backups/, so the page goes back to the made-up company).
 let connectedNote = keptJson(CONNECTED);
+// Connect reloads the page: the press of Connect still counts as using it, so the top light says Answering here at once.
+if (connectedNote?.at && Date.now() - connectedNote.at < 120000) control.touch(connectedNote.at);
 let undoAsk = false;
 async function undoConnect() {
   connectedNote = { ...connectedNote, working: true, error: '' };
@@ -1980,6 +2136,8 @@ async function undoConnect() {
   keep(UNDONE, JSON.stringify({ lines: out.lines || [] }), 'sessionStorage');
   reloadHome();
 }
+// Done with the card: the tour stays in the ... menu and Settings, and no longer opens by itself.
+const connectedGone = () => { unkeep(CONNECTED); connectedNote = null; keep(TOUR_SEEN, '1'); };
 function connectedCard() {
   if (!connectedNote || !ownCompany() || fromAway()) return null;
   const n = connectedNote;
@@ -1997,7 +2155,8 @@ function connectedCard() {
           h('button.btn.primary', { id: 'undo-go', type: 'button', disabled: !!n.working, onclick: undoConnect }, n.working ? 'Undoing...' : 'Undo'),
           h('button.btn', { id: 'undo-keep', type: 'button', disabled: !!n.working, onclick: () => { undoAsk = false; render(); } }, 'Keep it')))
       : h('div.control-row',
-        h('button.btn.primary', { id: 'connected-ok', type: 'button', onclick: () => { unkeep(CONNECTED); connectedNote = null; render(); } }, 'Got it'),
+        h('button.btn.primary', { id: 'connected-ok', type: 'button', onclick: () => { connectedGone(); render(); } }, 'Got it'),
+        !walkOn() && h('button.btn', { id: 'connected-tour', type: 'button', onclick: () => { connectedGone(); render(); tour.open(); } }, 'Show me around'),
         h('button.btn.quiet', { id: 'undo-ask', type: 'button', onclick: () => { undoAsk = true; render(); $('undo-keep')?.focus(); } }, 'Undo')));
 }
 
@@ -2014,13 +2173,15 @@ function firstCard() {
   firstState = now;
   if (now.waiting) {
     const folders = floorFolders(org);
+    const codex = kept(CODEX) !== '0'; // connected from the page without Codex: '0'; set up in a terminal: not known
+    const agent = codex ? 'Claude Code (or Codex)' : 'Claude Code';
     return h('section.panel-card.first-card',
       sectHead('bot', 'Waiting for your first agent'),
       folders.length
-        ? [h('p', 'Open Claude Code (or Codex) in one of these folders, and it shows here as it starts:'),
+        ? [h('p', `Open ${agent} in one of these folders, and it shows here as it starts:`),
           h('ul.first-folders', folders.map((x) => h('li', h('code', x.folder), x.floor && h('span.small.muted', ` ${x.floor}`))))]
-        : h('p', 'Give a floor its folder in data/company.json, then open Claude Code (or Codex) there, and it shows here as it starts.'),
-      h('p.small.muted', 'Codex runs Arnheim\'s hooks once you trust them: type /hooks in Codex, once.'));
+        : h('p', `Give a floor its folder in data/company.json, then open ${agent} there, and it shows here as it starts.`),
+      codex && h('p.small.muted', 'Codex runs Arnheim\'s hooks once you trust them: type /hooks in Codex, once.'));
   }
   if (!firstArrived) return null;
   const c = firstArrived;
@@ -2091,12 +2252,14 @@ function updateCard() {
       h('button.btn.primary', { id: 'update-now', type: 'button', disabled: updateBusy, onclick: updateArnheim }, updateBusy ? 'Updating...' : 'Update now')),
     updateNote && h('p.small.note', { role: 'status' }, updateNote),
     behind && h('p.small.muted', 'Update now gets it from GitHub and starts Arnheim again. By hand, in Arnheim\'s folder in a terminal: ',
-      h('code', 'git pull'), ', then start Arnheim again. Switch off Look for a newer Arnheim, on the Company page, to stop this notice.'));
+      h('code', 'git pull'), ', then start Arnheim again. Switch off Look for a newer Arnheim, in Settings, to stop this notice.'));
 }
 
-// The first tour (tour.js): once per browser, by itself, and any time from the Overview or the Company page.
+// The first tour (tour.js): once per browser, by itself, and any time from the ... menu or Settings.
 const storageWorks = () => { try { window.localStorage.setItem('arnheim-probe', '1'); window.localStorage.removeItem('arnheim-probe'); return true; } catch { return false; } };
 function maybeTour() {
+  if (document.getElementById('welcome-look')) return; // the welcome card on screen offers it: Look around first
+  if (connectedNote && ownCompany()) return; // just connected: that card offers the tour (Show me around)
   const seen = kept(TOUR_SEEN) === '1' || !storageWorks(); // a browser that can't remember would see it on every visit
   if (!tourWanted({ seen, embedded: window.self !== window.top, away: fromAway(), walking: walkOn() || !!building?.walking?.() })) return;
   keep(TOUR_SEEN, '1');
@@ -2104,28 +2267,41 @@ function maybeTour() {
 }
 const tourLink = () => !fromAway() && h('button.linkish', { type: 'button', onclick: () => { if (!walkOn()) tour.open(); } }, 'Show the tour again');
 
-function floorCard(floor) {
-  return h('li', h('a.floor-card', { href: `#/${floor.id}` },
-    h('span.tile-icon.plain', icon(floor === org.lobby ? 'globe' : floor === org.basement ? 'server' : floor.icon || 'box', 20)),
-    h('span.floor-main', h('span.floor-name', floor.label), floor.about && h('span.row-sub', floor.about)),
-    h('span.floor-states', floorLines(floor).map(chip))));
-}
-
 function viewCompany() {
   return {
     top: true,
     crumbs: [],
     body: [
-      title(org.company),
-      org.mission && h('p.mission', h('span.muted', 'Mission: '), org.mission),
-      org.about && h('p', org.about),
-      h('ul.floor-list', floors().map(floorCard)),
-      switchesCard(),
+      title('Settings'),
+      firstRun && setupCard(),
+      agentsCard(),
       memoryCard(),
       alwaysCard(),
+      switchesCard(),
+      h('section.panel-card.company-card',
+        sectHead('building-2', org.company),
+        org.mission && h('p.mission', h('span.muted', 'Mission: '), org.mission),
+        org.about && h('p', org.about)),
       !fromAway() && h('p.small.muted.tour-again', 'New here? ', tourLink()),
     ],
   };
+}
+
+// Your own company in Settings: that your agents are connected, and the way back (connect/setup.py --undo).
+function agentsCard() {
+  if (!ownCompany() || fromAway() || route.floor !== 'company') return null;
+  const n = connectedNote || {};
+  return h('section.panel-card.agents-card',
+    sectHead('laptop', 'Your agents'),
+    h('p', `Connected: ${count(org.floors.length, 'project has its floor', 'projects have their floors')}. Claude Code and Codex conversations started in their folders show here as they work.`),
+    n.error && h('p.banner.fail', { role: 'alert' }, n.error),
+    undoAsk
+      ? h('div.connect-undo',
+        h('p.small', 'Take Arnheim\'s hooks and status line out of Claude Code\'s and Codex\'s settings, and put your building aside in data/backups/, so this goes back to the made-up company?'),
+        h('div.control-row',
+          h('button.btn.primary', { id: 'undo-go', type: 'button', disabled: !!n.working, onclick: undoConnect }, n.working ? 'Undoing...' : 'Undo'),
+          h('button.btn', { id: 'undo-keep', type: 'button', disabled: !!n.working, onclick: () => { undoAsk = false; render(); } }, 'Keep it')))
+      : h('div.control-row', h('button.btn.quiet', { id: 'undo-ask', type: 'button', onclick: () => { undoAsk = true; render(); $('undo-keep')?.focus(); } }, 'Undo connecting')));
 }
 
 // The commands you allowed for good (connect/standing.py), each a press away from asking again.
@@ -2373,6 +2549,7 @@ function viewItem(floor, room, id) {
 function viewFor(r) {
   if (!r.floor) return viewOverview();
   if (r.floor === 'company') return viewCompany();
+  if (r.floor === 'activity') return viewActivity();
   if (r.floor === 'front-desk') return poe.view();
   const floor = floors().find((f) => f.id === r.floor);
   if (!floor) return viewOverview();
@@ -2390,8 +2567,8 @@ function renderCrumbs(crumbs) {
 }
 
 function renderTabs() {
-  const tab = !route.floor ? 'overview' : route.floor === 'front-desk' ? 'poe' : 'company';
-  for (const name of ['overview', 'company', 'poe']) {
+  const tab = !route.floor ? 'overview' : route.floor === 'company' ? 'company' : route.floor === 'front-desk' ? null : 'activity';
+  for (const name of ['overview', 'activity', 'company']) {
     const el = $(`tab-${name}`);
     if (name === tab) el.setAttribute('aria-current', 'page');
     else el.removeAttribute('aria-current');
@@ -2400,6 +2577,7 @@ function renderTabs() {
 
 function render({ nav = false } = {}) {
   noteUsed = false;
+  showCounts(); // an answer drops the count at once, even while the sample is paused
   focusNow = null; // viewOverview sets it again when it is the view showing
   const panel = $('content');
   const active = document.activeElement;
@@ -2422,12 +2600,24 @@ function render({ nav = false } = {}) {
   panel.replaceChildren(...[view.body].flat(Infinity).filter(Boolean));
   if (nav) {
     panel.scrollTop = 0;
+    // a phone scrolls the page itself, so a tab would open where the last one was left: start it at its top
+    if (view.top && window.scrollY > 0 && window.matchMedia('(max-width: 820px)').matches) {
+      const y = panel.getBoundingClientRect().top + window.scrollY - ($('top')?.offsetHeight || 0) - ($('tabs')?.offsetHeight || 0);
+      if (window.scrollY > y + 1) window.scrollTo(0, Math.max(0, y));
+    }
     $('view-title')?.focus({ preventScroll: true });
   } else {
     panel.scrollTop = scroll;
     if (focusHref) [...panel.querySelectorAll('a')].find((a) => a.getAttribute('href') === focusHref)?.focus({ preventScroll: true });
     if (focusSwitch) [...panel.querySelectorAll('label.switch')].find((l) => l.querySelector('b')?.textContent === focusSwitch)?.querySelector('input')?.focus({ preventScroll: true });
     if (focusKey && !panel.contains(document.activeElement)) document.getElementById(focusKey)?.focus({ preventScroll: true });
+  }
+  // What came of an answer shows where it was given: on a phone the note sits above, out of sight, without this.
+  if (noteFresh) {
+    noteFresh = false;
+    const note = panel.querySelector('.control-note');
+    const box = note?.getBoundingClientRect();
+    if (box && (box.top < 0 || box.bottom > window.innerHeight)) note.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
   }
 }
 
@@ -2449,6 +2639,106 @@ function refresh() {
   checkAlerts();
   render();
   showAnswering();
+  showCounts();
+}
+
+// One count everywhere: the top bar's pill, the Needs you tab and the building's filters.
+function showCounts() {
+  const n = waitingNow().length;
+  const moving = work.conversations.filter((c) => c.working).length + work.jobs.filter((j) => j.state === 'running').length;
+  const pill = $('needs-pill');
+  pill.hidden = n === 0;
+  const word = `${n} need${n === 1 ? 's' : ''} you`;
+  if ($('needs-word').textContent !== word) {
+    $('needs-n').textContent = String(n);
+    $('needs-word').querySelector('.needs-more').textContent = word.slice(String(n).length);
+  }
+  pill.setAttribute('aria-label', `${word}: show the first`);
+  const tab = $('tab-count');
+  tab.hidden = n === 0;
+  if (tab.textContent !== String(n)) tab.textContent = String(n);
+  for (const el of document.querySelectorAll('[data-count-of]')) {
+    const c = el.dataset.countOf === 'needs' ? n : el.dataset.countOf === 'working' ? moving : null;
+    const text = c ? String(c) : '';
+    if (el.textContent !== text) el.textContent = text;
+    el.hidden = !text;
+  }
+  showPauseAll();
+}
+
+// Pause all, at the top: on your own company while the building answers your agents.
+function showPauseAll() {
+  const b = $('pause-all');
+  const m = $('pause-all-menu'); // a phone's: in the ... menu, in words (demo.css)
+  const can = control.on && dir === 'data'; // as the lobby's pause card: a paired phone may pause them too
+  b.hidden = !can;
+  m.hidden = !can;
+  if (!can) return;
+  const paused = !!control.paused();
+  const sig = paused ? 'paused' : 'going';
+  if (b.dataset.sig === sig) return;
+  b.dataset.sig = sig;
+  b.replaceChildren(icon(paused ? 'rotate-ccw' : 'pause', 14), h('span.pause-word', paused ? 'Resume all' : 'Pause all'));
+  b.title = paused ? 'Every agent is paused. Press to let them go on.' : 'Pause every agent at once: each stops at its next step, until you resume them.';
+  b.classList.toggle('paused', paused);
+  m.replaceChildren(icon(paused ? 'rotate-ccw' : 'pause', 15), paused ? 'Resume all agents' : 'Pause all agents');
+}
+
+// The ... menu: light or dark, the list alone, the sample's pause, the tour.
+function setupMenu() {
+  const more = $('more');
+  const menu = $('more-menu');
+  const show = (on) => { menu.hidden = !on; more.setAttribute('aria-expanded', String(on)); };
+  more.addEventListener('click', (event) => { event.stopPropagation(); show(menu.hidden); if (!menu.hidden) menu.querySelector('button:not([hidden])')?.focus(); });
+  document.addEventListener('click', (event) => { if (!menu.hidden && !$('more-wrap').contains(event.target)) show(false); });
+  menu.addEventListener('click', (event) => {
+    if (!event.target.closest('button')) return;
+    const inside = menu.contains(document.activeElement); // the tour or a new view takes the focus itself
+    show(false);
+    if (inside) more.focus();
+  });
+  $('more-wrap').addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !menu.hidden) { event.stopPropagation(); show(false); more.focus(); }
+  });
+  // Tabbing on past the menu closes it. A click on a button that takes no focus (Safari) has no next element: it stays.
+  $('more-wrap').addEventListener('focusout', (event) => { if (!menu.hidden && event.relatedTarget && !$('more-wrap').contains(event.relatedTarget)) show(false); });
+  $('desk-open').replaceChildren(icon('messages-square', 15), deskAsk());
+  $('desk-open').addEventListener('click', () => { primeBrain('receptionist'); goTo(DESK); });
+  $('tour-again').hidden = fromAway();
+  $('tour-again').addEventListener('click', () => { if (!walkOn()) tour.open(); });
+  $('list-mode').addEventListener('click', () => setListOnly(!document.body.classList.contains('list-only')));
+  setListOnly(kept(LIST_ONLY) === '1', false);
+  for (const id of ['pause-all', 'pause-all-menu']) $(id).addEventListener('click', () => controlDone(control.paused() ? control.resumeAll() : control.pauseAll(), () => ''));
+  // The floor and room labels let taps through to the empty space behind them (#labels has pointer-events: none),
+  // so a tap on a floor's name did nothing. Now it opens that floor or room, as a tap on the floor itself does; a
+  // drag that ends on one is still a drag.
+  let labelDown = null;
+  $('stage').addEventListener('pointerdown', (event) => { labelDown = event.target.tagName === 'CANVAS' ? [event.clientX, event.clientY] : null; });
+  $('stage').addEventListener('click', (event) => {
+    const down = labelDown;
+    labelDown = null;
+    if (!down || event.target.tagName !== 'CANVAS' || walkOn() || Math.hypot(event.clientX - down[0], event.clientY - down[1]) > 6) return;
+    const href = labelHref(event.clientX, event.clientY);
+    if (href) goTo(href);
+  });
+  $('needs-pill').addEventListener('click', () => {
+    if (!route.floor) { $('content').scrollTop = 0; $('view-title')?.focus({ preventScroll: true }); }
+  });
+}
+// What a label at this point of the screen names: '#/<floor>' or '#/<floor>/<room>', or '' for none.
+function labelHref(x, y) {
+  for (const el of $('labels').querySelectorAll('.label:not(.small)')) {
+    const key = el.dataset.key || '';
+    if (el.hidden || !/^[fr]:/.test(key)) continue;
+    const box = el.getBoundingClientRect();
+    if (x >= box.left && x <= box.right && y >= box.top && y <= box.bottom) return `#/${key.slice(2)}`;
+  }
+  return '';
+}
+function setListOnly(on, save = true) {
+  document.body.classList.toggle('list-only', on);
+  $('list-mode').replaceChildren(icon('layers', 15), on ? 'Show the building' : 'Hide the building');
+  if (save) keep(LIST_ONLY, on ? '1' : '0');
 }
 
 // The top bar's light while control is on (welcome.js): whether a permission request waits here now, by
@@ -2497,10 +2787,14 @@ function step() {
 function setPlaying(on) {
   playing = on;
   const b = $('live');
-  b.setAttribute('aria-pressed', String(on));
-  b.replaceChildren(h('span.live-dot', { 'aria-hidden': 'true' }), on ? 'Live' : 'Paused');
-  b.setAttribute('aria-label', on ? 'The work is moving. Press to pause it.' : 'Paused. Press to let the work move again.');
-  if (!route.floor) render();
+  b.replaceChildren(icon(on ? 'pause' : 'zap', 15), on ? 'Pause the sample' : 'Resume the sample'); // the words say the state: no pressed
+  b.title = on ? 'The sample\'s work is moving on its own. Press to hold it still.' : 'The sample is held still. Press to let its work move again.';
+  // The top bar says so too, where it is seen without opening the menu.
+  const badge = $('made-up');
+  badge.classList.toggle('paused', !on);
+  badge.title = on ? '' : 'The sample is held still. Resume it in the ... menu.';
+  badge.replaceChildren(...(on ? ['Sample', h('span.made-up-more', ': made up')] : [icon('pause', 12), h('span', 'Paused', h('span.made-up-more', ': the sample holds still'))]));
+  if (!route.floor || route.floor === 'activity') render();
 }
 
 /* ---------- scenes, theme, routes ---------- */
@@ -2514,8 +2808,10 @@ function applyScene() {
 function setupScenes() {
   let saved = params.get('scene');
   if (!saved) { try { saved = localStorage.getItem('arnheim-scene'); } catch { saved = null; } }
-  const list = [...Object.entries(SCENE_NAMES), ...org.floors.map((f) => [f.id, f.label])];
+  const list = Object.entries(SCENE_NAMES); // the floors themselves are the way to a project: tap one, or its label
   if (list.some(([id]) => id === saved)) sceneId = saved;
+  // ?scene=<floor id> (docs/embed.md) lights that one floor; the chips then show none pressed.
+  else if (params.get('scene') && org.floors.some((f) => f.id === params.get('scene'))) sceneId = params.get('scene');
   $('scenes').replaceChildren(...list.map(([id, name]) => h('button.scene', {
     type: 'button',
     'data-scene': id,
@@ -2523,8 +2819,9 @@ function setupScenes() {
       sceneId = id;
       try { localStorage.setItem('arnheim-scene', id); } catch { /* it just won't be remembered */ }
       applyScene();
+      if (id === 'needs' && route.floor && !walkOn()) goTo('#/'); // one meaning for Needs you: the floors lit, and their list beside
     },
-  }, icon(SCENE_ICON[id] || org.floors.find((f) => f.id === id)?.icon || 'box', 18), h('span', name))));
+  }, icon(SCENE_ICON[id] || 'box', 18), h('span', name), h('span.scene-count', { 'data-count-of': id }))));
 }
 
 function isDark() {
@@ -2534,7 +2831,7 @@ function isDark() {
 
 function applyTheme() {
   const dark = isDark();
-  $('theme').replaceChildren(icon(dark ? 'sun' : 'moon', 15), dark ? 'Light' : 'Dark');
+  $('theme').replaceChildren(icon(dark ? 'sun' : 'moon', 15), dark ? 'Light mode' : 'Dark mode');
   $('theme').setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
   building?.setTheme(dark);
 }
@@ -2565,7 +2862,7 @@ function parentHash() {
   if (TOP_ROUTES.has(route.floor)) return '#/';
   if (route.item) return `#/${route.floor}/${route.room}`;
   if (route.room) return `#/${route.floor}`;
-  return '#/company';
+  return '#/activity';
 }
 
 function focusBuilding() {
@@ -2710,7 +3007,7 @@ async function startBuilding() {
       onNotes: showNotes,
       onPick(hit) {
         tip.hidden = true;
-        if (hit.company) { goTo('#/company'); return; }
+        if (hit.company) { goTo('#/activity'); return; }
         if (hit.href === DESK) { primeBrain('receptionist'); goTo(DESK); return; }
         if (isAide(hit)) { primeBrain('assistant'); return; } // she has no page of her own: the talk opens in the walk
         if (hit.walk) { goTo(hit.href || `#/${hit.floorId}/${hit.roomId}`); return; }
@@ -2814,6 +3111,7 @@ document.addEventListener('click', (event) => {
 let walkOpening = 0;
 async function toggleWalk() {
   if (!building) return;
+  if (document.body.classList.contains('list-only')) setListOnly(false); // the walk needs the building
   const on = !building.walking() && !walkOn();
   setWalking(on);
   document.activeElement?.blur?.(); // so Space and Enter don't press the button again mid-walk
@@ -2842,7 +3140,7 @@ function setupStageTools() {
   $('zoom-in').addEventListener('click', () => building?.zoomBy(0.86));
   $('zoom-out').addEventListener('click', () => building?.zoomBy(1.16));
   $('view-reset').addEventListener('click', () => building?.resetView());
-  $('view-back').addEventListener('click', () => goTo('#/company'));
+  $('view-back').addEventListener('click', () => goTo('#/activity'));
   $('stage-retry').addEventListener('click', () => {
     if (!modelLoaded) { location.reload(); return; } // the files themselves never arrived
     modelTries = 0;
@@ -2869,11 +3167,11 @@ function setupStageTools() {
 
 function setupIcons() {
   $('top').querySelector('h1').prepend(icon('building-2', 18));
-  $('tab-overview').prepend(icon('layers', 15));
-  $('tab-company').prepend(icon('building-2', 15));
-  const desk = $('tab-poe');
-  desk.textContent = deskTab();
-  desk.prepend(poeBadge(18, org.receptionist?.look));
+  $('tab-overview').prepend(icon('bell', 15));
+  $('tab-activity').prepend(icon('history', 15));
+  $('tab-company').prepend(icon('sliders-horizontal', 15));
+  $('more').replaceChildren(icon('ellipsis', 18));
+  $('tour-again').prepend(icon('sparkles', 15));
   $('back').prepend(icon('arrow-left', 15));
   $('view-back').prepend(icon('arrow-left', 15));
   $('view-reset').prepend(icon('rotate-ccw', 14));
@@ -3113,12 +3411,17 @@ async function boot() {
   }
   document.title = madeUp() ? `Arnheim: ${org.company}, a made-up company` : `Arnheim: ${org.company}`;
   $('made-up').hidden = !madeUp();
+  // A phone's header stays at the top as the page scrolls, and the tabs just under it (demo.css): how tall it is now.
+  const topHeight = () => document.documentElement.style.setProperty('--top-h', `${$('top').offsetHeight}px`);
+  topHeight();
+  try { new ResizeObserver(topHeight).observe($('top')); } catch { addEventListener('resize', topHeight); }
   $('live').hidden = !hasStory();
   setupDesk();
   readRoute();
   setupTheme();
   setupIcons();
   setupScenes();
+  setupMenu();
   setupStageTools();
   setPlaying(params.get('live') !== 'off');
   $('live').addEventListener('click', () => setPlaying(!playing));
@@ -3190,6 +3493,7 @@ async function boot() {
   }
   setupAnswering();
   showAnswering();
+  showCounts();
   if (!fromAway()) { // a newer Arnheim: asked of this computer's serve.py now and every half hour (it asks GitHub once a day)
     readUpdate().then(() => render());
     setInterval(() => readUpdate().then(() => render()), 30 * 60000);

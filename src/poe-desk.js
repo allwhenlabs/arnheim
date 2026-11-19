@@ -34,7 +34,7 @@ const WORDS = {
   addHere: '',
   added: 'It is in the Work room now.',
   addedHelper: '',
-  scenes: 'The buttons above the building relight it: Everything, Only what needs me, Working now, or one project.',
+  scenes: 'The buttons above the building relight it: Everything, Needs you or Working. Tap a floor, or its label, for one project.',
   keys: null, // the page's keyboard shortcuts, in a sentence
   searchLabel: 'Search for',
 };
@@ -308,7 +308,7 @@ export function createPoe(kit) {
     { id: 'tour', answer: (c) => has(c.q, ['tour', 'show me round', 'show me around', 'look around']) && (setTimeout(startTour, 0), { lines: ['Follow me. Press Back or Esc to stop.'] }) },
     { id: 'keys', answer: (c) => W.keys && has(c.q, ['shortcut', 'keyboard', 'keys']) && { lines: [W.keys] } },
     { id: 'scenes', answer: (c) => has(c.q, ['scene', 'filter']) && { lines: [W.scenes] } },
-    { id: 'colours', answer: (c) => has(c.q, ['colour', 'color', 'light', 'amber', 'glow', 'warm', 'dim', 'green', 'red']) && { lines: ['The light means something. Warm: working now. Amber: needs you. Blue: finished, your turn to look. Green: finished, and its work proven by its check. Red: its check failed. Dim: quiet.'] } },
+    { id: 'colours', answer: (c) => has(c.q, ['colour', 'color', 'light', 'amber', 'glow', 'warm', 'dim', 'green', 'red', 'blue']) && { lines: ['The light means something. Amber: it needs you. Blue: working now. Red: something is wrong, such as a check that failed. Plain: quiet. In the lists, a tick means finished and proven by its check, and an empty ring means finished, look when you can.'] } },
     { id: 'happening', answer: (c) => has(c.q, ['happening', 'going on', 'whats new', 'news', 'catch me up', 'latest']) && happeningAnswer(c.f, c.floor) },
     { id: 'running', answer: (c) => has(c.q, ['running', 'working', 'busy', 'queue', 'jobs', 'doing', 'progress']) && runningAnswer(c.f, c.floor) },
     { id: 'needs', answer: (c) => has(c.q, ['need', 'waiting', 'to do', 'todo', 'pending', 'urgent', 'first', 'today', 'next', 'on my plate', 'what should']) && needsAnswer(c.f, c.floor) },

@@ -57,6 +57,7 @@
 /* Talking (voice.js): the Voice button beside Leave, and the conversation inside the talking card. */
 .aw-voice { margin-right: auto; white-space: nowrap; }
 .aw-voice .icon { display: none; }
+.aw-knob { display: none; } /* the switch shows in Talk only (talk-dock.css) */
 @media (max-width: 420px) { .aw-voice { padding: 0; } .aw-voice .icon { display: block; } .aw-voice-word, .aw-needs-word { display: none; } .aw-name { padding: 0 11px; } .aw-needs { padding: 0 11px; } }
 .aw-voice[aria-pressed="true"] { border-color: #ffcf8f; color: #ffd9a8; }
 .aw-voice[hidden], .aw-talk[hidden], .aw-said[hidden] { display: none; }

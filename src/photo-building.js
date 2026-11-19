@@ -52,21 +52,21 @@ const KIND_ORDER = { goals: 0, code: 1, conversations: 2, work: 3 };
 // A room's light, as a colour over its bake.
 const MOOD = {
   quiet: { color: '#ffffff', level: 1 },
-  working: { color: '#ffeedd', level: 1.04 },
+  working: { color: '#a8c6ff', level: 1.08 }, // as strong as amber, the other way
   needs: { color: '#ffd29e', level: 1.08 },
-  check: { color: '#e2ebff', level: 1.02 },
-  ok: { color: '#e2f6e7', level: 1.02 }, // finished, and its work proven (proof.js)
+  check: { color: '#ffffff', level: 1 }, // finished: plain, like a quiet room (the list marks it)
+  ok: { color: '#ffffff', level: 1 }, // finished and proven (proof.js): plain; the list gives it a tick
   failed: { color: '#ffc9cf', level: 1.0 },
 };
 
 const THEMES = {
   dark: {
     level: 0.84, hemi: 0.9, sun: 1.7, exposure: 0.82,
-    bg: { all: ['#57392a', '#0a0e1a'], needs: ['#663a14', '#0b0d16'], working: ['#5e4522', '#0b0e18'] },
+    bg: { all: ['#57392a', '#0a0e1a'], needs: ['#663a14', '#0b0d16'], working: ['#1f3150', '#0b0e18'] },
   },
   light: {
     level: 1, hemi: 1.1, sun: 2.2, exposure: 0.9,
-    bg: { all: ['#f7ead8', '#dfe5ee'], needs: ['#fbdcb6', '#e8e3dc'], working: ['#fae9c4', '#e6e5df'] },
+    bg: { all: ['#f7ead8', '#dfe5ee'], needs: ['#fbdcb6', '#e8e3dc'], working: ['#dbe6f8', '#e3e6ec'] },
   },
 };
 
@@ -841,9 +841,10 @@ export function createPhotoBuilding(canvas, org, { base, people: ownPeople, onPi
     if (!s) {
       for (const st of storeys) {
         if (st.part !== 0 || st.t > 0.05 || st.rooms.every((room) => room.gain < 0.5)) continue;
-        const lines = live[`floor:${st.id}`]?.lines || [];
+        const floor = live[`floor:${st.id}`] || {};
+        const lines = floor.lines || [];
         out.push({
-          key: `f:${st.id}`, title: st.label, sub: lines.map((l) => l.text).join(', '), kind: lines[0]?.kind || 'quiet', align: 'right',
+          key: `f:${st.id}`, title: st.label, sub: floor.label ?? lines.map((l) => l.text).join(', '), kind: floor.kind || lines[0]?.kind || 'quiet', align: 'right',
           at: [OX + box3.x0 - 0.2, st.y + st.height * 0.5, OZ + box3.z1], rank: lines.some((l) => l.kind === 'needs') ? 0 : 1,
         });
       }
@@ -877,6 +878,7 @@ export function createPhotoBuilding(canvas, org, { base, people: ownPeople, onPi
       if (!el) {
         el = document.createElement('div');
         el.append(document.createElement('b'), document.createElement('span'));
+        el.dataset.key = l.key; // f:<floor> or r:<floor>/<room>: a page can open what a tapped label names
         labels.append(el);
         labelEls.set(l.key, el);
       }

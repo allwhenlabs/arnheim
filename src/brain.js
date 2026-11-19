@@ -62,7 +62,7 @@ export function createBrain({ base = BASE, headers = () => ({}) } = {}) {
 
   return {
     check,
-    // After the brain was switched on or off (the Company page's Switches): ask the server afresh.
+    // After the brain was switched on or off (Settings' Switches): ask the server afresh.
     recheck() { asked = null; return check(); },
     get on() { return !!status.on; },
     get model() { return status.model || null; },

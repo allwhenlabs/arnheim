@@ -27,7 +27,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var restarts: [Date] = []
     var quitting = false
     var openWhenReady = true
-    var fragment = ""  // where on the page to open: "" for the building, "#/" for the Overview
+    var fragment = ""  // where on the page to open: "" for the building, "#/company" for Settings
     var python: Python?
     var folders: [String]?
     var environment: [String: String] = [:]
@@ -473,8 +473,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func openArnheim() { ask("") }
 
-    /// The Overview, where the page shows how to connect your agents.
-    @objc func connectAgents() { ask("#/") }
+    /// Settings, where the page shows how to connect your agents (or lists the ones connected).
+    @objc func connectAgents() { ask("#/company") }
 
     func ask(_ fragment: String) {
         switch phase {

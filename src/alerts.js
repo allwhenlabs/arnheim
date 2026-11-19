@@ -5,7 +5,7 @@
 // tests/test_ease.py can run it under Node with a stand-in for the browser's Notification.
 
 export const ALERTS = 'arnheim-alerts';
-const KINDS = new Set(['permission', 'question']); // what needs you, as the Overview's list has it (queue.js)
+const KINDS = new Set(['permission', 'question']); // what needs you, as the Needs you list has it (queue.js)
 
 // The items that need you and haven't been seen on this page before. Every item given is marked seen in `known`, so
 // one that comes while the page is in front never alerts later.

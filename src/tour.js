@@ -1,4 +1,4 @@
-// A one-minute first tour: three short steps, each pointing at a real part of the page (the building, the Overview,
+// A one-minute first tour: three short steps, each pointing at a real part of the page (the building, Needs you,
 // Walk), with Next, Back and Skip. It shows once per browser (localStorage), on this computer's own page and never
 // inside a page that embeds Arnheim or mid-walk; "Show the tour again" opens it any time. Esc closes it, focus moves
 // into it and back to where it was, a narrow screen gets it as a sheet along the bottom, and with reduced motion
@@ -9,12 +9,12 @@ export const TOUR = 'arnheim-tour';
 // Each step's target: the first of its selectors that is showing. A step whose targets are all hidden (Walk, with no
 // 3D) is left out.
 export const STEPS = [
-  { target: ['#stage', '#tab-company'], title: 'Each floor is a project',
+  { target: ['#stage', '#tab-activity'], title: 'Each floor is a project',
     text: 'Tap a floor to bring it out: its rooms show what is going on in that project. Drag to turn the building.' },
-  { target: ['#tab-overview'], title: 'Amber means an agent needs you',
-    text: 'A floor lit amber has an agent waiting for your answer. The Overview lists what waits on you first, with its answer beside it.' },
+  { target: ['#tab-overview'], title: 'Amber means it needs you',
+    text: 'A floor lit amber has an agent waiting for your answer, and blue means one is at work. The Needs you tab lists what waits, with its answer beside it.' },
   { target: ['#walk'], title: 'Walk goes inside',
-    text: 'Press Walk to step in and talk to the people at work, and to the receptionist at the front desk.' },
+    text: 'Press Walk to step in and talk to the people at work. Settings is where your own projects come in (Connect my agents) and where every feature is switched on or off.' },
 ];
 
 // Whether the tour opens by itself: a first visit in this browser, on this computer's own page, not inside another

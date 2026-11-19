@@ -41,6 +41,8 @@ const out = {
   update: L.leadUpdate({ label: 'Lantern', conversations: convos, waiting: [run], goals: [{ title: 'Ten thousand readers', status: 'open' }],
     tasks: [{ status: 'open' }, { status: 'needs_you' }], prs: [{}], health: { problems: [{ kind: 'pr', line: 'x' }] }, spend: { text: '900 thousand tokens today' }, clashes: [] }),
   quiet: L.leadUpdate({ label: 'Kitefield', conversations: [], waiting: [] }),
+  moreTasks: L.leadUpdate({ label: 'Tidepool', conversations: [], waiting: [{ kind: 'task', title: 'Post the update', what: '' }],
+    tasks: [{ status: 'needs_you' }, { status: 'open' }, { status: 'claude' }] }),
   markup: L.leadUpdate({ label: 'Kitefield', conversations: [{ title: 'Kites', working: true, says: { now: 'I\'m working on what you asked: "<agent-message from=\"a1\"> [Subagent hand-back] The report".' } }], waiting: [] }),
   news: L.leadNews({ label: 'Lantern', since: 50, now: 200, from: 'since 14:05', conversations: convos,
     moments: [{ key: 'c2', at: 120, kind: 'finished', what: 'The pictures are ready.' }, { key: 'c1', at: 160, kind: 'changed', what: 'reader/bookmark.js' }],
@@ -136,6 +138,8 @@ class LeadsTest(unittest.TestCase):
             self.assertIn(part, u)
         self.assertNotIn("It saves too soon", u)  # only the first sentence of what an agent says
         self.assertEqual(self.r["quiet"], "Nobody is working on Kitefield right now. Nothing here waits on you.")
+        # a task named as waiting on you isn't counted again: the rest are "more", so the numbers add up
+        self.assertIn("Open: 2 more tasks.", self.r["moreTasks"])
         self.assertIn('One is on "Kites".', self.r["markup"])  # a message's markup is never read out
         self.assertNotIn("<", self.r["markup"])
 

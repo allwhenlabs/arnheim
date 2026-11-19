@@ -13,9 +13,8 @@ export const H = 2.6;
 const DARK = '#23262e';
 const WOOD = '#b48d63';
 const AMBER = '#ff8a1e';
-const WARM = '#ffb066';
-const COOL = '#8fb4ff';
-const PROVEN = '#6fe09a';
+const WARM = '#ffb066'; // signs, plates and screens that are simply on
+const WORKING = '#6f9dff'; // at work: blue, as the building's lamps (building.js); amber needs you, red failed
 const FAIL = '#ff5a6e';
 
 // Each floor's colours: its floorboards, walls, fabric and rugs, and the sky behind the building
@@ -221,12 +220,12 @@ export const ROOMS = {
         const screen = needs
           ? mat('#14100b', { rough: 0.3, emissive: AMBER, emissiveIntensity: 2.6 })
           : working
-            ? mat('#14100b', { rough: 0.3, emissive: WARM, emissiveIntensity: 1.9 })
+            ? mat('#0b0f18', { rough: 0.3, emissive: WORKING, emissiveIntensity: 1.9 })
             : mat('#0c0f14', { rough: 0.3, emissive: '#3a4a6b', emissiveIntensity: 0.25 });
         desk(g, x, z, screen);
         if (needs) g.add(decal(1.5, 1.2, x, z + 0.2, { color: AMBER, opacity: 0.3, add: true, y: 0.018 }));
         if (working) {
-          g.add(decal(1.4, 1.1, x, z + 0.2, { color: WARM, opacity: 0.22, add: true, y: 0.018 }));
+          g.add(decal(1.4, 1.1, x, z + 0.2, { color: WORKING, opacity: 0.22, add: true, y: 0.018 }));
           const person = at(buildSeated(identity(task.id ?? task.title), { seat: 0.47, pose: 'desk' }), x, 0, z + 0.48);
           person.rotation.y = Math.PI; // facing the screen
           g.add(person);
@@ -275,9 +274,9 @@ export const ROOMS = {
         );
         g.add(decal(1, 1, seat.position.x, seat.position.z), seat);
         if (c.working || c.check) seat.add(buildSeated(identity(c.id), { seat: 0.46, pose: 'chat' })); // the same person for the same id
-        if (c.working) g.add(decal(1.5, 1.5, seat.position.x, seat.position.z, { color: WARM, opacity: 0.3, add: true, y: 0.02 }));
-        const lamp = c.proof === 'proven' ? PROVEN : c.proof === 'failed' ? FAIL : COOL; // blue: your turn; green: proven; red: failed its check
-        if (c.check) seat.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 8), mat(lamp, { emissive: lamp, emissiveIntensity: 2.4 })), 0, 0.98, -0.24));
+        if (c.working) g.add(decal(1.5, 1.5, seat.position.x, seat.position.z, { color: WORKING, opacity: 0.3, add: true, y: 0.02 }));
+        // Finished work stays plain (the list gives it a ring, or a tick once proven); only a failed check lights red.
+        if (c.check && c.proof === 'failed') seat.add(at(new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 8), mat(FAIL, { emissive: FAIL, emissiveIntensity: 2.4 })), 0, 0.98, -0.24));
         ctx.object({ x: seat.position.x, y: 0, z: seat.position.z, w: 0.8, h: 1.05, d: 0.8, title: c.title, sub: c.sub, href: c.href, mood: c.mood || (c.working ? 'working' : c.check ? 'check' : 'quiet'),
           figure: c.working || c.check ? { x: seat.position.x, z: seat.position.z, stand: [seat.position.x + (cx - seat.position.x) * 0.55, seat.position.z + (cz - seat.position.z) * 0.55] } : null });
       });
@@ -540,7 +539,7 @@ export const ROOMS = {
           this.busy = !!info.running;
           this.online = !!info.online;
           air.visible = this.busy;
-          screen.emissive.set(this.busy ? WARM : this.online ? '#3a4a6b' : '#000000');
+          screen.emissive.set(this.busy ? WORKING : this.online ? '#3a4a6b' : '#000000');
           screen.emissiveIntensity = this.busy ? 1.8 : 0.4;
           leds.forEach((led) => { led.emissiveIntensity = this.online || this.busy ? 0.8 : 0; });
           if (!this.busy) fan.rotation.z = 0.3;

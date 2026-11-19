@@ -18,6 +18,7 @@ SCRIPT = """
 import { pathToFileURL } from 'node:url';
 const q = await import(pathToFileURL(process.argv[1] + '/src/queue.js').href);
 const out = JSON.parse(process.argv[2]).map(([fn, given, extra]) => {
+  if (given.hushed) given.hushed = new Map(Object.entries(given.hushed));
   const items = q.waitingOnYou(given);
   if (fn === 'list') return items.map((i) => [i.kind, i.key ?? null, i.title, i.what, !!i.read]);
   if (fn === 'together') return q.together(items);
@@ -82,6 +83,17 @@ class QueueTest(unittest.TestCase):
             ["turn", "c6", "Logo", "It has finished for now.", False],
             ["turn", "c4", "Stock count", "Counted 40 lines.", False],
         ])
+
+    def test_an_answered_request_leaves_at_once(self):
+        # c3's request was answered on the page a moment ago: what it said while asking waits for news, so the
+        # count drops at once; something new from it, or ten minutes, and it shows again
+        hushed = {**BUSY, "asks": [], "hushed": {"c3": NOW - 5}}
+        changed = {**hushed, "conversations": [talk("c3", "New menu", at=NOW - 1, says={"needs": "Which size?"})]}
+        later = {**hushed, "hushed": {"c3": NOW - 700}}
+        got = self.run_js([["list", hushed], ["list", changed], ["list", later]])
+        self.assertNotIn("c3", [row[1] for row in got[0]])
+        self.assertIn(["question", "c3", "New menu", "Which size?", False], got[1])
+        self.assertIn(["question", "c3", "New menu", "Which font?", False], got[2])
 
     def test_reads_together(self):
         one_read = {**BUSY, "asks": BUSY["asks"][:2]}

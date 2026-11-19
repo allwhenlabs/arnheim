@@ -108,9 +108,10 @@ export function leadUpdate(v) {
   const goals = (v.goals || []).filter((g) => g.status !== 'reached');
   if (goals.length) out.push(`${goals.length === 1 ? 'The goal is' : 'The goals are'} ${goals.slice(0, 2).map((g) => q(g.title)).join(' and ')}${goals.length > 2 ? `, and ${goals.length - 2} more` : ''}.`);
   const open = (v.tasks || []).filter((t) => t.status !== 'needs_you').length;
+  const asked = w.filter((i) => i.kind === 'task').length; // tasks named above as waiting on you: the rest are "more", so the sums agree
   const prs = (v.prs || []).length;
   const stale = (v.health?.problems || []).filter((p) => p.kind === 'pr').length;
-  const opened = [open && many(open, 'one task', 'tasks'), prs && many(prs, 'one pull request', 'pull requests')].filter(Boolean);
+  const opened = [open && (asked ? many(open, 'one more task', 'more tasks') : many(open, 'one task', 'tasks')), prs && many(prs, 'one pull request', 'pull requests')].filter(Boolean);
   if (opened.length) out.push(`Open: ${opened.join(' and ')}${stale ? `, ${stale === 1 ? 'one of them' : `${stale} of them`} waiting over a week` : ''}.`);
   if (v.spend) out.push(`Spent: ${v.spend.text}.`);
   return out.join(' ');
@@ -387,7 +388,7 @@ const BACK = /^(?:go\s+)?back(?: please)?[.!]?$/i;
 // Gives { href, label } for "take me to Lantern", "show me the work room on Tidepool", "home", "back", or null.
 export function goAsked(text, places) {
   const said = String(text || '').trim();
-  if (HOME.test(said)) return { href: '#/', label: 'the overview' };
+  if (HOME.test(said)) return { href: '#/', label: places?.find((p) => p.href === '#/')?.label || 'the overview' };
   if (BACK.test(said)) return { back: true, label: 'back' };
   const m = GO_TO.exec(said);
   if (!m) return null;

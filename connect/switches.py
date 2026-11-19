@@ -1,4 +1,4 @@
-"""The switches: each of Arnheim's features on or off, from the Company page (docs/connect.md, "Switches").
+"""The switches: each of Arnheim's features on or off, from Settings (docs/connect.md, "Switches").
 
 Each switch is kept in data/serve.json, beside the answer connect/setup.py keeps there (whether you answer your
 agents from the building), so it holds for every start. The hooks read it at each event, and serve.py as it
@@ -46,10 +46,10 @@ SWITCHES = (
     ("git", "running", "Look in project folders",
      "Every minute: each floor's changes not yet committed, and its open pull requests.", True),
     ("updates", "running", "Look for a newer Arnheim",
-     "Once a day, ask GitHub whether a newer Arnheim is out, and say so on the Overview. GitHub is sent the commit this copy "
+     "Once a day, ask GitHub whether a newer Arnheim is out, and say so in the Needs you list. GitHub is sent the commit this copy "
      "is at, and nothing else about you.", True),
     ("forecast", "page", "Your plan",
-     "The Overview's card that says when you'd reach your plan's limits. The receptionist still answers if you ask.", True),
+     "The card in Activity that says when you'd reach your plan's limits. The receptionist still answers if you ask.", True),
 )
 NAMES = tuple(s[0] for s in SWITCHES)
 DEFAULTS = {s[0]: s[4] for s in SWITCHES}
@@ -126,13 +126,13 @@ def restore(name, before, data):
 
 
 def listing(data, locked=None):
-    """The switches as the page shows them: [{name, group, label, about, on, set_by}], where set_by is the
+    """The switches as the page shows them: [{name, group, label, about, default, on, set_by}], where set_by is the
     word serve.py started with that holds this switch for now, or None when the page can change it."""
     locked = locked or {}
     kept = saved(data)
     rows = []
     for name, group, label, about, _ in SWITCHES:
         held = locked.get(name)
-        rows.append({"name": name, "group": group, "label": label, "about": about,
+        rows.append({"name": name, "group": group, "label": label, "about": about, "default": DEFAULTS[name],
                      "on": held[0] if held else on(name, data, kept), "set_by": held[1] if held else None})
     return rows

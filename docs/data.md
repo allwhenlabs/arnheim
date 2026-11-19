@@ -115,7 +115,7 @@ gets smaller.
 | --- | --- | --- |
 | `goals` | a floor | A flag for each of the floor's goals: red while open, gold once reached. |
 | `work` | a floor | A desk for each open task. It glows amber when the task needs you, and someone sits at it while it is being worked on. |
-| `conversations` | a floor | A seat for each conversation. Someone sits in it while it is working, and a light shows when there is something to check: blue, or green when its work is proven, red when its check failed. |
+| `conversations` | a floor | A seat for each conversation. Someone sits in it while it is working (lit blue), and its light turns red when its check failed. Finished work goes back to plain light; the list marks it. |
 | `code` | a floor | Open pull requests as books, and copies of the code with unsaved changes as crates. |
 | `company` | a floor | A filing cabinet each for Money, Legal, Subscriptions and Key dates. |
 | `websites`, `email`, `social`, `domains` | the lobby | A screen, pigeonhole, signboard or brass plaque for each entry in `presence` of that type. |
@@ -179,21 +179,21 @@ The sample also has a `story`, so that something always moves: a list of steps, 
 one every `every` seconds (6 if left out, and at least 2). Each step is
 `{ "line": "What happened", "change": [["tasks", "t1", { "status": "done" }]] }`, where each change
 names a list, an `id` in it and the fields to change. A real company leaves it out or empties it
-(`"story": []`), and the Live button, which pauses the story, only shows when there is one.
+(`"story": []`), and **Pause the sample**, in the ... menu at the top, only shows when there is one.
 
 The sample also has `asks`: made-up permission requests, so its first screen shows one with Allow and
 Deny. Each is `{ "id": "...", "key": "<a conversation's id>", "tool": "Bash", "what": "Bash: npm test", "ago": 240 }`.
 Answering one there runs nothing. Your own company's requests come from your agents, with control on,
 and `asks` in `data/work.json` is ignored.
 
-The sample also has `usage`: made-up readings of the plan's limits, so its Overview shows the "Your
+The sample also has `usage`: made-up readings of the plan's limits, so its Activity tab shows the "Your
 plan" card (docs/connect.md, step 18). It is `{ "sources": { "Claude Code": { "five_hour": [...],
 "seven_day": [...] }, "Codex": {...} } }`, each reading `{ "ago", "used", "resets_in" }`: seconds back
 from when the page opened, the percent used, and seconds until the limit starts again. Your own
 company's readings come from Claude Code and Codex, in `data/feeds/usage.json`, and `usage` in
 `data/work.json` is ignored.
 
-`data/serve.json` isn't the company's: it keeps the Company page's switches, each `true` or `false`,
+`data/serve.json` isn't the company's: it keeps the switches in Settings, each `true` or `false`,
 such as `{ "control": true, "handovers": false }`, with what you told `connect/setup.py` about control
 among them ([connect.md](connect.md), step 20).
 
@@ -231,10 +231,10 @@ is the fullest example. One plain object, keyed:
 
 | Field | What it is |
 | --- | --- |
-| `state` | The room's light: `quiet`, `working` (warm), `needs` (amber), `check` (blue) or `failed` (red). |
+| `state` | The room's light: `quiet`, `working` (blue), `needs` (amber), `failed` (red), or `check` and `ok` (finished, and finished and proven), which light like `quiet`. |
 | `big`, `detail` | The number and words on its label, such as `3` and `open, 1 needs you`. |
 | `sub` | Words for its label in place of `big` and `detail`. |
-| `working` | `true` while something in it is working, for the Working now scene. |
+| `working` | `true` while something in it is working, for the Working filter. |
 | `items` | What stands in it: `{ id, title, sub, href, mood }` each, where `mood` is a state. A goal adds `reached: true` once reached; a conversation `working` or `check`; a lobby entry `up` or `live`. |
 | `prs`, `copies` | A Code room's books (`{ id, title, sub, href, draft }`) and crates (`{ id, title, sub, href }`). |
 | `add` | A Goals room with no goals: `{ title, sub, href }` puts up a bare flagpole (a card, in the photo look) with a ring to stand in, to set the first goal there. Give `href` as `standHref(floor id)` from `src/goal-stand.js`, so the talk knows it. |

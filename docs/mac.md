@@ -32,7 +32,7 @@ few minutes. Arnheim starts by itself once the tools are in.
 Click the tower in the menu bar:
 
 - **Open Arnheim** opens the building in your browser. Opening the app again does the same.
-- **Connect my agents** opens the Overview, where the page shows how to connect Claude Code and Codex.
+- **Connect my agents** opens Settings, where the page shows how to connect Claude Code and Codex.
 - **Start at login** starts Arnheim each time you log in, quietly, without opening your browser. A tick
   shows it is on. macOS may ask you to allow it first, in System Settings, General, Login Items.
 - **Show the log** shows what Arnheim has said, in Console.

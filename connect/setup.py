@@ -890,7 +890,7 @@ def setup(args, say=print, control=None, page=False):
         raise Refused("Stopped before changing anything.")
 
     say("")
-    if serve_choice:  # read again: the Company page may have changed a switch while you were deciding
+    if serve_choice:  # read again: Settings may have changed a switch while you were deciding
         serve_choice = plan_saved(serve_choice["control"])
     changes = ([(company_path, company)] if company else []) + ([(settings_file, new_settings)] if new_settings else []) \
         + ([(codex_file, new_codex)] if new_codex else []) + ([(serve_file, serve_choice)] if serve_choice else [])

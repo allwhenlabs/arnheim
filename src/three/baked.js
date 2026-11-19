@@ -181,9 +181,8 @@ export function sunLight(sunPlan, { strength = 2.2, sky = 1.1 } = {}) {
 /* ---------- what comes from the data, room by room ---------- */
 
 const AMBER = new THREE.Color('#ffb347');
-const WARM = new THREE.Color('#ffe2bd');
-const COOL = new THREE.Color('#8fb4ff');
-const PROVEN = new THREE.Color('#6fe09a');
+const WARM = new THREE.Color('#ffe2bd'); // name plates
+const WORKING = new THREE.Color('#a8c6ff'); // at work: blue, as the building (photo-building.js); amber needs you, red failed
 const FAIL = new THREE.Color('#ff5a6e');
 const DARK = '#1f1d1b';
 
@@ -192,7 +191,7 @@ function standard(color, extra = {}) {
 }
 
 function screenMaterial(mood) {
-  const lit = mood === 'needs' ? AMBER : mood === 'working' ? WARM : mood === 'failed' ? FAIL : null;
+  const lit = mood === 'needs' ? AMBER : mood === 'working' ? WORKING : mood === 'failed' ? FAIL : null;
   return standard(lit || 0x0b0c0d, { emissive: lit || 0x000000, emissiveIntensity: lit ? 1.4 : 0, roughness: 0.08 });
 }
 
@@ -363,7 +362,7 @@ export const FILL = {
       chair.position.set(0, 0, 0.5);
       chair.rotation.y = Math.PI;
       unit.add(body, screen, chair, pool(1.9, 1.1, { opacity: 0.22 }), ...deskThings(kit, identity(task.id ?? task.title)));
-      if (task.mood === 'needs' || task.mood === 'working') unit.add(pool(1.7, 1.4, { color: task.mood === 'needs' ? AMBER : WARM, opacity: 0.3, add: true, y: 0.008 }));
+      if (task.mood === 'needs' || task.mood === 'working') unit.add(pool(1.7, 1.4, { color: task.mood === 'needs' ? AMBER : WORKING, opacity: 0.3, add: true, y: 0.008 }));
       let figure = null;
       if (task.mood === 'working' && ctx.seated) {
         const person = ctx.seated(identity(task.id ?? task.title), { seat: 0.5, pose: 'desk' });
@@ -404,10 +403,9 @@ export const FILL = {
         const person = ctx.seated?.(identity(c.id), { seat: 0.46, pose: 'chat' });
         if (person) { person.position.copy(seat.position); person.rotation.y = s.rot; g.add(person); }
       }
-      if (c.working) { const p = pool(1.3, 1.3, { color: WARM, opacity: 0.3, add: true }); p.position.x = s.at[0]; p.position.z = s.at[2]; g.add(p); }
-      if (c.check) { // blue: your turn; green: its work is proven; red: it failed its check (proof.js)
-        const lamp = c.proof === 'proven' ? PROVEN : c.proof === 'failed' ? FAIL : COOL;
-        const light = new THREE.Mesh(new THREE.SphereGeometry(0.04, 12, 8), standard(lamp, { emissive: lamp, emissiveIntensity: 2.4 }));
+      if (c.working) { const p = pool(1.3, 1.3, { color: WORKING, opacity: 0.3, add: true }); p.position.x = s.at[0]; p.position.z = s.at[2]; g.add(p); }
+      if (c.check && c.proof === 'failed') { // finished work stays plain (the list marks it); a failed check lights red (proof.js)
+        const light = new THREE.Mesh(new THREE.SphereGeometry(0.04, 12, 8), standard(FAIL, { emissive: FAIL, emissiveIntensity: 2.4 }));
         light.position.set(...along({ ...s, at: [s.at[0], 0, s.at[2]] }, 0, 0.98, -0.24));
         g.add(light);
       }

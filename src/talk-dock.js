@@ -56,6 +56,7 @@ export function createTalkDock({ talk, features, people, here, place, before = n
   opener.id = 'talk';
   opener.setAttribute('aria-expanded', 'false');
   opener.setAttribute('aria-controls', 'talk-dock');
+  opener.setAttribute('aria-label', 'Talk'); // a phone hides the word: the button keeps its name
   opener.append(icon('mic', 16), el('span', 'td-open-word', 'Talk'));
   opener.addEventListener('click', () => (isOpen ? close() : open()), { signal });
   place.insertBefore(opener, before);
@@ -78,7 +79,7 @@ export function createTalkDock({ talk, features, people, here, place, before = n
   const switches = el('div', 'td-switches');
   switches.hidden = true;
   const body = el('div', 'td-body');
-  const hint = el('p', 'td-hint', 'Try: "what needs me?", "how is Lantern doing?", "take me to the company page".');
+  const hint = el('p', 'td-hint', 'Try: "what needs me?", "how is Lantern doing?", "take me to Settings".');
   body.append(hint);
   dock.append(head, switches, body);
   document.body.append(dock);
@@ -150,7 +151,7 @@ export function createTalkDock({ talk, features, people, here, place, before = n
     });
     const more = typeof extra === 'function' ? extra() : null;
     switches.replaceChildren(el('h3', null, 'Talking'), ...rows,
-      el('p', 'td-note', 'Switching off Talk from any screen hides this button. It comes back from the Company page.'), ...(more ? [more] : []));
+      el('p', 'td-note', 'Switching off Talk from any screen hides this button. It comes back in Settings, under Talking.'), ...(more ? [more] : []));
   }
   function showSwitches(on) {
     switches.hidden = !on;

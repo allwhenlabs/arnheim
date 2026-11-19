@@ -23,7 +23,7 @@ stays free: it costs nothing more than your plan's own use.
   run jobs, sign in, send email, buy or pay, they still say no and offer to take it down as a task.
   "Remind me to ..." still adds a task, a tour still starts from the desk, and with control on the
   receptionist still starts agents. None of these go to Claude.
-- **Where the answers come from.** The receptionist's tab says they answer with Claude, through
+- **Where the answers come from.** The receptionist's page says they answer with Claude, through
   Claude Code on this computer.
 - **The rules when Claude can't answer.** If Claude Code is missing, not signed in, or too slow,
   they answer from the building's files as they do with the brain off.
@@ -31,7 +31,7 @@ stays free: it costs nothing more than your plan's own use.
 ## Switch it on
 
 You need Claude Code installed and signed in on the computer that runs `serve.py`: check that
-`claude` works in a terminal there. Then, on your own company's Company page under Switches, tick
+`claude` works in a terminal there. Then, in your own company's Settings, under Switches, tick
 **Receptionist and assistant think with Claude**. Or start Arnheim with `--brain`, which works with
 the made-up company too:
 
@@ -49,13 +49,13 @@ ARNHEIM_BRAIN_MODEL=haiku python3 serve.py --brain
 `ARNHEIM_CLAUDE` names another `claude` command, if yours isn't on the path. The brain works with
 `--control` too, but never with `--lan`.
 
-When it is on, Arnheim says so in its terminal ("The brain is on"), the receptionist's tab says
+When it is on, Arnheim says so in its terminal ("The brain is on"), the receptionist's page says
 they answer with Claude, and the receptionist greets you with "Ask me what's happening, or
 anything at all."
 
 ## Switch it off
 
-On your own company's Company page, under Switches, untick **Receptionist and assistant think with Claude**. It
+In your own company's Settings, under Switches, untick **Receptionist and assistant think with Claude**. It
 stops at once and stays off each time Arnheim starts. If you started Arnheim with `--brain`, that
 holds it on for that start: stop Arnheim (Ctrl-C in its terminal) and start it again without `--brain`:
 
@@ -113,7 +113,7 @@ the company's notes. With control on, the facts also give each conversation's id
 assistant can pass things on. They go whole with the first question, and after that only what
 changed.
 
-When you step up to the receptionist or the assistant on a walk, or open the receptionist's tab,
+When you step up to the receptionist or the assistant on a walk, or open the receptionist's page,
 the page reads them the facts straight away, so their first answer comes sooner. That is a short
 exchange with Claude of its own.
 

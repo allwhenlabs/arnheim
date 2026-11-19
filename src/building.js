@@ -39,21 +39,21 @@ const VIEWS = {
 
 const LAMP = {
   quiet: { color: '#ffc78f', level: 0.3 },
-  working: { color: '#ffb066', level: 1 },
+  working: { color: '#6f9dff', level: 1 },
   needs: { color: '#ff8a1e', level: 1.05 },
-  check: { color: '#8fb4ff', level: 0.75 },
-  ok: { color: '#7fdc9b', level: 0.75 }, // finished, and its work proven (proof.js)
+  check: { color: '#ffc78f', level: 0.3 }, // finished: plain, like a quiet room (the list marks it)
+  ok: { color: '#ffc78f', level: 0.3 }, // finished and proven (proof.js): plain; the list gives it a tick
   failed: { color: '#ff5a6e', level: 0.55 },
 };
 
 const THEMES = {
   dark: {
     sky: '#a49cf0', ground: '#1a1215', hemi: 0.46, sun: '#b9c0ff', sunI: 0.62, exposure: 1.08, lampK: 13, spotK: 15, bloom: 0.36, glass: '#3d5fae', glassI: 0.55,
-    bg: { all: ['#57392a', '#0a0e1a'], needs: ['#663a14', '#0b0d16'], working: ['#5e4522', '#0b0e18'] },
+    bg: { all: ['#57392a', '#0a0e1a'], needs: ['#663a14', '#0b0d16'], working: ['#1f3150', '#0b0e18'] },
   },
   light: {
     sky: '#ffffff', ground: '#c2b8a8', hemi: 1.75, sun: '#fff0da', sunI: 2.2, exposure: 0.92, lampK: 18, spotK: 20, bloom: 0.14, glass: '#bcd6ff', glassI: 0.7,
-    bg: { all: ['#f7ead8', '#dfe5ee'], needs: ['#fbdcb6', '#e8e3dc'], working: ['#fae9c4', '#e6e5df'] },
+    bg: { all: ['#f7ead8', '#dfe5ee'], needs: ['#fbdcb6', '#e8e3dc'], working: ['#dbe6f8', '#e3e6ec'] },
   },
 };
 
@@ -862,9 +862,10 @@ function createDrawnBuilding(canvas, org, { onPick, onHover, onStatus, onWalk, o
     if (!s) {
       for (const st of storeys) {
         if (st.part !== 0 || st.t > 0.05 || st.rooms.every((room) => room.gain < 0.5)) continue;
-        const lines = live[`floor:${st.id}`]?.lines || [];
+        const floor = live[`floor:${st.id}`] || {};
+        const lines = floor.lines || [];
         out.push({
-          key: `f:${st.id}`, title: st.label, sub: lines.map((l) => l.text).join(', '), kind: lines[0]?.kind || 'quiet', align: 'right',
+          key: `f:${st.id}`, title: st.label, sub: floor.label ?? lines.map((l) => l.text).join(', '), kind: floor.kind || lines[0]?.kind || 'quiet', align: 'right',
           at: [X0 - 0.2, st.y + H * 0.5, D / 2], rank: lines.some((l) => l.kind === 'needs') ? 0 : 1,
         });
       }
@@ -897,6 +898,7 @@ function createDrawnBuilding(canvas, org, { onPick, onHover, onStatus, onWalk, o
       if (!el) {
         el = document.createElement('div');
         el.append(document.createElement('b'), document.createElement('span'));
+        el.dataset.key = l.key; // f:<floor> or r:<floor>/<room>: a page can open what a tapped label names
         labels.append(el);
         labelEls.set(l.key, el);
       }

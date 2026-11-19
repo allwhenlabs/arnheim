@@ -14,12 +14,13 @@ follows along without a reload.
 
 - **A seat for each Claude Code conversation**, in the project's Conversations room, named after
   the conversation, or after the first line of your first message.
-- **Someone in the seat while Claude works**, and the room lit warm. They stay seated while it
+- **Someone in the seat while Claude works**, and the room lit blue. They stay seated while it
   waits for you.
 - **An amber desk when Claude needs you**: when it asks for your permission or asks you something,
   a desk in the Work room says what it is waiting for, the floor says "Needs you", and the receptionist lists it
   when you ask what needs you. It goes as soon as you answer.
-- **A blue light when Claude has finished** and it is your turn, until you reply.
+- **A mark in the list when Claude has finished** and it is your turn, until you reply: an empty ring, or a
+  tick once its work is proven (step 5). The room goes back to plain light, so only amber, blue and red stand out.
 - **Claude's task list as desks**: one for each task, someone at it while it is being done. Finished
   tasks leave. Newer Claude models keep no written task list unless you ask for one: start Claude
   Code with `CLAUDE_CODE_ENABLE_TODO_TOOLS=1 claude` to have it keep one.
@@ -75,11 +76,11 @@ folder goes back to the made-up company.
 
 It asks one more thing: whether you want to answer your agents from the building (step 4). Your
 answer is kept in `data/serve.json`, so `serve.py` starts with control on, or off, without being
-told; the Company page's Switches change it (step 20), and `python3 serve.py --no-control` leaves it off once. Last, on a Mac or Linux, it offers to start
+told; the Switches in Settings change it (step 20), and `python3 serve.py --no-control` leaves it off once. Last, on a Mac or Linux, it offers to start
 Arnheim now and each time you log in, so it keeps running when you close the window: that is
 `python3 serve.py --always`, and `python3 serve.py --always off` takes it out again.
 
-**From the page.** On the made-up company's Overview, on the computer that runs `serve.py` (never a
+**From the page.** On the made-up company's welcome card, or in Settings, on the computer that runs `serve.py` (never a
 phone, `--lan` or `--share`), **Connect my agents** does the same without a terminal. It lists the
 projects setup finds, each ticked, takes one more folder you type (it must be there, and not your home
 folder or a whole disk), says whether Claude Code and Codex are here, and asks the one question about
@@ -88,7 +89,7 @@ folders, with the same copies and words, and switches control on at once if you 
 offers to start Arnheim at login: that stays in the terminal. The page then shows your own company,
 what was done, and **Undo**, which takes the hooks and status line out as `--undo` does and moves
 `data/company.json` into `data/backups/`, so the page shows the made-up company again. Until your
-first conversation arrives, the Overview lists the folders to open Claude Code (or Codex) in.
+first conversation arrives, Needs you lists the folders to open Claude Code (or Codex) in.
 
 `serve.py` does step 3 itself. The steps below do the same by hand, and say what each piece does.
 
@@ -198,9 +199,9 @@ Optional, and off unless you switch it on. Then the person at this computer can:
   `git log` and the like). It must match word for word, one plain command: nothing chained, piped or
   redirected, no quotes or variables, nothing run outside the agent's sandbox or in the background,
   and nothing that names anything private or outside the project. A test or build runs the project's own code, as it does
-  each time you allow it once. Reads, searches, file changes and web requests always ask. The Company
-  page lists each one, with **Stop allowing**.
-- **See everything waiting on you in one list.** The Overview's "Waiting on you" puts together every
+  each time you allow it once. Reads, searches, file changes and web requests always ask. Settings
+  lists each one, with **Stop allowing**.
+- **See everything waiting on you in one list.** The Needs you tab puts together every
   agent's permission requests (the one whose wait runs out first at the top), the questions agents
   stopped to ask, your own tasks marked as needing you, and agents that finished in the last two
   hours and wait for your next step. Each has its answer beside it: Allow and Deny, or a box to reply.
@@ -240,7 +241,7 @@ python3 serve.py --control
 While control is on, a light in the top bar says **Answering here** while the page counts as in use
 (walking, or touched in the last two minutes), so a request waits there for you, and **Agents ask in
 their windows** when it doesn't. Press it to read why; touching the page makes it answer again. With
-**Desktop alerts when an agent needs you** on (on the Overview, or under Switches, for each browser
+**Desktop alerts when an agent needs you** on (on Needs you, or under Switches, for each browser
 apart), a permission request or a question that comes while the page is in the background brings one
 desktop alert, named after its floor; clicking it opens what is asked. Nothing that was already
 waiting when the page opened alerts, nor anything in the made-up company.
@@ -265,12 +266,12 @@ on that floor finishes a turn in which it changed files:
 `folder`, if the check names one), with no shell, as you, and is stopped after `timeout` seconds (ten
 minutes if left out). `label` is what the building calls it. `"check": ["npm", "test"]` is enough.
 
-Then each conversation that changed files says, in its seat's lamp, its room's light and its page in
-the panel, which of these is true:
+Then each conversation that changed files says, in the list, its room's light and its page in the
+panel, which of these is true:
 
-- **Proven**: the check passed after its last change. Its lamp turns green, and the room does too once
-  everything finished there is proven.
-- **Not proven**: the check failed, ran too long, or couldn't start. The lamp and the room turn red,
+- **Proven**: the check passed after its last change. The list gives it a green tick, and its seat and room stay
+  plain: nothing more to look at there.
+- **Not proven**: the check failed, ran too long, or couldn't start. A red lamp lights at its seat and the room turns red,
   and its page shows the check's last lines.
 - **Claimed**: it changed files and nothing has checked them since, perhaps because the floor has no
   check, or it changed more while the check ran.
@@ -288,7 +289,7 @@ conversation. Tell the receptionist, by typing or out loud:
 > Remember that we never push on a Friday.
 
 ("Remember: ...", "from now on, ..." and "going forward, ..." work too.) Or type it under "What every
-agent is told" in the Company tab, where Forget takes one out again. Saving needs control on (step 4).
+agent is told" in Settings, where Forget takes one out again. Saving needs control on (step 4).
 The decisions are kept in `data/memory.json`, which you can also edit by hand:
 
 ```json
@@ -311,7 +312,7 @@ Ask the receptionist "what have we decided?" to hear the memory. With the brain 
 Arnheim counts what each conversation spends each day, from Claude Code's own record of it: the new
 tokens of each reply, that is what Claude read fresh, wrote to its cache, and wrote back. Re-reading
 its cache is left out, since that is the same context again, and so is the work of its sub-agents.
-The Overview shows each floor's total for today under "Spent today", and each floor's page says it too.
+Activity shows each floor's total for today under "Spent today", and each floor's page says it too.
 
 Give a floor a budget for a day, in new tokens, or give the company one for every floor:
 
@@ -325,14 +326,14 @@ you asks whether they may go on. **Let them go on** (with control on) gives them
 today; or leave them, and the budget starts afresh tomorrow. Each conversation is stopped once for each
 limit it passes, so if you carry on with it in Claude Code yourself, it lets you.
 
-With control on, **Pause everyone** on the Overview, or in the lobby, stops every agent in the
+With control on, **Pause all** at the top of the page (on a phone, in the ... menu), or **Pause everyone** in the lobby, stops every agent in the
 company's folders at its next step, and a message you send one in Claude Code is turned away with a
-note saying so: send it again after you **Resume everyone**. Nothing is ever stopped in the middle of a step, and a message you send from the
+note saying so: send it again after you **Resume all**. Nothing is ever stopped in the middle of a step, and a message you send from the
 building is always handed over first.
 
 ## 8. Replay the day, ask its history, and the week
 
-When something went wrong, or you were away, drag the slider under "Replay the day" on the Overview
+When something went wrong, or you were away, drag the slider under "Replay the day" in Activity
 back through today. The building shows who was at work at that moment, who was waiting on you and who
 had finished, with a banner saying which time you are looking at, and the list beside it shows the
 last moments before then: when each conversation started work, which files it changed, what it asked
@@ -345,7 +346,7 @@ The building keeps a week of these days, and you can ask about them. Ask the rec
 happened yesterday?"**, **"What did the agents do on Tuesday?"**, **"What happened on Lantern this
 week?"** or **"Who changed reader/bookmark.js?"**, and they answer from the moments.
 
-**This week**, on the Overview, is the weekly report: each floor's conversations, the instructions you
+**This week**, in Activity, is the weekly report: each floor's conversations, the instructions you
 gave, the files they changed, how many finished or stopped, how long they waited on you, and what they
 spent. **Copy the report** copies it as plain text, for a message or a document. Ask **"How was the
 week?"** to hear it summed up.
@@ -417,8 +418,8 @@ hooks let another program hand them words; starting new work there starts Claude
 
 Two agents changing the same file can undo each other's work. When a conversation changes a file that
 another conversation on the same floor changed in the last two hours, Arnheim tells it at once, with the
-other's name, so it looks at their work before going on. The Overview lists the pair under "Two agents
-on the same files", and the floor says so. With control on, "Make ... wait" tells either one to wait
+other's name, so it looks at their work before going on. Needs you lists the pair under "Two agents
+on the same files", and the floor says "Two agents, one file". With control on, "Make ... wait" tells either one to wait
 until the other has finished. It needs only step 2's hooks, and sees changes made with Claude Code's
 own tools for editing files.
 
@@ -508,7 +509,7 @@ Or have your computer's own scheduler run `python3 /path/to/arnheim/connect/rout
 minutes (cron or launchd), which starts the routines that are due and gives back at once. Add
 `"feeds/routines.json"` to `feeds` in `company.json` too.
 
-The Overview lists each routine, when it runs and what its last run came to. You only hear about one
+Activity lists each routine, when it runs and what its last run came to. You only hear about one
 when it needs you: a command that fails or runs too long, or an agent that doesn't end all clear, puts
 a task in "Waiting on you", which goes when a later run is all clear. With control on, "Run it now"
 and "Run it again" run one at once. A new routine waits for its first time after Arnheim first sees
@@ -536,8 +537,8 @@ It has a warning while:
   handed what the old one was asked, the files it changed and its last words; stop the old one once
   the new one has it.
 
-The floor shows a chip ("One thing to fix", "A pull request waiting"), its page
-lists each thing in words, and the Overview's "Project health" card, after "Waiting on you", puts
+The floor's label says "Something to fix" (or how many), its page
+lists each thing in words, and the "Project health" card in Activity puts
 every floor together. With control on, each thing has "Send an agent", which starts one on the floor
 with a brief that says what is wrong and asks it to fix it, or, for a pull request, to say what it
 needs without merging or closing it. Ask the receptionist "is anything broken?" or "how are the
@@ -549,7 +550,7 @@ The receptionist tells you what happened since you were last here: how many agen
 which finished and whether their work was proven, which were stopped, which routines ran, and what
 waits on you now. On a walk they greet you with it the first time you come to the desk, out loud
 with Voice on. Ask "brief me", "what did I miss?" or "what happened overnight?" to hear it again.
-The Overview shows it too, as "Since you were last here". Your last visit is kept in that browser,
+Needs you shows it too, as "Since you were last here". Your last visit is kept in that browser,
 and the brief never reaches back more than a day.
 
 To have it on your phone, add "pings" to company.json, and Arnheim sends the brief at the first time
@@ -623,7 +624,7 @@ that covers what it is about to do. In the building they stand on the Library's 
 
 Claude Code and Codex each stop your agents when your plan's limit for the next five hours, or for
 the week, is used up, and the usual complaint is reaching it without warning. Each says how much is
-used and when it starts again, and Arnheim keeps a few hours of those readings. The Overview's "Your
+used and when it starts again, and Arnheim keeps a few hours of those readings. Activity's "Your
 plan" card shows each limit, how much is used, and when you would reach it at this pace if that comes
 before it starts again: "At this pace you reach it around 15:40, before it starts again at 17:00." A
 five-hour limit goes by the last hour's pace, a weekly one by its average since the week began. When
@@ -655,7 +656,7 @@ its own work back.
 
 ## 20. Switches: every feature on or off
 
-The Company page's **Switches** turn each feature on or off, at once and for every start. They are
+The **Switches** in Settings turn each feature on or off, at once and for every start. They are
 only on the page on the computer that runs `serve.py`, never on a phone or another computer, and a
 change needs that page's own token.
 
@@ -673,7 +674,7 @@ change needs that page's own token.
 
 **Look for a newer Arnheim** is on unless you switch it off. When Arnheim's folder is a git checkout
 of github.com/allwhenlabs/arnheim, `serve.py` asks GitHub as it starts and once a day whether `main`
-has changes this copy hasn't, sending only this copy's commit. If it has, this computer's Overview says
+has changes this copy hasn't, sending only this copy's commit. If it has, this computer's Needs you tab says
 "A newer Arnheim is out", with how many changes, and **Update now**: `serve.py` runs `git pull
 --ff-only` in its own folder and starts itself again with the same words, and the page reloads. It says
 why when it can't, such as changes of your own in the folder. By hand: `git pull` in Arnheim's folder,

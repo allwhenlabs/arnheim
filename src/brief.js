@@ -1,5 +1,5 @@
 // The brief: what happened since you were last here, and what waits on you now. The receptionist greets you
-// with it on a walk and says it when asked, and the Overview shows it. connect/ping.py sends the same kind of
+// with it on a walk and says it when asked, and Needs you shows it. connect/ping.py sends the same kind of
 // bundle to your phone. It comes from what the building already keeps: the day's moments (replay.js), each
 // conversation's proof and review, the routines' last runs, and the one list of what waits on you (queue.js).
 // Plain modules only, so tests/test_brief_words.py can run it under Node.
@@ -57,7 +57,7 @@ export function sinceSaid(since, now = Date.now() / 1000) {
 const n = (k, one, many) => (k === 1 ? `1 ${one}` : `${k} ${many}`);
 const list = (parts) => (parts.length < 2 ? parts.join('') : `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`);
 
-// The brief in words, for the receptionist and the Overview.
+// The brief in words, for the receptionist and Needs you.
 export function sayBrief(b, label = (p) => p, now = Date.now() / 1000) {
   const from = sinceSaid(b.since, now);
   const on = (x) => `"${x.title}"${x.project ? ` on ${label(x.project)}` : ''}`;

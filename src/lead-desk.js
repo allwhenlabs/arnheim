@@ -301,7 +301,7 @@ export function createLeadDesk(env) {
     const asked = goAsked(text, env.places());
     if (!asked) return null;
     if (asked.back) { env.back(); return 'Going back.'; }
-    if (asked.unknown) return `I don't know a place called "${asked.unknown}". Say a floor's name, such as ${env.floors()[0]?.label || 'a project'}, or "the company page".`;
+    if (asked.unknown) return `I don't know a place called "${asked.unknown}". Say a floor's name, such as ${env.floors()[0]?.label || 'a project'}, or "Activity".`;
     env.go(asked.href);
     return `Here's ${asked.label}.`;
   }

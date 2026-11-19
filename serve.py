@@ -204,7 +204,7 @@ input{width:100%;box-sizing:border-box;font:600 22px/1.2 ui-monospace,Menlo,mono
 button{margin-top:16px;width:100%;font:600 17px/1 inherit;padding:14px;border-radius:12px;border:0;background:#eceef3;color:#0d0f13}
 .no{color:#ff9aac;font-weight:600}</style></head>
 <body><main><h1>Pair this phone with Arnheim</h1>
-<p>On your computer, open Arnheim's Company page and choose Pair a phone. Type the code it shows here.</p>
+<p>On your computer, open Arnheim's Settings and choose Pair a phone. Type the code it shows here.</p>
 {error}<form method="post" action="/remote/pair"><label for="code">The code from your computer</label>
 <input id="code" name="code" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" maxlength="12" required autofocus>
 <button type="submit">Pair</button></form></main></body></html>"""
@@ -358,7 +358,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         control = self.server.control
         if control is None:
             off = name == "token" and method == "GET"
-            code, data = (200, {"on": False}) if off else (404, {"error": "Control is off. Switch it on under Switches on the Company page, or start Arnheim with --control."})
+            code, data = (200, {"on": False}) if off else (404, {"error": "Control is off. Switch it on in Settings, under Switches, or start Arnheim with --control."})
             kind, data, extra = "application/json; charset=utf-8", json.dumps(data).encode(), {}
         elif not self.here() and not self.phone_controls():
             if self.phone() is not None and name == "token" and method == "GET":
@@ -391,7 +391,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         brain = self.server.brain
         if brain is None:
             off = name == "status" and method == "GET"
-            code, data = (200, {"on": False}) if off else (404, {"error": "The brain is off. Switch it on under Switches on the Company page, or start Arnheim with --brain."})
+            code, data = (200, {"on": False}) if off else (404, {"error": "The brain is off. Switch it on in Settings, under Switches, or start Arnheim with --brain."})
             kind, data, extra = "application/json; charset=utf-8", json.dumps(data).encode(), {}
         elif not self.here() and self.phone() is None:
             code, kind, data, extra = 403, "application/json; charset=utf-8", b'{"error": "Only on this computer, or a phone paired with it."}', {}
@@ -697,7 +697,7 @@ class Refused(Exception):
 
 
 class Switchboard:
-    """The switches as this start has them (connect/switches.py): what you chose on the Company page, unless a word
+    """The switches as this start has them (connect/switches.py): what you chose in Settings, unless a word
     given to serve.py as it started holds one for this start. A change works at once: control and the brain are
     made or put away here, and the minute jobs ask before each run."""
 
@@ -813,6 +813,17 @@ SETUP_MOST_FOLDERS = 50
 CLAUDE_CODE_URL = "https://claude.com/claude-code"
 
 
+def home_said(lines, tool):
+    """What setup did, as the page shows it: ~ for the home folder, as a person would write it (and as a screenshot of
+    it should say), without the computer's user name. Only for showing: the files themselves keep whole paths."""
+    mine = tool.home()
+    out = []
+    for line in lines:
+        if line.strip():
+            out.append(line.replace(mine + os.sep, "~" + os.sep) if mine and mine != os.sep else line)
+    return out
+
+
 def setup_tool(data):
     """connect/setup.py, writing to this server's data folder (setup's own is the same unless ARNHEIM_DATA says
     otherwise). Called with SETUP_LOCK held."""
@@ -890,7 +901,7 @@ def setup_connect(given, data, board=None):
         try:
             tool.setup(args, say=lines.append, control=control, page=True)
         except tool.Refused as why:
-            return 409, {"error": str(why), "lines": [line for line in lines if line.strip()]}
+            return 409, {"error": str(why), "lines": home_said(lines, tool)}
         kept = switches.saved(data).get("control")
     note = None
     if board is not None and isinstance(kept, bool) and (board.server is None or (board.server.control is not None) != kept):
@@ -898,7 +909,7 @@ def setup_connect(given, data, board=None):
             board.switch("control", kept)
         except Refused as why:
             note = str(why)
-    return 200, {"lines": [line for line in lines if line.strip()], "control": kept if isinstance(kept, bool) else None,
+    return 200, {"lines": home_said(lines, connect_setup), "control": kept if isinstance(kept, bool) else None,
                  **({"note": note} if note else {})}
 
 
@@ -911,7 +922,7 @@ def setup_undo(data):
         try:
             tool.undo(say=lines.append, page=True)
         except tool.Refused as why:
-            return 409, {"error": str(why), "lines": lines}
+            return 409, {"error": str(why), "lines": home_said(lines, tool)}
         company = os.path.join(data, "company.json")
         if os.path.isfile(company):
             backups = os.path.join(data, "backups")
@@ -924,10 +935,10 @@ def setup_undo(data):
                 os.makedirs(backups, exist_ok=True)
                 os.replace(company, aside)
             except OSError as error:
-                return 409, {"error": f"Your building, data/company.json, couldn't be moved aside: {error.strerror or error}.", "lines": lines}
+                return 409, {"error": f"Your building, data/company.json, couldn't be moved aside: {error.strerror or error}.", "lines": home_said(lines, tool)}
             lines.append(f"Moved your building to {tool.shown(aside)}, so the page shows the made-up company again. "
                          "Move it back to data/company.json to have it again.")
-    return 200, {"lines": [line for line in lines if line.strip()]}
+    return 200, {"lines": home_said(lines, connect_setup)}
 
 
 # ---------- a newer Arnheim (the "Look for a newer Arnheim" switch) ----------
@@ -1030,7 +1041,7 @@ def check_newer(server, board, last, ask=newer_arnheim, now=None, every=86400):
 
 
 def look_for_newer(server, board, every=3600):
-    """At the start and once a day: whether GitHub has a newer Arnheim, for the Overview's notice."""
+    """At the start and once a day: whether GitHub has a newer Arnheim, for the Needs you notice."""
     last = 0
     while True:
         try:
@@ -1042,7 +1053,7 @@ def look_for_newer(server, board, every=3600):
 
 def update_now(server, run=subprocess.run):
     """Update now: `git pull --ff-only <Arnheim's own remote> main` in this folder, only on main and only while the
-    Overview's notice says GitHub has a newer one. Gives (whether it worked, what to say)."""
+    the Needs you notice says GitHub has a newer one. Gives (whether it worked, what to say)."""
     if not server.update:
         return False, "There is no newer Arnheim to update to just now."
     control = server.control
@@ -1121,7 +1132,7 @@ def saved():
 
 
 def control_wanted(args, away, board=None):
-    """(whether control is on, whether you chose it in setup or on the Company page): --control, or your choice in
+    """(whether control is on, whether you chose it in setup or in Settings): --control, or your choice in
     data/serve.json unless --no-control, and never on the network (away is --lan or --share, or None)."""
     board = board or Switchboard(args, away)
     return board.on("control"), saved().get("control") is True and not args.no_control
@@ -1482,7 +1493,7 @@ def main():
     def make_brain(control):
         return Brain(tell=lambda why: print(f"The brain had no answer: {why}", file=sys.stderr, flush=True), control=control)
 
-    board = Switchboard(args, away, make_brain)  # the Company page's switches, and the words given here (connect/switches.py)
+    board = Switchboard(args, away, make_brain)  # the switches in Settings, and the words given here (connect/switches.py)
     control_on, chose = control_wanted(args, away, board)
     try:
         remote = Remote(args.remote, os.path.join(ROOT, "data")) if args.remote else None
@@ -1496,7 +1507,7 @@ def main():
         except ValueError as error:
             if args.brain:
                 sys.exit(str(error))
-            brain_trouble = str(error)  # switched on on the Company page, but it can't start here now
+            brain_trouble = str(error)  # switched on in Settings, but it can't start here now
     where = ("0.0.0.0" if args.lan or args.share else "127.0.0.1", args.port)
     login_copy = os.environ.get("ARNHEIM_ALWAYS") == "1"  # the copy that starts at login (connect/always.py)
     server = None
@@ -1543,11 +1554,11 @@ def main():
     if remote:
         print(f"Phones are on: a phone paired with this computer can open https://{remote.name}/ from anywhere your "
               f"private way in reaches. With Tailscale, run once: tailscale serve --bg {args.port}. To pair a phone, open "
-              "the Company page here and choose Pair a phone (docs/phone.md).", flush=True)
+              "Settings here and choose Pair a phone (docs/phone.md).", flush=True)
     if control_on:
         print("Control is on: the page on this computer can talk to your Claude Code and Codex agents, answer their "
               "permission requests, and start and stop them (docs/connect.md)."
-              + ("" if args.control else " Switch it off on the Company page, or start with --no-control for once."), flush=True)
+              + ("" if args.control else " Switch it off in Settings, or start with --no-control for once."), flush=True)
     elif chose and away:
         print(f"Control stays off with {away}: it works only on this computer.", flush=True)
     if brain_trouble:
@@ -1569,7 +1580,7 @@ def main():
               "founder's notes. It stays the same each time; python3 serve.py --share --new-link makes a new one and ends this one.", flush=True)
     for line in company_note():
         print(line, flush=True)
-    # The minute jobs run while their switch is on, and look again each minute, so the Company page's switches work at once.
+    # The minute jobs run while their switch is on, and look again each minute, so the switches in Settings work at once.
     threading.Thread(target=every_minute, args=("projects.py", lambda: board.on("git") and floors_have_folders()), daemon=True).start()
     threading.Thread(target=every_minute, args=("routines.py", lambda: board.on("routines")), daemon=True).start()
     threading.Thread(target=every_minute, args=("ping.py", lambda: board.on("pings")), daemon=True).start()
@@ -1584,7 +1595,7 @@ def main():
         print("Pings are on: the morning brief, and decisions that wait on you, go to your phone at the times "
               "\"pings\" in data/company.json gives (docs/connect.md).", flush=True)
     if os.path.isfile(os.path.join(ROOT, "data", "company.json")):  # your own company: the made-up one has no Switches
-        print("Each feature can be switched on or off on the Company page, under Switches.", flush=True)
+        print("Each feature can be switched on or off in Settings, under Switches.", flush=True)
     print("Ctrl-C stops it.", flush=True)
     signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))  # stopped by its process id: tidy up as for Ctrl-C
     try:

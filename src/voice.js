@@ -68,6 +68,15 @@ export function voiceWanted() {
 
 const remember = (value) => { try { localStorage.setItem(SAVED, value); } catch { /* a private window */ } };
 const recalled = () => { try { return localStorage.getItem(SAVED); } catch { return null; } };
+
+// Whether the voice is on in this browser, as the Voice button left it, and a way to switch it from elsewhere
+// (Settings' "Speak out loud"): a Voice button already on the page follows at once, and the page hears of each change.
+const VOICE_EVENT = 'arnheim-voice';
+export const voiceSaved = () => voiceWanted() && recalled() === 'on';
+export function setVoiceSaved(value) {
+  remember(value ? 'on' : 'off');
+  window.dispatchEvent(new CustomEvent(VOICE_EVENT, { detail: !!value }));
+}
 const keyOf = (who) => (who ? who.href || who.title || '' : null);
 
 // Words as they are said: no web addresses read out letter by letter, no markup.
@@ -192,6 +201,7 @@ export function createVoice({ hud, card, ctx, el, button, signal, early = true, 
   toggle.classList.add('aw-voice');
   toggle.hidden = !talk || !allowed;
   hud.firstElementChild?.after(toggle);
+  window.addEventListener(VOICE_EVENT, (event) => { if (!!event.detail !== on) setOn(event.detail); }, { signal });
   const box = el('div', 'aw-talk');
   const said = el('ol', 'aw-said');
   const line = el('p', 'aw-mic');
@@ -226,8 +236,12 @@ export function createVoice({ hud, card, ctx, el, button, signal, early = true, 
 
   function drawToggle() {
     // The words, or on a narrow screen a microphone (walk.css); aria-pressed says which.
-    toggle.replaceChildren(icon(on ? 'mic' : 'mic-off', 18), el('span', 'aw-voice-word', on ? 'Voice on' : 'Voice off'));
+    // In Talk a small switch beside the words shows it is a state you flip (talk-dock.css).
+    const knob = el('span', 'aw-knob');
+    knob.setAttribute('aria-hidden', 'true');
+    toggle.replaceChildren(icon(on ? 'mic' : 'mic-off', 18), knob, el('span', 'aw-voice-word', on ? 'Voice on' : 'Voice off'));
     toggle.setAttribute('aria-pressed', String(on));
+    toggle.title = on ? 'Voice is on. Press to turn it off.' : 'Voice is off. Press to turn it on.';
   }
 
   // A page's own short name for someone; its slip never stops the walk.
@@ -241,7 +255,7 @@ export function createVoice({ hud, card, ctx, el, button, signal, early = true, 
     let text;
     let state = mode;
     if (!allowed) { text = 'Type to talk. This device keeps the voice off.'; state = 'off'; }
-    else if (!on) { text = 'Type to talk, or turn the voice on.'; state = 'off'; }
+    else if (!on) { text = 'Voice off: nothing is said out loud. Type to talk, or turn the voice on.'; state = 'off'; }
     else if (audio && audio.state !== 'running') { text = 'Tap anywhere to wake the voice.'; state = 'off'; } // a phone's sound, asleep after the screen locked
     else if (!server || server.state === 'starting' || server.state === 'off') { text = 'Waking the voice'; state = 'thinking'; }
     else if (!server.say) { text = 'Type to talk. To give this computer a voice, run python3 serve.py --set-up-voice'; state = 'off'; }
@@ -352,6 +366,7 @@ export function createVoice({ hud, card, ctx, el, button, signal, early = true, 
   function setOn(value) {
     on = !!value && allowed;
     remember(on ? 'on' : 'off');
+    window.dispatchEvent(new CustomEvent(VOICE_EVENT, { detail: on }));
     drawToggle();
     if (on) {
       arm();

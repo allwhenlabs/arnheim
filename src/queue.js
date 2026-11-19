@@ -20,6 +20,7 @@ const RANK = { permission: 0, question: 1, task: 2, turn: 3 };
 // kept: "Not yet. Please add the key." and "No, but should it be gold?" still ask.
 const NOTHING = /^\s*(?:nothing(?:\s+yet)?|not\s+yet|none)\s*[.!]?\s*$/i;
 const asksNothing = (text) => NOTHING.test(text);
+const HUSH = 600; // seconds: how long an answered request's conversation waits to say something new before it shows again
 const RECENT = 2 * 3600; // seconds: an agent that finished longer ago than this is no longer waiting on you
 
 // What a permission is for, in plain words: "to read notes.md", "to run npm test".
@@ -41,7 +42,7 @@ const seconds = (at) => {
 // asks and runs: the permissions waiting and the agents started from the page (control state), conversations
 // and tasks: as the page reads them (feeds included). A run names an agent whose conversation isn't in a feed
 // yet. Each item: { kind, id, key?, title, project?, what, at, until?, read?, ask?, task?, proof?, review? }.
-export function waitingOnYou({ asks = [], runs = [], conversations = [], tasks = [], now = Date.now() / 1000, recent = RECENT } = {}) {
+export function waitingOnYou({ asks = [], runs = [], conversations = [], tasks = [], now = Date.now() / 1000, recent = RECENT, hushed = new Map() } = {}) {
   const items = [];
   const talks = new Map(conversations.filter((c) => c && c.id).map((c) => [c.id, c]));
   const started = new Map(runs.filter((r) => r && r.key).map((r) => [r.key, r]));
@@ -55,6 +56,9 @@ export function waitingOnYou({ asks = [], runs = [], conversations = [], tasks =
   }
   for (const c of talks.values()) {
     if (asking.has(c.id) || c.working) continue;
+    // its request was just answered here: what it said while asking is that request, until it says something new
+    const hush = hushed.get(c.id);
+    if (hush && Math.max(seconds(c.at), seconds(c.stopped)) <= hush && now - hush < HUSH) continue;
     if (c.says?.needs && !asksNothing(c.says.needs)) {
       items.push({ kind: 'question', id: `talk:${c.id}`, key: c.id, title: c.title, project: c.project, what: c.says.needs, at: seconds(c.at) });
     } else if (c.check && now - seconds(c.stopped || c.at) < recent) {

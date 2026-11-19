@@ -172,7 +172,8 @@ class PageTest(unittest.TestCase):
                 self.assertIn(f'id="{target[1:]}"', page, target)
         self.assertIn("project", steps[0]["title"])
         self.assertIn("Amber", steps[1]["title"])
-        self.assertIn("Overview", steps[1]["text"])
+        self.assertIn("Needs you", steps[1]["text"])
+        self.assertIn("Connect my agents", steps[2]["text"])  # the last step says where your own projects come from
         self.assertIn("Walk", steps[2]["title"])
         self.assertEqual(self.r["wanted"], [True, False, False, False, False])
         place = self.r["place"]

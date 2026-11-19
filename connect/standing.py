@@ -5,7 +5,7 @@ sees each request from every agent, Claude Code and Codex alike, and each one yo
 building or in the agent's own window (the agent then went on and ran it). Once you have allowed the
 same command on a floor twice, the next request for it offers "Always allow here": one press allows it
 now, and from then on Arnheim's hook allows that exact command on that floor for every agent, without
-asking you. The Company page lists them, each with "Stop allowing".
+asking you. Settings lists them, each with "Stop allowing".
 
 Only a command from a short list can stand: running the project's tests, checks and builds (npm test,
 pytest, cargo test, go test, make test and the like), and looking without changing anything (ls,
@@ -237,7 +237,7 @@ def add(data, project, tool, command):
 
 
 def used(data, rid):
-    """A standing allow just allowed a request: how often, and when last, for the Company page."""
+    """A standing allow just allowed a request: how often, and when last, for Settings."""
     with _Locked(data):
         kept = rows(data)
         row = next((r for r in kept if r.get("id") == rid), None)

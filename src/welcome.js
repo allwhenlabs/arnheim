@@ -66,5 +66,5 @@ export function answeringWords(on, using) {
       why: 'Nobody has touched this page for two minutes, so each agent asks in its own window, as usual. Touch the page, or walk, and requests wait here again.' };
 }
 
-// The Overview's notice of a newer Arnheim, from how many changes GitHub's main has that this copy hasn't.
+// The Needs you notice of a newer Arnheim, from how many changes GitHub's main has that this copy hasn't.
 export const updateLine = (n) => `A newer Arnheim is out (${n} ${n === 1 ? 'change' : 'changes'}).`;

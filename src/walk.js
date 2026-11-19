@@ -213,8 +213,8 @@ export function createWalk(ctx) {
   card.append(cardText, openButton);
   // How to walk, said for the hands in use; the burn is only mentioned where it plays (not with reduced motion).
   const helpText = () => (coarse
-    ? `Walk with the stick and drag to look. Tap the floor to go there, or someone to walk over and talk. The lift is where you arrive, and ▲ ▼ at the top take it from anywhere.${still() ? '' : ' Double-tap to burn this floor and rebuild it.'} ? brings this back.`
-    : `WASD or the arrow keys to walk, Shift to hurry, drag to look. Click the floor to go there, or someone to walk over and talk. The lift is where you arrive, and ▲ ▼ at the top (or Page Up and Page Down) take it from anywhere.${still() ? '' : ' Double-click to burn this floor and rebuild it.'} Esc to leave, ? brings this back.`);
+    ? `Walk with the stick and drag to look. Tap the floor to go there, or someone to walk over and talk. The lift is where you arrive, and ▲ ▼ at the top take it from anywhere.${still() ? '' : ' Double-tap to rebuild this floor.'} ? brings this back.`
+    : `WASD or the arrow keys to walk, Shift to hurry, drag to look. Click the floor to go there, or someone to walk over and talk. The lift is where you arrive, and ▲ ▼ at the top (or Page Up and Page Down) take it from anywhere.${still() ? '' : ' Double-click to rebuild this floor.'} Esc to leave, ? brings this back.`);
   const help = el('p', 'aw-help', helpText());
   const stickEl = el('div', 'aw-stick');
   const knob = el('span');
