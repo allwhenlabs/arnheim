@@ -1185,7 +1185,8 @@ def newer_arnheim(run=subprocess.run, opener=urllib.request.urlopen):
         with opener(request, timeout=20) as reply:
             said = json.loads(reply.read(1 << 22).decode("utf-8"))
     except urllib.error.HTTPError as error:
-        error.close()
+        if error.fp is not None:  # an answer with no body has nothing to close, and Python 3.9 fails trying
+            error.close()
         return None
     except (OSError, ValueError, http.client.HTTPException):
         return None
@@ -1576,8 +1577,8 @@ def fetch_pictures(say, folder=None, url=None, size=None, sha256=None, opener=ur
     except (OSError, http.client.HTTPException, zipfile.BadZipFile) as error:
         if tty and got:
             print(flush=True)
-        if isinstance(error, urllib.error.HTTPError):
-            error.close()  # GitHub's answer, unread
+        if isinstance(error, urllib.error.HTTPError) and error.fp is not None:
+            error.close()  # GitHub's answer, unread (one with no body has nothing to close, and Python 3.9 fails trying)
         return download_trouble(error)
     finally:
         if part and os.path.exists(part):
