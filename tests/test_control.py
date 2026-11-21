@@ -133,10 +133,14 @@ class ControlTest(unittest.TestCase):
         self.hook(hook_event_name="UserPromptSubmit", prompt="Fix the bookmark")
         code, sent = self.call("POST", "say", {"key": KEY, "text": "Use the blue button"})
         self.assertEqual((code, sent["sent"]), (200, "queued"))
-        out = self.hook(hook_event_name="PostToolUse", tool_name="Read", tool_input={})
-        self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "PostToolUse")
+        # Before its next step, as added context: after a step it would sit in the tool's output, which Claude Code
+        # rightly won't take instructions from (seen with the real Claude Code, 21 Nov).
+        self.assertIsNone(self.hook(hook_event_name="PostToolUse", tool_name="Read", tool_input={}))
+        out = self.hook(hook_event_name="PreToolUse", tool_name="Read", tool_input={})
+        self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "PreToolUse")
         self.assertIn('"Use the blue button"', out["hookSpecificOutput"]["additionalContext"])
-        self.assertIsNone(self.hook(hook_event_name="PostToolUse", tool_name="Read", tool_input={}))  # handed over once
+        self.assertNotIn("permissionDecision", out["hookSpecificOutput"])  # the step itself goes ahead
+        self.assertIsNone(self.hook(hook_event_name="PreToolUse", tool_name="Read", tool_input={}))  # handed over once
         self.assertEqual(self.talk()["heard"], sent["id"])
         self.assertIsNone(self.hook(hook_event_name="Stop", last_assistant_message="Done: the button is blue now. Anything else?"))
         talk = self.talk()

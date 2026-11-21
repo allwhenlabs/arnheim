@@ -4,7 +4,7 @@
 // sample's work moves on a loop (the story at the end of its work.json), so there is always
 // something to see. Nothing is saved anywhere: a reload reads the files again.
 import { createBrain } from './brain.js';
-import { agentControls, agentQuick, agentReply, createControl, deskControls, deskStart } from './control.js';
+import { agentControls, agentQuick, createControl, deskControls, deskStart } from './control.js';
 import { FEATURES, createFeatures } from './features.js';
 import { createTalkDock } from './talk-dock.js';
 import { hasLead, isLeadHref, leadUpdate, voiceAnswer } from './leads.js';
@@ -36,6 +36,7 @@ import { wellChanges, wellLine, wellMerge, wellMissing, wellNotes, wellRequest, 
 import { TOUR as TOUR_SEEN, createTour, tourWanted } from './tour.js';
 import { createAlerts, freshAlerts } from './alerts.js';
 import { setVoiceSaved, voiceSaved, voiceWanted } from './voice.js';
+import { createBeside } from './beside-page.js';
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -69,7 +70,9 @@ let dir = 'sample'; // where they came from: data (your own company) or sample (
 let firstRun = false; // no data/company.json yet: Needs you and Settings show the one step to see your own work
 let feeds = []; // files in data/ that tools keep up to date (docs/connect.md)
 // Control of your Claude Code agents, with serve.py --control and your own company (control.js).
-const control = createControl({ busy: () => !!building?.walking?.() });
+// A paired phone asks every five seconds, so its twenty requests a minute leave room to look at an agent's screen
+// and to send it something (docs/connect.md, "Work beside your agents").
+const control = createControl({ busy: () => !!building?.walking?.(), every: ['127.0.0.1', 'localhost', '[::1]', '::1'].includes(location.hostname) ? 3000 : 5000 });
 // The receptionist's and the assistant's brain, with serve.py --brain: they answer with Claude,
 // through Claude Code on the computer that serves the page (brain.js). Off otherwise.
 const brain = createBrain();
@@ -84,6 +87,50 @@ const pause = (ms) => new Promise((done) => setTimeout(done, ms));
 const alerts = createAlerts({ win: window, storage: (() => { try { return window.localStorage; } catch { return null; } })() });
 const tour = createTour();
 let dock = null; // the Talk panel (talk-dock.js)
+// Working beside your agents (beside-page.js): each agent's live screen, its replies straight away, its questions,
+// reviewing together and holding it. Your own company's screens on this computer, a phone's through control while
+// it may control agents, the made-up company's own made-up agent, and nothing anywhere else.
+const beside = createBeside({
+  control,
+  where: () => {
+    if (!org || !work) return 'none';
+    if (madeUp() || dir !== 'data') return 'sample';
+    if (fromAway()) return phoneMe?.phone && phoneMe?.control && control.on ? 'phone' : 'none';
+    return 'here';
+  },
+  // each part's switch: what control says (a phone can't read /switches), else this computer's switches
+  part: (name) => {
+    const parts = control.on ? control.parts() : null;
+    return parts && typeof parts[name] === 'boolean' ? parts[name] : switchOn(name, true);
+  },
+  convo: (key) => convoNow(key) || (control.run(key) ? { id: key, ...control.run(key) } : null),
+  label: (p) => floorLabel(p),
+  reviewer: (p) => !!reviewerOf(floorOf(p)),
+  reviewSaid: (c) => (c ? reviewSaid(c) : null),
+  href: (key) => { const c = convoNow(key); return c ? convoHref(c) : null; },
+  done: (promise, said) => controlDone(Promise.resolve(promise), said),
+  changed: () => { if (route.item) render(); },
+  talkTo: (key) => { const c = convoNow(key); if (c && dock) dock.open(agentWho(c)); },
+  // Walk me through it, pressed on its page: in Talk, so its answer is said out loud as well as shown
+  walkAloud: (key) => {
+    const c = convoNow(key);
+    if (!c || !dock || !features.get('talk') || walkOn()) return false;
+    dock.open(agentWho(c));
+    dock.voice.ask('Walk me through it');
+    return true;
+  },
+  sampleUrl: () => `${dir}/live.json`,
+});
+// The agents Talk can put you through to: those at work or asking you something, the one whose page is open, and
+// the one you are talking to.
+const routeConvo = () => (route.item ? work.conversations.find((c) => c.id === route.item && floorOf(c.project)?.id === route.floor) || null : null);
+function talkingAgents() {
+  const asking = new Set(control.on ? control.questions().map((q) => q.key) : []);
+  const talking = dock?.voice?.who?.href;
+  const open = routeConvo();
+  return byProject(work.conversations.filter((c) => c.working || asking.has(c.id) || c === open || (talking && convoHref(c) === talking))).slice(0, 8);
+}
+const agentWho = (c) => ({ href: convoHref(c), title: c.title, sub: `${floorOf(c.project)?.label || c.project}${c.agent ? `, ${c.agent}` : ''}` });
 let starting = null; // an agent the receptionist was asked to start, waiting for your word
 let controlNote = ''; // what came of the last thing done from the panel
 let noteUsed = false; // it shows once a page, in the first place that has room for it (render resets this)
@@ -182,7 +229,8 @@ const waitingNow = () => {
   const { asks, runs } = control.on ? control.state() : { asks: work.asks || [], runs: [] };
   // a floor's budget question goes as soon as it is under budget again, without waiting for the hook
   const tasks = openTasks().filter((t) => !t.budget || spendOf(floorOf(t.budget))?.over !== false);
-  return waitingOnYou({ asks: asks.filter((a) => !answered.has(a.id)), runs, conversations: work.conversations, tasks, hushed: answeredKeys })
+  const questions = control.on ? control.questions() : [];
+  return waitingOnYou({ asks: asks.filter((a) => !answered.has(a.id)), runs, conversations: work.conversations, tasks, questions, hushed: answeredKeys })
     .filter((i) => i.kind !== 'turn' || !carryingOn(i.key)); // one stopped at its limit shows once, as the offer to carry it on
 };
 // Permissions answered here, left out of the list before the next look at control catches up, and their
@@ -930,11 +978,17 @@ const talk = {
         return v.act ? answerSaid(v.act) : v.reply;
       }
     }
+    if (item && isConvo(item)) {
+      // hold on, carry on, walk me through it, looks good, "the second change", or the answer to its question
+      const said = beside.heard(item.id, text, { permission: control.on && !!control.askFor(item.id) });
+      if (said != null) return said;
+    }
     if (item && control.on && isConvo(item)) {
-      // allow, deny and stop at once; anything else through their brain, if it is on, or straight to the agent
+      // allow, deny and stop at once; anything else through their brain, if it is on, or straight to the agent, which
+      // answers at once and then as it takes it (beside-page.js)
       const quick = agentQuick(control, item, text, () => convoNow(item.id));
       if (quick != null) return quick;
-      const relay = () => agentReply(control, item, text, () => convoNow(item.id));
+      const relay = () => beside.relay(item.id, text);
       return brain.on ? agentThinks(item, text, relay) : relay();
     }
     if (item && brain.on) return agentThinks(item, text, () => sampleReply(item, text));
@@ -955,7 +1009,22 @@ const talk = {
   speakUp(who) {
     const lead = leads.floorOf(who);
     if (lead) return leads.speakUp(lead);
-    return who.href === DESK || isAide(who) ? leads.speakUp(null) : null;
+    if (who.href === DESK || isAide(who)) return leads.speakUp(null);
+    // an agent: its question, that it has your note, its answer, that it is holding (beside-page.js)
+    const item = talkItem(who);
+    return item && isConvo(item) ? beside.speakUp(item.id) : null;
+  },
+  // Its screen, above the conversation: an agent's own, on a walk and in Talk; in Talk with anyone else, the
+  // questions agents are asking you.
+  screen(who) {
+    const item = talkItem(who);
+    if (item && isConvo(item)) return beside.mini(item.id);
+    return walkOn() ? null : beside.banner();
+  },
+  // What an agent at work is doing, over where it sits on a walk.
+  monitor(who) {
+    const item = talkItem(who);
+    return item && isConvo(item) ? beside.monitor(item.id) : null;
   },
   cutIn: () => features.get('cutin'),
   // With control on: Allow and Deny, or Stop, on an agent's card; Start at the front desk. A lead's card has
@@ -963,6 +1032,16 @@ const talk = {
   controls(who) {
     const lead = leads.floorOf(who);
     if (lead) return leads.controls(lead);
+    const item = talkItem(who);
+    if (item && isConvo(item)) {
+      // a permission waiting comes first; then its question's choices, Hold on or Carry on, Walk me through it,
+      // Looks good, and Stop
+      const base = control.on ? agentControls(control, item) : null;
+      if (base?.note) return base;
+      const q = beside.questionButtons(item.id);
+      const all = [...(q?.buttons || []), ...beside.buttons(item.id), ...(base?.buttons || [])];
+      return q || all.length ? { note: q?.note || null, buttons: all } : null;
+    }
     if (!control.on) return null;
     if (who.href === DESK) {
       return deskControls(starting, () => {
@@ -971,8 +1050,7 @@ const talk = {
         return start?.reply;
       }, () => { starting = null; return "All right, I won't start it."; });
     }
-    const item = talkItem(who);
-    return item && isConvo(item) ? agentControls(control, item) : null;
+    return null;
   },
 };
 
@@ -1153,6 +1231,7 @@ const switchOn = (name, otherwise = true) => {
 // The switches in the groups a person thinks in, each one line (the rest of its words on hover or focus).
 const SWITCH_SETS = [
   ['Answering your agents', ['control', 'always']],
+  ['Working beside your agents', ['live', 'replies', 'questions', 'review_together', 'hold']],
   ['Guardrails', ['checks', 'review', 'budget', 'restore', 'clash', 'secrets']],
   ['What every agent is told', ['handovers', 'memory', 'howtos']],
   ['While Arnheim runs', ['brain', 'routines', 'pings', 'git', 'updates']],
@@ -1335,9 +1414,8 @@ function convoControls(c, { noAsk = false } = {}) {
     if (!text) return;
     input.value = '';
     input.blur();
-    controlDone(control.say(c.id, text), (r) => (r.sent === 'resumed' ? 'Sent. It is answering now.'
-      : working ? 'Sent. It reads it at its next step, and its answer shows above.'
-        : waitsIn(c.id)));
+    // hold on, a note on a change, the answer to its question, or a message: what it says straight away (beside-page.js)
+    controlDone(beside.whole(beside.heard(c.id, text) ?? beside.relay(c.id, text)), (said) => said || (working ? 'Sent. It reads it at its next step, and its answer shows above.' : waitsIn(c.id)));
   };
   return h('div.control',
     ask && h('div.control-ask',
@@ -1348,7 +1426,9 @@ function convoControls(c, { noAsk = false } = {}) {
     h('form.control-say', { onsubmit: send },
       h('input', { name: 'text', type: 'text', maxlength: 2000, autocomplete: 'off', placeholder: 'Say something to it', 'aria-label': `A message for ${c.title}` }),
       h('button.btn', { type: 'submit' }, 'Send')),
-    working && h('div.control-row', btn('Stop', () => controlDone(control.halt(c.id), () => 'Stopping. It stops at its next step.'))),
+    h('div.control-row',
+      working && btn('Stop', () => controlDone(control.halt(c.id), () => 'Stopping. It stops at its next step.')),
+      features.get('talk') && dock && btn('Talk to it', () => dock.open(agentWho(c)), '.quiet', 'mic')),
     noteOnce());
 }
 
@@ -1920,12 +2000,14 @@ function waitingActions(i, { keys = false } = {}) {
   const decided = i.kind === 'question' ? decidedFor(i.what, memoryNow()) : [];
   const reachable = control.on && (REACHABLE.test(i.key) || control.run(i.key));
   if (decided.length) {
+    const told = `You decided this before: ${decided.map((r) => r.text).join(' ')}`;
     out.push(h('div.waiting-do.decided',
       h('p.small', h('span.muted', 'You decided before: '), decided.map((r) => r.text).join(' ')),
-      reachable && h('div.control-row', btn('Send it that', () => controlDone(control.say(i.key, `You decided this before: ${decided.map((r) => r.text).join(' ')}`),
-        () => waitsIn(i.key)), '.primary'))));
+      reachable && h('div.control-row', btn('Send it that', () => (i.q ? controlDone(beside.whole(beside.answer(i.q, { text: told })), (said) => said || 'Answered.')
+        : controlDone(control.say(i.key, told), () => waitsIn(i.key))), '.primary'))));
   }
-  if ((i.kind === 'question' || i.kind === 'turn') && reachable) {
+  if (i.q && control.on) out.push(...beside.questionParts(i)); // asked in the building: its choices, how long it waits, your own words
+  else if ((i.kind === 'question' || i.kind === 'turn') && reachable) {
     const send = (event) => {
       event.preventDefault();
       const input = event.currentTarget.elements.text;
@@ -2814,7 +2896,9 @@ function convoPage(c) {
       h('div.verdict', h(`span.pill.k-${verdict}`, verdict === 'ok' ? 'Proven' : verdict === 'failed' ? 'Not proven' : pr?.word || 'Not yet'),
         h('div', pr && h('p', pr.line), rv && h('p.small.muted', rv.line))),
       proofPart(c, pr)),
+    beside.page(c),
     control.on ? convoControls(c, { noAsk: !!asking }) : null,
+    !control.on && beside.madeUp() && c.working && features.get('talk') && dock ? h('div.control-row', btn('Talk to it', () => dock.open(agentWho(c)), '', 'mic')) : null,
     restoreCard(pointsOf(work.restore, { key: c.id })),
   ];
 }
@@ -3776,8 +3860,11 @@ async function boot() {
       { who: deskWho(), label: `${deskName() || 'The receptionist'}, at the front desk` },
       ...(aideWho() ? [{ who: aideWho(), label: `${org.assistant.name}, ${org.founder?.name ? `${org.founder.name}'s` : 'the'} assistant` }] : []),
       ...(features.get('leads') ? leads.floors().map((f) => ({ who: leads.who(f), label: leads.who(f).title })) : []),
+      ...talkingAgents().map((c) => ({ who: agentWho(c), label: `${c.title}, on ${floorLabel(c.project)}` })),
     ],
     here: () => {
+      const c = routeConvo();
+      if (c && talkingAgents().includes(c)) return agentWho(c);
       const floor = org.floors.find((f) => f.id === route.floor);
       return floor ? leads.lead(floor.id) : null;
     },
@@ -3821,7 +3908,8 @@ async function boot() {
     let seen = '';
     let primed = false;
     control.watch((s) => {
-      const sig = JSON.stringify([s.on, s.asks.map((a) => a.id), s.runs.map((r) => [r.key, r.state, r.answered]), s.projects.length, s.paused, s.allowed]);
+      const sig = JSON.stringify([s.on, s.asks.map((a) => a.id), s.runs.map((r) => [r.key, r.state, r.answered]), s.projects.length, s.paused, s.allowed,
+        (s.questions || []).map((q) => [q.id, q.state]), s.holds, s.parts]);
       if (sig === seen) return;
       seen = sig;
       if (s.on && !primed) { // control's first answer: what was already waiting there never alerts either
@@ -3833,6 +3921,7 @@ async function boot() {
     control.start();
     readSwitches().then((got) => { if (got) render(); });
   }
+  beside.start(); // the agents' screens, where they can be read (beside-page.js)
   setupAnswering();
   showAnswering();
   showCounts();

@@ -28,6 +28,9 @@
 //   speakUp(who)             optional: what they say without being asked, looked at every few seconds while
 //                            you are with them and nobody is talking: a string, or null for nothing
 //   cutIn()                  optional: false when talking over someone shouldn't stop them (the switch)
+//   screen(who)              optional: an element to show above the conversation while you are with them, such as
+//                            an agent's live screen (beside-page.js), or null for none. Asked again every second; the
+//                            page keeps the element up to date itself, and the same element is left where it is
 // answer is also given a fourth argument, { spoken }: true when the words were heard, not typed, so a page
 // can keep some answers (allowing something, say) off the voice. It may also give { turns: [{ who, text, heard }] }:
 // several people speaking in turn, each in their own voice and named in the captions (who: null for the one
@@ -216,7 +219,9 @@ export function createVoice({ hud, card, ctx, el, button, signal, early = true, 
   form.append(input, send);
   const acts = el('div', 'aw-acts');
   acts.hidden = true;
-  box.append(said, line, acts, form);
+  const screen = el('div', 'aw-screen'); // the page's own view of whoever you are with (talk.screen)
+  screen.hidden = true;
+  box.append(screen, said, line, acts, form);
   box.hidden = !talk;
   card.append(box);
   form.addEventListener('submit', (event) => {
@@ -299,6 +304,14 @@ export function createVoice({ hud, card, ctx, el, button, signal, early = true, 
       }, b.label);
       acts.append(node);
     }
+  }
+
+  function drawScreen() {
+    let node = null;
+    try { node = who ? talk?.screen?.(who) || null : null; } catch (error) { console.warn('Arnheim: no screen.', error); }
+    if (node && screen.firstChild !== node) screen.replaceChildren(node);
+    else if (!node && screen.firstChild) screen.replaceChildren();
+    screen.hidden = !node;
   }
 
   function drawLog() {
@@ -767,7 +780,8 @@ export function createVoice({ hud, card, ctx, el, button, signal, early = true, 
     clearInterval(upTimer);
     actsSig = null; // draw afresh, even to nothing
     drawActs();
-    if (who && talk.controls) actsTimer = setInterval(drawActs, 1000);
+    drawScreen();
+    if (who && (talk.controls || talk.screen)) actsTimer = setInterval(() => { drawActs(); drawScreen(); }, 1000);
     if (who && talk.speakUp) upTimer = setInterval(speakUp, 4000);
     if (!who) { mode = 'idle'; return; }
     input.placeholder = (() => { try { return talk?.placeholder?.(who); } catch { return null; } })() || `Type to ${nameOf(who)}`; // the page may word it, as for a goal

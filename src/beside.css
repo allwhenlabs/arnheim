@@ -1,0 +1,110 @@
+/* Working beside your agents (beside-page.js): an agent's live screen on its page, the small one on its card on a walk
+   and in Talk, its changes red and green, and its questions. The page's own colours (demo.css), and the walk's dark
+   glass on a card or in Talk. On a phone everything stacks, and long lines wrap rather than scroll sideways. */
+
+.bs-page h4, .bs-mini h4 { margin: 14px 0 6px; font-size: 12px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.bs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 250px), 1fr)); gap: 4px 22px; } /* side by side where there is room, stacked where not */
+.bs-grid > * { min-width: 0; }
+.bs-now { display: flex; align-items: baseline; gap: 8px; margin: 2px 0 8px; font-size: 16px; overflow-wrap: anywhere; }
+.bs-now.small { font-size: 14px; margin: 0 0 4px; }
+.bs-now-words { min-width: 0; }
+.bs-for { display: block; font-size: 13px; }
+.bs-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: rgb(var(--quiet-rgb, 120, 124, 132)); transform: translateY(-1px); }
+.bs-dot.k-working { background: rgb(var(--working-rgb, 63, 111, 216)); box-shadow: 0 0 0 3px rgba(var(--working-rgb, 63, 111, 216), .18); }
+.bs-dot.k-needs { background: rgb(var(--needs-rgb, 212, 105, 11)); box-shadow: 0 0 0 3px rgba(var(--needs-rgb, 212, 105, 11), .2); }
+.bs-dot.k-failed { background: rgb(var(--failed-rgb, 184, 54, 79)); }
+@media (prefers-reduced-motion: no-preference) { .bs-dot.k-working { animation: bs-breathe 1.8s ease-in-out infinite; } }
+@keyframes bs-breathe { 50% { opacity: .45; } }
+.bs-hold { margin: 6px 0 8px; padding: 8px 10px; border-radius: 10px; background: var(--amber-bg, #fff3e6); color: var(--amber-text, #8f4304); font-size: 14px; overflow-wrap: anywhere; }
+.bs-ended { margin: 4px 0 8px; }
+.bs-do { margin: 10px 0 4px; }
+
+.bs-todo ol, .bs-steps ol, .bs-said ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.bs-todo li { display: flex; align-items: flex-start; gap: 8px; font-size: 14px; overflow-wrap: anywhere; }
+.bs-todo li svg { margin-top: 3px; }
+.bs-box { flex: none; width: 12px; height: 12px; margin: 4px 1px 0; border-radius: 3px; border: 1.5px solid var(--quiet, #a3a5aa); }
+.bs-t-done { color: var(--muted); }
+.bs-t-done span:last-child { text-decoration: line-through; text-decoration-color: rgba(127, 127, 127, .5); }
+.bs-t-done svg { color: var(--ok, #1d7f55); }
+.bs-t-working { font-weight: 600; }
+.bs-t-working svg { color: var(--warm, #3f6fd8); }
+.bs-steps li { display: flex; align-items: baseline; gap: 8px; font-size: 13.5px; overflow-wrap: anywhere; }
+.bs-steps li > span:nth-child(2) { min-width: 0; }
+.bs-k { flex: none; width: 7px; height: 7px; border-radius: 2px; background: var(--quiet, #a3a5aa); transform: translateY(-1px); }
+.bs-k.k-edit, .bs-k.k-write { background: rgb(var(--ok-rgb, 29, 127, 85)); }
+.bs-k.k-command { background: rgb(var(--working-rgb, 63, 111, 216)); }
+.bs-k.k-ask, .bs-k.k-waiting, .bs-k.k-held { background: rgb(var(--needs-rgb, 212, 105, 11)); }
+.bs-steps .bs-failed { color: var(--fail, #b8364f); }
+.bs-steps .bs-failed .bs-k { background: rgb(var(--failed-rgb, 184, 54, 79)); }
+
+.bs-said li { padding: 8px 10px; border-radius: 10px; border: 1px solid var(--card-edge, #e5e4de); background: var(--panel-bg, #fafaf8); }
+.bs-said p { margin: 0 0 4px; overflow-wrap: anywhere; font-size: 14px; }
+.bs-said p:last-child { margin-bottom: 0; }
+.bs-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.bs-walk { margin-top: 12px; padding: 10px 12px; border-radius: 10px; background: var(--warm-bg, #e9effc); color: var(--text); }
+.bs-walk h4 { margin-top: 0; }
+.bs-walk p { margin: 0; overflow-wrap: anywhere; }
+
+/* changes, red and green */
+.bs-file { margin: 10px 0 0; border: 1px solid var(--card-edge, #e5e4de); border-radius: 10px; overflow: hidden; }
+.bs-file-head { display: flex; align-items: center; gap: 7px; margin: 0; padding: 7px 10px; background: var(--surface-2, #efeee9); font-size: 13px; }
+.bs-file-head b { min-width: 0; overflow-wrap: anywhere; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-weight: 600; }
+.bs-count { margin-left: auto; flex: none; font: 600 12px/1 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.bs-plus { color: var(--ok, #1d7f55); }
+.bs-minus { color: var(--fail, #b8364f); }
+.bs-hunk + .bs-hunk { border-top: 1px dashed var(--card-edge, #e5e4de); }
+.bs-hunk > p { margin: 0; padding: 6px 10px; }
+.bs-hunk-head { display: flex; align-items: baseline; gap: 6px; font-size: 12px; color: var(--muted); }
+.bs-lines { list-style: none; margin: 0; padding: 0 0 4px; }
+.bs-line { display: grid; grid-template-columns: 3.4em 1.2em minmax(0, 1fr); width: 100%; margin: 0; padding: 1px 10px 1px 0; border: 0; border-radius: 0; text-align: left; color: inherit; background: transparent;
+  font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.bs-line .bs-ln { padding-right: 8px; text-align: right; color: var(--muted); user-select: none; }
+.bs-line .bs-sign { user-select: none; }
+.bs-line .bs-code { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+.bs-add { background: var(--ok-bg, #e8f5ee); }
+.bs-add .bs-sign { color: var(--ok, #1d7f55); }
+.bs-del { background: var(--fail-bg, #fcebee); }
+.bs-del .bs-sign { color: var(--fail, #b8364f); }
+button.bs-line { cursor: pointer; }
+button.bs-line:hover { filter: brightness(.96); box-shadow: inset 3px 0 0 var(--accent, #2f5bd3); }
+button.bs-line:focus-visible { outline: 2px solid var(--accent, #2f5bd3); outline-offset: -2px; }
+button.bs-line.bs-aimed { box-shadow: inset 4px 0 0 var(--accent, #2f5bd3); }
+.bs-comment { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 10px 8px; background: var(--panel-bg, #fafaf8); }
+.bs-comment input { flex: 1 1 180px; min-width: 0; padding: 8px 10px; border-radius: 9px; border: 1px solid var(--line, #e2e1db); background: var(--surface, #fff); color: var(--text); font: inherit; }
+.bs-git { margin-top: 14px; }
+.bs-git h4 { text-transform: none; letter-spacing: 0; font-size: 13px; color: var(--text); }
+
+/* a question's choices */
+.bs-options .bs-option { display: inline-grid; justify-items: start; gap: 1px; text-align: left; min-height: 40px; }
+.bs-options .bs-option span { font-weight: 400; opacity: .8; }
+.bs-choices { display: grid; gap: 10px; flex: 1 1 100%; }
+.bs-choices fieldset { margin: 0; padding: 8px 10px; border: 1px solid var(--card-edge, #e5e4de); border-radius: 10px; display: grid; gap: 6px; }
+.bs-choices legend { padding: 0 4px; font-weight: 600; font-size: 14px; }
+.bs-choices label { display: flex; align-items: flex-start; gap: 8px; cursor: pointer; font-size: 14px; }
+.bs-choices input { margin-top: 3px; }
+.bs-qwait { flex: 1 1 100%; margin: 0; color: var(--muted); }
+
+/* the small screen: on a walk's card and in Talk, over the dark glass */
+.bs-mini { display: grid; gap: 4px; padding: 8px 10px; border-radius: 12px; background: rgba(255, 255, 255, .06); border: 1px solid rgba(255, 255, 255, .14); font-size: 13px; line-height: 1.4; color: #f7f2ea; max-height: 34vh; overflow-y: auto; overscroll-behavior: contain; }
+.bs-mini p { margin: 0; overflow-wrap: anywhere; }
+.bs-mini .muted { color: rgba(247, 242, 234, .66); }
+.bs-mini a { color: #ffd9a8; }
+.bs-mini .bs-hold { background: rgba(255, 162, 74, .16); color: #ffd2a3; font-size: 13px; padding: 6px 8px; margin: 2px 0; }
+.bs-mini .bs-q b, .bs-mini .bs-now b { color: #fff; }
+.bs-mini .bs-dot.k-working { background: #8fb0ff; box-shadow: 0 0 0 3px rgba(143, 176, 255, .22); }
+.bs-mini .bs-dot.k-needs { background: #ffb870; box-shadow: 0 0 0 3px rgba(255, 184, 112, .22); }
+.bs-mini .bs-line { font-size: 12px; grid-template-columns: 2.8em 1.1em minmax(0, 1fr); border-radius: 4px; }
+.bs-mini .bs-line .bs-ln { color: rgba(247, 242, 234, .5); }
+.bs-mini .bs-add { background: rgba(95, 211, 154, .14); }
+.bs-mini .bs-add .bs-sign { color: #7ee0a0; }
+.bs-mini .bs-del { background: rgba(255, 138, 160, .14); }
+.bs-mini .bs-del .bs-sign { color: #ff9fb2; }
+.bs-mini .bs-lines { padding: 2px 0 0; display: grid; gap: 1px; }
+.bs-mini .btn { min-height: 32px; padding: 0 10px; margin-left: 4px; border-radius: 10px; border: 1px solid rgba(255, 255, 255, .22); background: rgba(255, 255, 255, .08); color: #f7f2ea; font: 600 13px/1 inherit; cursor: pointer; }
+.bs-banner p + p { margin-top: 4px; }
+.aw-screen[hidden] { display: none; }
+.aw-card > .aw-talk .aw-screen { min-width: 0; }
+@media (max-width: 560px) { .bs-mini { max-height: 26vh; } }
+
+/* a line read out once, by its words, and drawn once, by its parts (no inline style: some pages forbid it) */
+.bs-contents { display: contents; }

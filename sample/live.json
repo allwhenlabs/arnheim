@@ -1,0 +1,48 @@
+{
+  "about": "Made up, like everything in the sample: what one agent at work would show over its shoulder (docs/connect.md, \"Work beside your agents\"). Times are seconds before the page opened. With your own agents, connect/live.py writes these in data/live/.",
+  "screens": {
+    "cl1": {
+      "project": "Lantern",
+      "agent": "Claude Code",
+      "state": "working",
+      "at": -6,
+      "now": { "kind": "command", "tool": "Bash", "words": "Running the page-turn tests", "files": [], "started_at": -40 },
+      "steps": [
+        { "id": "s1", "at": -400, "kind": "read", "tool": "Read", "words": "Read reader/bookmark.js", "files": ["reader/bookmark.js"], "took": 1, "failed": false },
+        { "id": "s2", "at": -380, "kind": "search", "tool": "Grep", "words": "Searched for \"saveBookmark\" in reader", "files": [], "took": 1, "failed": false },
+        { "id": "s3", "at": -360, "kind": "plan", "tool": "TodoWrite", "words": "Updated my to-do list", "files": [], "took": null, "failed": false },
+        { "id": "s4", "at": -300, "kind": "command", "tool": "Bash", "words": "Ran the page-turn tests", "files": [], "took": 38, "failed": true },
+        { "id": "s5", "at": -220, "kind": "read", "tool": "Read", "words": "Read reader/page-turn.js", "files": ["reader/page-turn.js"], "took": 1, "failed": false },
+        { "id": "s6", "at": -150, "kind": "edit", "tool": "Edit", "words": "Edited reader/page-turn.js", "files": ["reader/page-turn.js"], "took": 2, "failed": false },
+        { "id": "s7", "at": -90, "kind": "edit", "tool": "Edit", "words": "Edited reader/bookmark.js", "files": ["reader/bookmark.js"], "took": 2, "failed": false }
+      ],
+      "changes": [
+        { "file": "reader/page-turn.js", "kind": "edit", "start": 41, "old_start": 41, "step": "s6", "at": -150, "added": 2, "removed": 0, "cut": false,
+          "lines": [[" ", "function turnPage(book, to) {"], [" ", "  book.animate(to)"], ["+", "  book.onTurned(() => book.emit('turned', to))"], ["+", "  return to"], [" ", "}"]] },
+        { "file": "reader/bookmark.js", "kind": "edit", "start": 12, "old_start": 12, "step": "s7", "at": -90, "added": 1, "removed": 1, "cut": false,
+          "lines": [[" ", "export function watch(book) {"], ["-", "  book.on('turn', (page) => saveBookmark(book, page))"], ["+", "  book.on('turned', (page) => saveBookmark(book, page))"], [" ", "}"]] }
+      ],
+      "todos": [
+        { "id": "todo0", "title": "Find why the bookmark jumps", "state": "done" },
+        { "id": "todo1", "title": "Save the place once the page has turned", "state": "working" },
+        { "id": "todo2", "title": "Try it on a long book", "state": "open" }
+      ],
+      "messages": [],
+      "hold": null,
+      "hold_ended": null,
+      "asking": null,
+      "n": 7
+    }
+  },
+  "cycle": {
+    "cl1": [
+      { "kind": "command", "words": "Running the page-turn tests", "lasts": 45 },
+      { "kind": "thinking", "words": "Thinking about the next step", "lasts": 12 },
+      { "kind": "read", "words": "Reading reader/long-book.json", "lasts": 8 },
+      { "kind": "command", "words": "Running the long book test", "lasts": 35 }
+    ]
+  },
+  "walk": {
+    "cl1": "In reader/page-turn.js, a page now says when it has finished turning, so nothing has to guess. In reader/bookmark.js, the bookmark waits for that before it saves your place, which is why it no longer keeps the page you were leaving."
+  }
+}

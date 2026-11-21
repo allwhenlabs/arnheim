@@ -157,10 +157,13 @@ class BrakeTest(unittest.TestCase):
         self.assertEqual(budget.spent_today(feed["conversations"], "Lantern", TODAY, feed["ended"]), 1850)
 
     def test_never_instead_of_your_message(self):
-        self.spend("a", 5000)
+        self.spend("a", 100)
+        self.assertIsNone(self.hook())  # at work, under budget
+        self.spend("b", 5000)
         self.box.post("cc-abc123def456", "Wrap up now")
-        out = self.hook()
+        out = self.hook(hook_event_name="PreToolUse")  # your message goes in before its next step
         self.assertIn("Wrap up now", out["hookSpecificOutput"]["additionalContext"])
+        self.assertIsNone(self.hook())  # after that step it isn't stopped, so it can answer you
         self.assertEqual(self.hook()["continue"], False)  # the step after
 
     def test_pause_everyone_and_resume(self):

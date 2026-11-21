@@ -196,7 +196,7 @@ class SetupTest(unittest.TestCase):
         self.assertEqual(got["hooks"]["Stop"][0], mine["hooks"]["Stop"][0])  # beside yours, not instead
         self.assertEqual(len(got["hooks"]["Stop"]), 2)
         self.assertEqual(got["hooks"]["PreToolUse"][0], mine["hooks"]["PreToolUse"][0])  # yours first, as it was
-        self.assertEqual(got["hooks"]["PreToolUse"][1]["matcher"], setup.MATCHERS["PreToolUse"])  # restore points: file changes only
+        self.assertNotIn("matcher", got["hooks"]["PreToolUse"][1])  # before every step: messages, holds and questions reach it there
         self.assertEqual(len(got["hooks"]["PreToolUse"]), 2)
         self.assertEqual(len(self.backups()), 1)
         code, out = self.h.run("--undo")
@@ -209,14 +209,44 @@ class SetupTest(unittest.TestCase):
     def test_restore_points_hook_only_for_tools_that_change_files_for_both_agents(self):
         out, added, _ = setup.plan_hooks({})
         self.assertIn("PreToolUse", added)
-        self.assertEqual(out["hooks"]["PreToolUse"], [{"matcher": "Edit|MultiEdit|Write|NotebookEdit|Bash",
-                                                      "hooks": out["hooks"]["PreToolUse"][0]["hooks"]}])
+        # before every step: your messages reach Claude Code there as added context (after a step they would sit in the
+        # tool's output, which it rightly won't take instructions from), and holds and questions too. The restore point
+        # itself still acts only before a change.
+        self.assertEqual(out["hooks"]["PreToolUse"], [{"hooks": out["hooks"]["PreToolUse"][0]["hooks"]}])
         self.assertIsNone(setup.plan_hooks(out)[0])  # already there: nothing changes
         out, added, _ = setup.plan_hooks({}, codex=True)
         self.assertIn("PreToolUse", added)
         self.assertEqual(out["hooks"]["PreToolUse"][0]["matcher"], "apply_patch|Edit|Write|Bash")
         self.assertIsNone(setup.plan_hooks(out, codex=True)[0])
         self.assertIn("feeds/restore.json", setup.FEEDS)  # the building lists the restore points
+
+    def test_running_connect_again_brings_an_old_install_up_to_date_and_undo_takes_it_out(self):
+        """An install from before questions came to the building has the old PreToolUse matcher: running Connect again
+        puts the new one in its place, once, beside your own hooks, and undo still takes all of Arnheim's out."""
+        ours = setup.hook_command()
+        yours = {"matcher": "Bash", "hooks": [{"type": "command", "command": "echo hi"}]}
+        old = {"hooks": {"PreToolUse": [yours, {"matcher": "Edit|MultiEdit|Write|NotebookEdit|Bash", "hooks": [{"type": "command", "command": ours}]}],
+                         "PostToolUse": [{"hooks": [{"type": "command", "command": ours}]}]}}
+        out, added, replaced = setup.plan_hooks(old)
+        self.assertIn(("PreToolUse", ours), replaced)
+        pre = out["hooks"]["PreToolUse"]
+        self.assertEqual(pre[0], yours)  # yours stays, first, as it was
+        self.assertEqual([g.get("matcher") for g in pre[1:]], [None])  # ours once, now before every step
+        self.assertEqual(len(out["hooks"]["PostToolUse"]), 1)  # what was up to date stays as it was
+        self.assertIsNone(setup.plan_hooks(out)[0])  # and again: nothing changes
+        back, taken = setup.take_out(out)
+        self.assertEqual(back, {"hooks": {"PreToolUse": [yours]}})
+        self.assertIn(("PreToolUse", ours), taken)
+        # The whole run too: Connect over an old install, then undo, in a made-up home folder.
+        with open(os.path.join(self.h.claude, "settings.json"), "w") as handle:
+            json.dump(old, handle)
+        code, said = self.h.run("--yes")
+        self.assertEqual(code, 0, said)
+        pre = self.h.settings()["hooks"]["PreToolUse"]
+        self.assertEqual([g.get("matcher") for g in pre], ["Bash", None])
+        code, said = self.h.run("--undo")
+        self.assertEqual(code, 0, said)
+        self.assertEqual(self.h.settings()["hooks"], {"PreToolUse": [yours]})
 
     def test_a_broken_settings_file_is_refused_and_nothing_changes(self):
         path = os.path.join(self.h.claude, "settings.json")

@@ -136,7 +136,7 @@ and when it ends. These are its hooks. Add Arnheim's to Claude Code's settings: 
   "hooks": {
     "SessionStart": [{ "hooks": [{ "type": "command", "command": "python3 /path/to/arnheim/connect/claude_code.py" }] }],
     "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "python3 /path/to/arnheim/connect/claude_code.py" }] }],
-    "PreToolUse": [{ "matcher": "Edit|MultiEdit|Write|NotebookEdit|Bash", "hooks": [{ "type": "command", "command": "python3 /path/to/arnheim/connect/claude_code.py" }] }],
+    "PreToolUse": [{ "hooks": [{ "type": "command", "command": "python3 /path/to/arnheim/connect/claude_code.py" }] }],
     "PostToolUse": [{ "hooks": [{ "type": "command", "command": "python3 /path/to/arnheim/connect/claude_code.py" }] }],
     "Notification": [{ "hooks": [{ "type": "command", "command": "python3 /path/to/arnheim/connect/claude_code.py" }] }],
     "Stop": [{ "hooks": [{ "type": "command", "command": "python3 /path/to/arnheim/connect/claude_code.py" }] }],
@@ -612,8 +612,8 @@ waits for its first time, and a time missed while the computer slept sends once.
 
 Before an agent changes a project's files, Claude Code or Codex, Arnheim keeps how they were, so you can
 go back. `python3 connect/setup.py` (or Connect my agents on the page) sets this up for both: the
-`PreToolUse` hooks in step 2 and step 9, which run only for tools that change files and for shell
-commands, and `"feeds/restore.json"` in `feeds` in `company.json`. Then, before the first file an agent changes
+`PreToolUse` hooks in step 2 and step 9 (Claude Code's runs before every step, and takes a restore point
+only before one that changes files or runs a shell command), and `"feeds/restore.json"` in `feeds` in `company.json`. Then, before the first file an agent changes
 after each message you send it, and before any command that deletes or overwrites files in bulk (`rm
 -r`, `git reset --hard`, `git clean -f`, `git checkout -- ...`, `git stash` and the like), the hook
 saves the floor's files as a restore point: every file in the floor's own folder that git doesn't
@@ -684,8 +684,10 @@ change needs that page's own token.
 
 - **Your agents:** answering them from the building (step 4), hand-overs (step 19), the company's
   memory (step 6), how-tos (step 17), Always allow (step 4), proving the work (step 5), the review line
-  (step 12), the budget brake (step 7), restore points (step 16), and the warning when two agents
-  change one file (step 10). The hooks read them at each event, so a new setting holds from the agent's
+  (step 12), the budget brake (step 7), restore points (step 16), the warning when two agents
+  change one file (step 10), and the five parts of working beside them (step 24): looking over their
+  shoulder, replies straight away, questions coming to you, reviewing together, and hold on and carry
+  on. The hooks read them at each event, so a new setting holds from the agent's
   next step. Off keeps what was there: the memory, the standing allows and the budgets wait until
   their switch is on again.
 - **While Arnheim runs:** the receptionist and your assistant thinking with Claude (`--brain`),
@@ -859,6 +861,80 @@ page, or `python3 connect/setup.py --undo`, puts each file back byte for byte. A
 loses only what this added (a rule, a line, a check), and one you rewrote is left as yours. MCP servers
 come out with each agent's own command, or Codex's config.toml put back. Running it again changes nothing.
 
+## 24. Work beside your agents
+
+Working with an agent should feel like working beside a colleague: you can see what they are doing, ask
+how it's going, steer them as they go, look over the work together, and they come to you when something
+isn't clear. Each part below is a switch (step 20), on unless you switch it off. The first needs only
+step 2's hooks; the rest need control on (step 4).
+
+- **Look over their shoulder.** Each agent's page, and its desk monitor on a walk, shows what it is doing
+  right now in plain words ("Running npm test", "Editing src/login.js") and for how long, its to-do list
+  ticking off, and the lines it has changed so far, in red and green, as it works. Claude Code's edits
+  come with their line numbers. A file it writes whole is compared with the file as it was, kept a moment
+  before it was written; when that couldn't be read, the whole new file shows, marked so. Codex's patches
+  show the same way. **Changes so far** puts the agent's changes file by file, and beside them everything
+  not yet committed in the floor's folder, when that folder is kept in git. That second part is everyone's
+  changes there, yours and other agents' included, and says so.
+- **A reply straight away.** Say something to an agent at work and it answers at once, in its own words,
+  from what the building can see: "Got it. I'm running npm test right now, 40 seconds in. I'll pick this
+  up as soon as that's done." It says plainly when it will read your message: at its next step, once a
+  permission it waits on is answered, straight away while you hold it, or the next time it works if it
+  has finished. Each message shows as queued, then taken (with when), then answered, and its real reply
+  follows as before. No model is asked for the first reply: it comes from the agent's screen.
+- **Questions come to you.** When Claude asks you something with its question tool, or ends a turn with a
+  question, the question shows in the building, with its choices, and on Needs you. While you are using
+  the building, the agent waits a while for your answer there (as long as a permission request does, two
+  minutes unless `ARNHEIM_CONTROL_WAIT` says otherwise) and carries on with it. Your answer reaches
+  Claude Code as the question tool's own answers, the way Claude Code's hooks are made to give them. With
+  no answer in time, or nobody there, the agent asks in its own window as it always did, and the question
+  stays as a card: answering it later reaches the agent as a message, at once for an agent started from
+  the building, or at its next step for any other. A message you send while it waits on a question counts
+  as the answer. Agents started from the building are told to ask rather than guess on anything that
+  matters.
+- **Review together.** **Walk me through it** asks the agent to explain its changes file by file, in a
+  sentence or two each, and its answer comes back as any reply does, to show and read out beside the
+  changes. Tap a changed line, or say "the second change", then say what you want: it reaches the agent as
+  one message tied to that file, that line and what the line says. **Looks good** runs the floor's check on
+  the work again (step 5, "Check it again"); on a floor with a review line, the line read the work when
+  the turn ended (step 12).
+- **Hold on, and carry on.** **Hold on**, or saying "hold on", holds the agent at its next step without
+  ending its turn. What you say while it is held reaches it straight away; it answers, and is held again
+  at its next step, so you can talk it through. A step it was about to take when you spoke is turned down,
+  so it reads you first, and takes it again only if it still fits. **Carry on** lets it go on in the new
+  direction, keeping what it has done. A hold ends when you say carry on, after ten minutes, or two minutes
+  after nobody is using the building, and the agent is told which. **Stop** still stops it.
+
+**Codex** gets all of it but the question tool, which it doesn't have: its commands and patches on its
+screen, a turn that ends with a question, and holding before its next command or patch, since its hooks can
+turn a step down or add words to it. Stop there turns the step down and stops it at the one after, as for a
+permission. This is built from Codex's hooks documentation and hasn't been tried with a real Codex yet.
+
+`python3 connect/setup.py` adds what this needs. Claude Code's PreToolUse hook now runs before every step,
+with no matcher: your messages and a hold's words reach Claude there, as words added before the step, and
+its question tool and a helper's long run come through it too. Handed over after a step, your words would
+sit inside that step's output, and Claude Code rightly won't take instructions from a tool's output.
+
+```json
+"PreToolUse": [{ "hooks": [{ "type": "command", "command": "python3 /path/to/arnheim/connect/claude_code.py" }] }]
+```
+
+Running it again over an older install puts this one in place of the old matcher, beside any hooks of your
+own, and `--undo` takes it out with the rest. A hook never waits longer than nine and a half minutes in one
+go, under Claude Code's and Codex's own limit of ten; a hold that lasts longer goes on at the next step.
+`ARNHEIM_HOLD_MOST` and `ARNHEIM_HOLD_NOBODY` change a hold's ten and two minutes, in seconds.
+
+**Where it is kept.** Each agent's screen is a file in `data/live/`, with an index of them all: the last 200
+steps, the last 200 changes, each cut to 80 lines of 400 characters, the to-do list and the last 40
+messages, 600 KB at most for one conversation, for twelve hours after it was last heard from. Anything
+that looks like a password, a token or a key is hidden before it is kept: what the secrets check finds
+(step 22), and a value given to a name such as `password` or `client_secret`, quoted or not, as code,
+settings files and commands write them. It can't promise to find every secret, so treat the screen as you
+would the agent's own window. It holds lines of your code and the commands your agents run, so `serve.py` gives it to this computer
+only: never with `--lan`, never through a view-only link, and a paired phone sees it only through control,
+while this computer lets that phone control agents ([phone.md](phone.md)). Questions and holds wait in
+`data/control/` with the rest of control's mail.
+
 ## What is kept, and where
 
 `connect/setup.py` keeps a copy of each file before it changes it: `data/backups/company.before-arnheim-<when>.json`
@@ -897,7 +973,9 @@ setup's answer about control among them.
 
 With control on, your messages wait in `data/control/` until Claude takes them, a permission
 request and its answer are deleted once it is answered, and each agent started from the building
-keeps its last words there.
+keeps its last words there. A question an agent asked is kept there for twelve hours, a hold until
+the agent has been told it ended. Each agent's screen is kept in `data/live/` (step 24), for this
+computer only.
 
 A conversation leaves the building when it ends, or after twelve hours with no word from it. One
 started from the building stays until then, to talk to.

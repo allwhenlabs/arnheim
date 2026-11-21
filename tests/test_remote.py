@@ -135,6 +135,7 @@ class RemoteTest(unittest.TestCase):
         self.assertEqual(json.loads(self.phone("/control/token", key=key)[2]), {"on": True, "token": "t"})
         self.assertEqual(self.phone("/control/answer", "POST", key=key, body=b"{}")[0], 200)
         self.assertEqual(self.phone("/control/answer", "POST", key=key, body=b"{}", origin="https://evil.example")[0], 403)
+        self.assertEqual(self.phone("/control/live", "POST", key=key, body=b"{}")[0], 200)  # reading a screen: counted, not logged
         with open(os.path.join(self.data, "remote", "log.jsonl"), encoding="utf-8") as handle:
             log = [json.loads(line) for line in handle]
         self.assertEqual([x["event"] for x in log], ["code", "paired", "control on", "control"])

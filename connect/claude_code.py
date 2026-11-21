@@ -48,11 +48,26 @@ the work is proven. On a floor with a review line, it holds the turn instead whi
 look at the work (connect/review.py), and sends it back to Claude with the reason if it isn't ready.
 
 With control switched on (serve.py --control, and connect/control.py), it also hands Claude what you
-say to it in the building, at its next step; while the building is open, it shows a permission
+say to it in the building, before its next step (PreToolUse, as added context: after a step it would sit in
+the tool's output, which Claude rightly takes no instructions from), or as its turn ends; while the building is open, it shows a permission
 Claude asks for there and waits a while for your answer; and it stops Claude when you ask. Otherwise
 it prints nothing, so Claude Code goes on as if it weren't there. Standard library only.
+
+Working beside your agents (docs/connect.md, "Work beside your agents"), each part a switch:
+
+- it keeps each conversation's screen in data/live/ (connect/live.py): the step under way, the steps it
+  finished, the lines it changed and its to-do list, and how each message you sent is getting on;
+- a question Claude asks with its AskUserQuestion tool comes to the building first: while someone is using
+  it, the hook waits a while for your answer and hands it back as the tool's answers (PreToolUse,
+  permissionDecision "allow" with updatedInput, as Claude Code's hooks docs give for this tool); and a turn
+  that ends with a question waits a while for your answer the same way, then goes on with it (Stop,
+  "block"). With no answer, or nobody there, Claude asks in its own window as it always did, and the
+  question waits as a card;
+- a hold from the building keeps it before its next step, without ending its turn, handing over what you
+  say, until you say carry on, ten minutes pass, or nobody has used the building for two minutes.
 """
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -69,6 +84,7 @@ import usage  # noqa: E402  (beside this file: your plan's limits, for the forec
 import handover  # noqa: E402  (beside this file: finished work, handed to the next agent on a floor)
 import switches  # noqa: E402  (beside this file: each feature on or off, data/serve.json)
 import carry_on  # noqa: E402  (beside this file: carrying a conversation on in the other agent at a limit)
+import live  # noqa: E402  (beside this file: each conversation's screen, for this computer and paired phones)
 
 DATA = os.environ.get("ARNHEIM_DATA") or os.path.join(os.path.dirname(HERE), "data")
 FEED = os.path.join(DATA, "feeds", "claude-code.json")
@@ -563,6 +579,8 @@ def weigh(event, talk, talks, tasks, project, extra, verdict, ended=None):
             who = ", ".join(f'"{title}"' for title, _ in others[:3])
             verdict["warn"] = (f"Arnheim, the building, saw that {who} also changed {others[0][1]} in the last two hours, in another "
                                "conversation. Look at what changed there before going on, so you don't undo each other's work.")
+    if name == "PostToolUse" and talk.pop("heard_before_step", None):
+        return  # your message went in just before this step: it answers you first, and stops at a later step if it must
     if name != "PostToolUse" or extra.get("heard") or extra.get("stopped"):
         return  # it stops only between steps, and never instead of handing over your message
     paused = box.paused()
@@ -792,21 +810,359 @@ def floor_of(event):
     return seat.get("project") if seat else None
 
 
+# ---------- working beside your agents (docs/connect.md, "Work beside your agents") ----------
+
+def mark(said):
+    """Stands for what an agent last said, without keeping it."""
+    return hashlib.sha256(str(said or "").encode("utf-8", "replace")).hexdigest()[:16] if said else None
+
+
+def last_said(event):
+    """The last thing the agent said, from its transcript, mid-turn: Claude Code's own (Codex's reads as nothing)."""
+    path = event.get("transcript_path")
+    return carry_on.last_words(path) if isinstance(path, str) and path else ""
+
+
+def watch(event):
+    """Keeps the conversation's screen in the building up to date (connect/live.py), with Look over their shoulder
+    on: the step under way, each step finished with its changes, waiting on you, finished. With Replies straight
+    away on, what it said since it was handed your messages answers them."""
+    name = event.get("hook_event_name")
+    shoulder, replies = switches.on("live", DATA), switches.on("replies", DATA)
+    if not shoulder and not replies:
+        return
+    key = key_of(event)
+    lv = live.Live(DATA)
+    doc = lv.read(key)
+    if replies and doc and name in ("PreToolUse", "PostToolUse") and any(
+            isinstance(m, dict) and m.get("state") == "taken" for m in doc.get("messages") or []):
+        said = last_said(event)
+        lv.replied(key, said, mark(said))
+    if name == "Stop" and replies and doc:
+        lv.answered(key, event.get("last_assistant_message"))  # its last words answer what it was handed
+    if not shoulder:
+        return
+    project = project_for(event.get("cwd")) or (doc or {}).get("project")
+    if not project:
+        return  # not this company's work
+    agent = event.get(AGENT) or "Claude Code"
+    if name == "PreToolUse":
+        lv.begin(event, project, agent)
+    elif name == "PostToolUse":
+        lv.finish(event, project, agent)
+    elif name == "UserPromptSubmit":
+        lv.moment(key, "working", "thinking", "Thinking about what you asked", project, agent, asking=None, hold=None)
+    elif name == "PermissionRequest":
+        lv.moment(key, "waiting", "waiting", f"Waiting for your permission: {control.describe(str(event.get('tool_name') or 'a tool'), event.get('tool_input'))}",
+                  project, agent)
+    elif name == "Notification" and event.get("notification_type") in ASKS:
+        lv.moment(key, "waiting", "waiting", "Waiting for you in my own window", project, agent)
+    elif name == "Stop":
+        lv.moment(key, "finished", None, None, project, agent)
+    elif name in ("StopFailure", "Interrupt"):
+        lv.moment(key, "stopped", None, None, project, agent)
+    elif name == "SessionEnd":
+        lv.moment(key, "ended", None, None, project, agent, asking=None)
+    elif name in ("TaskCreated", "TaskCompleted") and event.get("task_id"):
+        lv.todo_event(key, event["task_id"], event.get("task_subject"), done=name == "TaskCompleted", project=project, agent=agent)
+
+
+def took(event, rows):
+    """Your messages were handed to the agent: on its screen they show as taken, and when."""
+    if not rows or not switches.on("replies", DATA):
+        return
+    try:
+        said = last_said(event)
+        live.Live(DATA).taken(key_of(event), [row.get("id") for row in rows], mark(said))
+    except Exception as error:  # the screen's trouble never costs the message
+        note(error)
+
+
+def heard_now(event, rows):
+    """The feed: the conversation has your message, so its next words answer it. Handed over before a step, the
+    budget's brake waits a step, so the agent can answer you before it stops (weigh)."""
+    if rows:
+        took(event, rows)
+        before = {"heard_before_step": True} if event.get("hook_event_name") == "PreToolUse" else {}
+        edit_talk(event, lambda t: t.update(heard=rows[-1].get("id"), **before))
+
+
+def kept_questions(box):
+    """Questions are kept for the building only where control has been used on this computer (data/control/)."""
+    return os.path.isdir(box.root)
+
+
+def seat_title(event):
+    talk = next((c for c in read_feed().get("conversations") or [] if isinstance(c, dict) and c.get("id") == key_of(event)), None)
+    return (talk or {}).get("title") or NEW
+
+
+# Why a step waits while the person holds an agent: their words come beside it as added context (see hold_here).
+HELD_REASON = "Not run yet: the person you are working for is holding you here from Arnheim, the building. Read their words, given with this."
+
+
+def stop_now(event, box, before_step=False):
+    """Stopped from the building while it was held or asked: it stops now. Before a step, Codex, which takes no
+    continue: false there, has the step turned down and stops at its next one."""
+    reason = "Stopped from Arnheim, the building."
+    key = key_of(event)
+    deny = {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": reason}
+    if before_step and event.get(AGENT) == "Codex":
+        box.stop(key)
+        return {"hookSpecificOutput": deny}
+    box.stopping(key)  # spent here
+    edit_talk(event, lambda t: halt(t, "I stopped, as you asked."))
+    out = {"continue": False, "stopReason": reason}
+    if before_step:  # continue: false alone doesn't stop the step about to run (Claude Code's hooks docs)
+        out["hookSpecificOutput"] = deny
+    return out
+
+
+def clean_questions(given):
+    """AskUserQuestion's questions as the building shows them, secrets hidden and cut to size, in their order."""
+    out = []
+    for q in given if isinstance(given, list) else []:
+        if not isinstance(q, dict) or not isinstance(q.get("question"), str) or not q["question"].strip():
+            return []
+        options = [{"label": live.clean(o.get("label"), 80), "description": live.clean(o.get("description"), 200)}
+                   for o in q.get("options") or [] if isinstance(o, dict) and isinstance(o.get("label"), str)][:8]
+        out.append({"question": live.clean(q["question"], 300), "header": live.clean(q.get("header"), 40), "options": options,
+                    "multiSelect": q.get("multiSelect") is True})
+    return out[:6]
+
+
+def ask_question(event, box):
+    """Claude Code's AskUserQuestion, caught before it shows: the question and its choices go to the building, and
+    while someone is using it the hook waits a while for your answer there. The answer goes back as Claude Code's
+    hooks docs give for this tool: permissionDecision "allow" with updatedInput, its questions and an "answers"
+    object from each question to the answer. Otherwise, or with no answer in time, Claude asks in its own window as
+    it always did, and the question waits as a card in the building."""
+    if not switches.on("questions", DATA) or not kept_questions(box):
+        return None
+    project = floor_of(event)
+    given = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+    shown = clean_questions(given.get("questions"))
+    if not project or not shown or len(shown) != len(given.get("questions") or []):
+        return None
+    key = key_of(event)
+    watched = box.watched()
+    until = time.time() + control.wait_seconds() if watched else None
+    qid = box.question(key, "choices", shown[0]["question"], shown, until,
+                       {"project": project, "agent": event.get(AGENT) or "Claude Code", "title": seat_title(event)})
+    if switches.on("live", DATA):
+        live.Live(DATA).moment(key, "asking" if watched else "waiting", "ask", f"Asking you: {shown[0]['question']}", project,
+                               asking={"id": qid, "kind": "choices", "text": shown[0]["question"]})
+    if not watched:
+        return None
+    how, got = control.await_question(box, qid, key, until)
+    late = box.settle(qid, "window" if how is None else "answered")
+    if how is None and late:
+        how, got = "answer", late
+    original = [q["question"] for q in given["questions"]]
+    if how == "words":
+        heard_now(event, got)
+        got = {"text": "; ".join(control.one_line(row.get("text"), control.MAX_TEXT) for row in got)}
+    if how in ("answer", "words"):
+        if isinstance(got.get("answers"), dict):  # keyed by the questions as shown: back to Claude's own words
+            answers = {original[i]: str(got["answers"].get(q["question"], "")) for i, q in enumerate(shown)}
+        elif len(original) == 1:
+            answers = {original[0]: control.one_line(got.get("text"), control.MAX_TEXT)}  # as if typed under "Other"
+        else:  # several questions, one answer in their own words: it stands for each (never as a hook error's reason)
+            said = control.one_line(got.get("text"), control.MAX_TEXT)
+            answers = {question: said for question in original}
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
+                                       "updatedInput": {**given, "answers": answers}}}
+    if how == "stop":
+        return stop_now(event, box, before_step=True)
+    return None
+
+
+# A sentence ends at . ! or ? before a space or the end: a dot inside colour.txt or v1.2 doesn't end one. One pass,
+# each character taken by one branch, so no backtracking however long the words.
+SENTENCE = re.compile(r"(?:[^.!?\n]|[.!?](?=[^\s.!?]))+[.!?]*")
+
+
+def asked_in(text):
+    """The question a turn ended with: the sentences ending in a question mark in its last two paragraphs (code left
+    out, and a ? inside an address isn't one), as (the question, those paragraphs for context), or None."""
+    text = re.sub(r"```.*?```", " ", str(text or "")[-6000:], flags=re.S).strip()
+    paragraphs = [p for p in re.split(r"\n[ \t]*\n", text) if p.strip()][-2:]
+    found = []
+    for p in paragraphs:
+        for m in SENTENCE.finditer(p):
+            said, after = m.group(0).strip(" \t*_>-"), p[m.end():m.end() + 1]
+            said = re.sub(r"\*\*|__|`", "", said)  # Markdown's bold and code marks, read aloud as nothing
+            if said.endswith("?") and after in ("", " ", "\t", "\n", '"', "'", ")", "]", "*", "_") and len(said.split()) >= 2 \
+                    and re.search(r"[A-Za-z]", said):
+                found.append(said)
+    if not found:
+        return None
+    return line(" ".join(found[-3:]), 300), line(" ".join(paragraphs), 600)
+
+
+def stop_question(event, box):
+    """A turn that ends by asking the person something: while someone is using the building, waits a while for the
+    answer there and goes on with it (Stop, decision "block" with the answer as the reason). Otherwise it waits as a
+    card, and answering it later reaches the agent as a message."""
+    if not switches.on("questions", DATA) or not kept_questions(box):
+        return None
+    found = asked_in(event.get("last_assistant_message"))
+    project = found and floor_of(event)
+    if not project:
+        return None
+    question, context = found
+    key = key_of(event)
+    watched = box.watched()
+    until = time.time() + control.wait_seconds() if watched else None
+    qid = box.question(key, "words", live.clean(question, 300), None, until,
+                       {"project": project, "agent": event.get(AGENT) or "Claude Code", "title": seat_title(event), "said": live.clean(context, 600)})
+    if switches.on("live", DATA):
+        live.Live(DATA).moment(key, "asking" if watched else "finished", "ask" if watched else None, f"Asking you: {question}", project,
+                               asking={"id": qid, "kind": "words", "text": live.clean(question, 300)})
+    if not watched:
+        return None
+    how, got = control.await_question(box, qid, key, until)
+    late = box.settle(qid, "open" if how is None else "answered")
+    if how is None and late:
+        how, got = "answer", late
+    if how == "stop":
+        box.stopping(key)  # it stops here anyway: the request is spent
+        return None
+    if how == "words":
+        heard_now(event, got)
+        words = "; ".join(control.one_line(row.get("text"), control.MAX_TEXT) for row in got)
+    elif how == "answer":
+        words = control.answered_words(got)
+    else:
+        return None
+    edit_talk(event, lambda t: t.update(working=True, check=False, says={"now": "I've got your answer, and I'm carrying on with it."}))
+    if switches.on("live", DATA):
+        live.Live(DATA).moment(key, "working", "thinking", "Thinking about your answer", project, asking=None)
+    return {"decision": "block", "reason": f'The person you are working for answered your question from Arnheim, the building: "{words}". '
+                                           "Carry on with that."}
+
+
+def hold_here(event, box):
+    """At an agent's step while you hold it from the building (connect/control.py, await_hold). Gives (how, words):
+    ("context", words) to add to what it is handed; ("deny", words) to turn this step down, so it reads your words
+    before it acts; ("block", words) to keep its turn from ending; ("stop", None) to stop it; or None."""
+    key = key_of(event)
+    name = event.get("hook_event_name")
+    if not os.path.isfile(box.path("holds", key + ".json")):
+        return None
+    if not switches.on("hold", DATA):
+        why = box.end_hold(key, "off")
+        return ("context", control.HOLD_ENDS["off"]) if why and name != "Stop" else None
+    shoulder = switches.on("live", DATA)
+    lv = live.Live(DATA)
+    project = floor_of(event)
+
+    def held(row):  # on its screen: holding, since when and until when at most
+        if shoulder and project:
+            lv.moment(key, "held", "held", "Holding, as you asked", project, event.get(AGENT) or "Claude Code", hold=control.hold_view(row))
+    got = control.await_hold(box, key, on=lambda: switches.on("hold", DATA), held=held)
+    if got is None:
+        return None
+    how, rows = got
+    if shoulder and project:
+        ended = {"hold_ended": {"why": how, "at": round(time.time(), 2)}} if how in ("carry on", "ten minutes", "nobody", "off", "stopped") else {}
+        if name == "Stop" and how not in ("words", "still"):  # its turn ends as it was going to
+            lv.moment(key, "finished", None, None, project, hold=None, **ended)
+        else:
+            lv.moment(key, "working", "thinking", "Thinking about the next step", project, hold=control.hold_view(box.hold_row(key)), **ended)
+    if how == "words":
+        heard_now(event, rows)
+        if name == "PreToolUse":
+            return "deny", control.held_message(rows, before_step=True)
+        return ("block" if name == "Stop" else "context"), control.held_message(rows)
+    if how == "still":
+        if name == "PreToolUse":
+            return "deny", control.STILL_HELD
+        if name == "Stop":
+            return "block", "The person you are working for is still holding you from Arnheim, the building. Say in a sentence that you're waiting for them."
+        return "context", "The person you are working for is still holding you from Arnheim, the building: your next step waits until they say carry on."
+    if how == "stopped":
+        return "stop", None
+    words = control.HOLD_ENDS.get(how)
+    if not words or name == "Stop":
+        return None  # told by another step, or a turn ending as it was going to
+    return "context", words
+
+
+def before_step(event):
+    """PreToolUse: the step under way is on its screen already (watch). Then a question it asks you
+    (AskUserQuestion), a hold from the building, and a restore point before it changes files."""
+    box = control.Box(DATA)
+    if event.get("tool_name") == "AskUserQuestion":
+        try:
+            return ask_question(event, box)
+        except Exception as error:  # a question that can't reach the building is asked in its window
+            note(error)
+            return None
+    out = None
+    try:
+        held = hold_here(event, box)
+    except Exception as error:  # a hold's trouble never holds Claude up
+        note(error)
+        held = None
+    if held and held[0] in ("deny", "stop"):
+        try:  # a step that never runs leaves no copy of a file from before it (connect/live.py, stash)
+            if event.get("tool_name") == "Write":
+                live.Live(DATA).unstash(event)
+        except Exception as error:
+            note(error)
+    if held and held[0] == "deny":
+        # The person's words go in as added context, never as the reason a step was turned down: Claude Code shows that
+        # reason as a hook error, and rightly won't take instructions from an error (seen with the real Claude Code).
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                       "permissionDecisionReason": HELD_REASON, "additionalContext": held[1]}}
+    if held and held[0] == "stop":
+        return stop_now(event, box, before_step=True)
+    if held and held[0] == "context":
+        out = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "additionalContext": held[1]}}
+    # Your messages reach Claude Code before its next step, as added context. Handed over after a step, they sit inside
+    # the tool's output, and Claude Code rightly won't take instructions from a tool's output (seen with the real one).
+    rows = []
+    if event.get(AGENT) != "Codex":
+        try:
+            rows = box.take(key_of(event))
+            heard_now(event, rows)
+        except Exception as error:  # the mail's trouble never holds Claude up
+            note(error)
+    if rows:
+        before = out["hookSpecificOutput"]["additionalContext"] if out else None
+        out = {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                       "additionalContext": "\n\n".join(w for w in (before, control.message(rows)) if w)}}
+    try:
+        restore_point(event)
+    except Exception as error:  # a restore point's trouble never holds Claude up
+        note(error)
+    return out
+
+
 def respond(event):
     """Keeps the feed up to date, and gives what Claude Code should hear back, if anything: your
-    messages from the building, your answer there to a permission, or your request to stop.
-    None means nothing: Claude Code carries on as usual."""
+    messages from the building, your answer there to a permission or a question, a hold, or your
+    request to stop. None means nothing: Claude Code carries on as usual."""
     name = event.get("hook_event_name")
     if not event.get("session_id") or os.environ.get("ARNHEIM_REVIEWER"):
         return None  # the review line's own reader is never a conversation of its own
+    try:
+        watch(event)
+    except Exception as error:  # the screen's trouble never holds Claude up
+        note(error)
     if name == "PreToolUse":
-        try:
-            restore_point(event)
-        except Exception as error:  # a restore point's trouble never holds Claude up
-            note(error)
-        return None
+        return before_step(event)
     key = key_of(event)
     box = control.Box(DATA)
+    if name in ("UserPromptSubmit", "SessionEnd") or (name == "PostToolUse" and event.get("tool_name") == "AskUserQuestion"):
+        try:  # you answered in its own window, or it moved on: its questions in the building are done
+            if os.path.isdir(box.path("questions")):
+                box.close_questions(key, ("choices",) if name == "PostToolUse" else ("choices", "words"))
+            if name != "PostToolUse" and os.path.isfile(box.path("holds", key + ".json")):
+                box.end_hold(key, "moved on")  # a new message, or the end: a hold from before it (say, after Esc) ends
+        except Exception as error:
+            note(error)
     if name == "PermissionRequest":
         tool = str(event.get("tool_name") or "a tool")
         what = control.describe(tool, event.get("tool_input"))
@@ -848,11 +1204,20 @@ def respond(event):
         keep(event, {"paused_prompt": True})
         return {"decision": "block", "reason": "Arnheim, the building, has paused every agent. Resume them there, then send this again."}
     stop = box.stopping(key) if name in ("PostToolUse", "UserPromptSubmit", "Stop") else False
+    if stop and name in ("PostToolUse", "Stop", "UserPromptSubmit"):
+        try:
+            if os.path.isfile(box.path("holds", key + ".json")):
+                box.end_hold(key, "stopped")  # stopped, or moved on: a hold ends with it
+        except Exception as error:
+            note(error)
     if stop and name == "PostToolUse":
         keep(event, {"stopped": True})
         return {"continue": False, "stopReason": "Stopped from Arnheim, the building."}
     # A new message from you, or a turn that ends anyway, spends a request to stop.
-    rows = box.take(key) if name in ("PostToolUse", "UserPromptSubmit") or (name == "Stop" and not stop) else []
+    # Before each step is where Claude Code gets your messages (before_step); after a step only Codex does.
+    after_step = name == "PostToolUse" and event.get(AGENT) == "Codex"
+    rows = box.take(key) if after_step or name == "UserPromptSubmit" or (name == "Stop" and not stop) else []
+    took(event, rows)
     try:
         memo = remembered(event, name)
     except Exception as error:  # the memory's trouble never costs Claude your message
@@ -864,10 +1229,33 @@ def respond(event):
         verdict = keep(event, {**extra, **told} or None)
         if verdict.get("stop"):
             return {"continue": False, "stopReason": verdict["stop"]}
+        notice = None
+        # A hold keeps Claude Code before its next step (before_step) or as its turn ends, where your words reach it;
+        # after a step they would sit in the tool's output, so only Codex is held there.
+        if (name == "Stop" or after_step) and not stop:
+            try:
+                held = hold_here(event, box)
+            except Exception as error:  # a hold's trouble never holds Claude up
+                note(error)
+                held = None
+            if held and held[0] == "stop":
+                return stop_now(event, box) if name == "PostToolUse" else None
+            if held and held[0] == "block":
+                edit_talk(event, lambda t: t.update(working=True, check=False))
+                return {"decision": "block", "reason": held[1]}
+            if held and held[0] == "context":
+                notice = held[1]
         if name == "Stop" and not stop:
             held = review(event)
             if held:
                 return held
+            try:
+                asked = stop_question(event, box)
+            except Exception as error:  # a question that can't reach the building waits in its window
+                note(error)
+                asked = None
+            if asked:
+                return asked
         if name == "Stop":
             prove(event)
         howtos = finished = None
@@ -880,7 +1268,7 @@ def respond(event):
                 finished = handed(event)
             except Exception as error:  # nor does the hand-over's
                 note(error)
-        words = "\n\n".join(w for w in (howtos, finished, memo[0] if memo else None, verdict.get("warn")) if w)
+        words = "\n\n".join(w for w in (notice, howtos, finished, memo[0] if memo else None, verdict.get("warn")) if w)
         return {"hookSpecificOutput": {"hookEventName": name, "additionalContext": words}} if words else None
     heard = rows[-1].get("id")
     if name == "Stop":

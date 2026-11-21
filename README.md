@@ -235,6 +235,34 @@ below).
 They never merge, publish, run jobs or sign in. A page of your own can teach them more words and
 topics, or give them answers of its own ([docs/embed.md](docs/embed.md)).
 
+## Work beside your agents
+
+Once your agents are connected (below), working with one feels like working beside a colleague.
+
+- **Look over their shoulder.** An agent's page shows what it is doing right now and for how long
+  ("Running npm test, 40 seconds"), its to-do list ticking off, its last steps, and the lines it has
+  changed so far, in red and green. On a walk the same line floats over its desk as you pass, and
+  its card, or the Talk panel while you talk to it, shows a small copy of its screen.
+- **A reply straight away.** Say something to an agent at work and it answers at once: what it is
+  doing and when it will read you. Your message shows as waiting, then read (with when), then
+  answered, and on a walk or in Talk it tells you once it has read it.
+- **Questions come to you.** When an agent asks you something, it is the first card on Needs you,
+  with its choices as buttons and how long it will wait for you there. Near it on a walk, or in
+  Talk, it asks you out loud: say a choice ("green", "the first one") or answer in your own words.
+- **Review together.** Press **Walk me through it**, or say it, and it explains its changes beside
+  them. Tap a changed line, or say **"the second change"** or **"line 42"**, then say what you want:
+  it reaches the agent tied to that line. **Looks good** runs the floor's check on the work and says
+  what happens next.
+- **Hold on.** Say **"hold on"**, **"wait"** or **"stop there"**, or press **Hold on**, and it
+  stops at its next step, keeping what it has done, while you talk it through. The page says how
+  long it can stay held. **Carry on** lets it go on. **"Stop"** on its own still stops it.
+
+Each part is a switch in Settings, under Switches, and on unless you turn it off. The screens hold
+lines of your code, so they stay on your own computer: never on the network or a view-only link,
+and a paired phone sees them only with control on. In the sample, Lantern's "Why the bookmark jumps"
+shows a made-up screen, and says so. How it works:
+[docs/connect.md](docs/connect.md), "Work beside your agents".
+
 ## Make it yours
 
 `python3 connect/setup.py` makes your company for you, a floor for each of your projects ("Connect

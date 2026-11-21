@@ -37,6 +37,21 @@ SWITCHES = (
      "Before an agent changes files in a project kept in git, the building keeps a way back.", True),
     ("clash", "agents", "Two agents, one file",
      "An agent is warned when another conversation changed the same file in the last two hours.", True),
+    # Working beside your agents (docs/connect.md, "Work beside your agents"): the hooks and connect/control.py honour each.
+    ("live", "agents", "Look over their shoulder",
+     "Each agent's screen: what it is doing now and for how long, its to-do list, and the lines it has changed, on its "
+     "page and its desk. Kept on this computer only, with anything secret hidden. Off: nothing new is recorded.", True),
+    ("replies", "agents", "Replies straight away",
+     "A message to an agent at work is answered at once with what it is doing and when it will read it, and shows as "
+     "queued, taken and answered. Needs answering agents from the building.", True),
+    ("questions", "agents", "Questions come to you",
+     "When an agent asks you something, it shows in the building, and while you are using it the agent waits a while "
+     "for your answer there. Agents started here are told to ask rather than guess. Off: they ask in their own window.", True),
+    ("review_together", "agents", "Review together",
+     "Walk me through it, and a note on one changed line, sent to the agent tied to that line.", True),
+    ("hold", "agents", "Hold on and carry on",
+     "Hold an agent at its next step to talk it through, then let it carry on. A hold ends when you say carry on, "
+     "after 10 minutes, or 2 minutes after nobody is using the building.", True),
     ("brain", "running", "Receptionist and assistant think with Claude",
      "They answer through your own Claude Code, on your own plan. Off: they answer from the building's facts alone.", False),
     ("routines", "running", "Routines",

@@ -1629,6 +1629,21 @@ export function createWalk(ctx) {
       v.set(p.x + A.x, p.y + 2.1, p.z + A.z);
       if (v.distanceTo(camera.position) < 12 && inView(A.x, A.z)) out.push({ key: 'w:assistant', title: A.who.title, sub: A.who.sub, kind: 'quiet', align: 'center', at: v.toArray(), rank: 0 });
     }
+    // Each agent at work near you, like a desk monitor seen in passing: what it is doing now and for how long (the
+    // page's talk.monitor). Not the one you are talking with: their card shows it all.
+    if (ctx.talk?.monitor) {
+      const p = here.group.position;
+      for (const s of spots) {
+        if (!s.who.href || s.who.href === talking?.who.href) continue;
+        let m = null;
+        try { m = ctx.talk.monitor(s.who); } catch (error) { console.warn('Arnheim: no monitor.', error); }
+        if (!m?.title) continue;
+        v.set(p.x + s.ax, p.y + 1.5, p.z + s.az);
+        const d = v.distanceTo(camera.position);
+        if (d > 9 || !inView(s.ax, s.az)) continue;
+        out.push({ key: `w:mon:${s.who.href}`, title: m.title, sub: m.sub || '', kind: m.kind || 'working', small: true, align: 'center', at: v.toArray(), rank: d });
+      }
+    }
     return out.sort((a, b) => a.rank - b.rank).slice(0, 5);
   }
 

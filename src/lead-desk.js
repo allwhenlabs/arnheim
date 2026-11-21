@@ -263,7 +263,9 @@ export function createLeadDesk(env) {
       const at = Date.now() / 1000;
       for (const { a } of sent) rememberPassed({ at, key: a.id, title: a.title, text, project: floor.project, working: !!a.working, told: [] });
       const when = sent.some(({ r }) => r?.sent === 'resumed') ? 'It is answering now.' : sent.some(({ a }) => a.working) ? 'It reads it at its next step.' : 'It reads it the next time it starts.';
-      return `Passed on to ${targetsSaid(to)}: "${text}" ${when} Ask me what's new and I'll tell you how it answered.`;
+      // one agent, with Replies straight away on: what it said back at once, in its own words, says when as well
+      const said = sent.length === 1 && typeof sent[0].r?.reply === 'string' && sent[0].r.reply.trim() ? `It said: "${sent[0].r.reply.trim()}"` : when;
+      return `Passed on to ${targetsSaid(to)}: "${text}" ${said} Ask me what's new and I'll tell you how it answered.`;
     }, (error) => `I couldn't pass it on: ${error.message}`);
   }
 

@@ -13,7 +13,11 @@ Then, on a walk and in the panel:
 - you can pause every agent at once and let them go on again, and let a floor's agents go past
   today's budget (connect/budget.py);
 - you can put a project's files back as they were at a restore point, taken before an agent changed
-  them (connect/restore.py).
+  them (connect/restore.py);
+- you can work beside them (docs/connect.md, "Work beside your agents"): each message gets a reply straight
+  away and shows as queued, taken and answered; a question an agent asks waits a while for your answer here;
+  you can leave a note on one changed line, ask it to walk you through its changes, see its changes so far
+  (connect/live.py), and hold it at its next step to talk it through until you say carry on.
 
 The page and Claude Code meet in data/control/, on this computer. Control, below, answers the
 page's /control/ requests for serve.py, or for a server of your own. Box is the mail between them.
@@ -69,6 +73,16 @@ except ImportError:
     except ImportError:
         carry_on = _beside("carry_on")
 
+try:
+    from . import live, switches  # over an agent's shoulder (connect/live.py), and each feature on or off
+except ImportError:
+    try:
+        import live
+        import switches
+    except ImportError:
+        live = _beside("live")
+        switches = _beside("switches")
+
 HERE = os.path.dirname(os.path.realpath(__file__))
 DATA = os.environ.get("ARNHEIM_DATA") or os.path.join(os.path.dirname(HERE), "data")
 JSON = "application/json; charset=utf-8"
@@ -82,6 +96,36 @@ ROUTINES = os.path.join(HERE, "routines.py")
 ROUTINE = re.compile(r"^rt-[a-z0-9-]{1,60}$")  # a routine, as connect/routines.py names it
 MEMORY_MOST = 100  # decisions kept at most
 MEMORY_TEXT = 300  # characters in one
+PARTS = ("live", "replies", "questions", "review_together", "hold")  # working beside your agents: a switch each
+QUESTIONS_KEPT = 12 * 3600  # seconds a question is kept
+HOLD_STALE = 15 * 60  # a hold asked for that never reached a step goes after this long
+QUESTION_STATES = ("waiting", "open", "window")  # still to answer: the hook waits for it; the turn ended on it; asked in its window
+WALK = ("Walk me through your changes so far, file by file: for each file you changed, say in a sentence or two what you "
+        "changed and why. Keep it brief, and change nothing while you do.")
+
+
+def seconds_from(name, usual, least=0.05, most=3600):
+    """A time in seconds from the environment, for the tests and for anyone who wants another, within limits."""
+    try:
+        return max(least, min(most, float(os.environ.get(name) or usual)))
+    except ValueError:
+        return usual
+
+
+def hold_seconds():
+    """How long a hold lasts at most: ten minutes, or ARNHEIM_HOLD_MOST seconds."""
+    return seconds_from("ARNHEIM_HOLD_MOST", 600)
+
+
+def nobody_seconds():
+    """How long a hold lasts once nobody is using the building: two minutes, or ARNHEIM_HOLD_NOBODY seconds."""
+    return seconds_from("ARNHEIM_HOLD_NOBODY", 120)
+
+
+def hook_seconds():
+    """The longest one hook waits in one go, under Claude Code's and Codex's own ten-minute limit for a hook: a hold
+    that lasts longer goes on at the agent's next step. ARNHEIM_HOOK_MOST seconds changes it."""
+    return seconds_from("ARNHEIM_HOOK_MOST", 570, most=580)
 
 
 def wait_seconds():
@@ -158,8 +202,9 @@ def check_for(project, data=DATA):
     return None
 
 
-def brief(data, text, floor, more=""):
-    """What a new agent is handed: the job in your words, where it was started from, and what counts as done.
+def brief(data, text, floor, more="", ask=False):
+    """What a new agent is handed: the job in your words, where it was started from, and what counts as done, and
+    with `ask`, to ask rather than guess (connect/claude_code.py brings its questions to the building).
     The company's memory reaches it through the hook as it starts."""
     company = read(os.path.join(data, "company.json")) or {}
     check = check_for(floor["project"], data)
@@ -169,7 +214,9 @@ def brief(data, text, floor, more=""):
     return (f"{text[:1].upper() + text[1:]}\n\n"
             f"You were started from Arnheim, the building that shows {one_line(company.get('company') or 'the company', 60)}'s work, "
             f"{more or 'by the person you work for'}, on the {floor['label']} floor, in its folder. {done}"
-            "When you have finished, say plainly what you did and how you checked it.")
+            + ("Ask rather than guess on anything that matters: ask with your question tool if you have one, or end your "
+               "turn with the question, and the person can answer you from the building. " if ask else "")
+            + "When you have finished, say plainly what you did and how you checked it.")
 
 
 def floors_of(data=DATA):
@@ -190,6 +237,27 @@ def floors_of(data=DATA):
                             "check": check and check["label"]})
                 break
     return out
+
+
+def folders_of(project, data=DATA):
+    """The folders of the floor whose project (or label) this is, as data/company.json names them, that are on this
+    computer: the only folders git diff ever runs in."""
+    company = read(os.path.join(data, "company.json")) or {}
+    for floor in company.get("floors") or []:
+        if isinstance(floor, dict) and project and str(floor.get("project") or floor.get("label") or "") == project:
+            folders = floor.get("folders") or ([floor["folder"]] if floor.get("folder") else [])
+            found = [os.path.realpath(os.path.expanduser(str(f))) for f in folders if isinstance(f, str) and f] if isinstance(folders, list) else []
+            return [f for f in dict.fromkeys(found) if os.path.isdir(f)]
+    return []
+
+
+def question_view(row):
+    """A question as the page gets it (docs: the contract for the page)."""
+    return {k: row.get(k) for k in ("id", "key", "kind", "text", "questions", "said", "at", "until", "state", "project", "agent", "title")}
+
+
+def hold_view(row):
+    return {k: row.get(k) for k in ("state", "asked_at", "since", "until", "why", "ended_at")} if isinstance(row, dict) else None
 
 
 def prove_later(project, data=DATA, also=None):
@@ -237,14 +305,52 @@ def describe(tool, given):
     return one_line(f"{tool}: {json.dumps(given, ensure_ascii=False)}" if given else tool, 300)
 
 
-def message(rows, stopping=False):
-    """Your messages, as Claude Code is handed them."""
+def quoted(rows):
     said = [one_line(row.get("text"), MAX_TEXT) for row in rows]
     words = f'"{said[0]}"' if len(said) == 1 else " ".join(f'({i}) "{text}"' for i, text in enumerate(said, 1))
+    return words, "this message" if len(said) == 1 else "these messages"
+
+
+def message(rows, stopping=False):
+    """Your messages, as Claude Code is handed them."""
+    words, what = quoted(rows)
     when = "Before you stop: the person you are working for" if stopping else "While you worked, the person you are working for"
-    what = "this message" if len(said) == 1 else "these messages"
     return (f"{when} sent you {what} from Arnheim, the building that shows their company's work: {words}. "
             "Take it into account, and reply to it in your next message.")
+
+
+def held_message(rows, before_step=False):
+    """Your messages while you hold an agent, as it is handed them: it answers, and is held again at its next step."""
+    words, what = quoted(rows)
+    out = (f"The person you are working for is holding you at this step from Arnheim, the building that shows their company's "
+           f"work, to talk it through, and sent you {what}: {words}. Reply to them in a sentence or two, then go on to your "
+           "next step: Arnheim holds you there again until they say carry on.")
+    return out + (" This step was not run: make it again if it still fits what they said." if before_step else "")
+
+
+# Why a hold ended, as the agent is told (await_hold).
+HOLD_ENDS = {
+    "carry on": ("The person you are working for said carry on, from Arnheim, the building. Go on with your work in the "
+                 "direction they gave you, keeping what you have done."),
+    "ten minutes": ("You have been held for 10 minutes, the longest a hold lasts in Arnheim, the building, so go on with your "
+                    "work, taking into account anything the person said while you were held."),
+    "nobody": ("Nobody has used Arnheim, the building, for 2 minutes, so your hold has ended. Go on with your work, taking "
+               "into account anything the person said while you were held."),
+    "off": "Holding was switched off in Arnheim, the building, so go on with your work.",
+}
+STILL_HELD = ("The person you are working for is still holding you from Arnheim, the building. Don't go on yet: make this "
+              "same step again, and Arnheim holds you there until they say carry on.")
+
+
+def answered_words(got):
+    """An answer from the building, in words: {"text"} as said, or {"answers"} as each question and its answer."""
+    if not isinstance(got, dict):
+        return ""
+    if isinstance(got.get("answers"), dict):
+        if len(got["answers"]) == 1:
+            return one_line(next(iter(got["answers"].values())), 500)
+        return "; ".join(f"{one_line(q, 200)}: {one_line(a, 500)}" for q, a in got["answers"].items())
+    return one_line(got.get("text"), MAX_TEXT)
 
 
 class Box:
@@ -271,9 +377,9 @@ class Box:
             return False
 
     # What you say to a conversation, for it to read at its next step.
-    def post(self, key, text):
+    def post(self, key, text, mid=None):
         os.makedirs(self.path("inbox"), exist_ok=True)
-        row = {"id": secrets.token_hex(6), "text": text, "at": time.time()}
+        row = {"id": mid or secrets.token_hex(6), "text": text, "at": time.time()}
         fd = os.open(self.path("inbox", key + ".jsonl"), os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
         try:
             os.write(fd, (json.dumps(row, ensure_ascii=False) + "\n").encode("utf-8"))
@@ -408,6 +514,171 @@ class Box:
             gone(path)
         return True
 
+    def locked(self, name):
+        """One writer at a time, between the hooks and serve.py, for questions or holds."""
+        os.makedirs(self.root, exist_ok=True)
+        return live._Lock(self.path(f".{name}.lock"))
+
+    # Questions an agent asked you (connect/claude_code.py): Claude Code's AskUserQuestion, or a turn that ended
+    # with a question. "waiting": the hook waits for your answer now; "open": the turn ended on it; "window": it
+    # asked in its own window instead; "answered" and "done" once answered, here or there.
+    def question(self, key, kind, text, questions=None, until=None, more=None):
+        qid = secrets.token_urlsafe(12)
+        row = {**(more or {}), "id": qid, "key": key, "kind": kind, "text": text, "questions": questions or [], "at": time.time(),
+               "until": until, "state": "waiting" if until else ("window" if kind == "choices" else "open")}
+        with self.locked("questions"):
+            for old in self.question_rows():  # what it asked before has moved on
+                if old.get("key") == key and old.get("state") in QUESTION_STATES:
+                    old["state"] = "done"
+                    write(self.path("questions", old["id"] + ".json"), old)
+            write(self.path("questions", qid + ".json"), row)
+        return qid
+
+    def question_rows(self):
+        try:
+            names = os.listdir(self.path("questions"))
+        except OSError:
+            return []
+        now = time.time()
+        out = []
+        for name in names:
+            if not name.endswith(".json") or name.endswith(".answer.json"):
+                continue
+            row = read(self.path("questions", name))
+            if not row or now - float(row.get("at") or 0) > QUESTIONS_KEPT:
+                gone(self.path("questions", name))
+                gone(self.path("questions", name[:-5] + ".answer.json"))
+                continue
+            out.append(row)
+        return sorted(out, key=lambda row: row.get("at") or 0)
+
+    @staticmethod
+    def shown_state(row, now=None):
+        """A question's state as it stands: one the hook stopped waiting for (it was cut short) is open, or in the
+        agent's window."""
+        state = row.get("state")
+        if state == "waiting" and float(row.get("until") or 0) < (now or time.time()) - 5:
+            return "window" if row.get("kind") == "choices" else "open"
+        return state
+
+    def question_row(self, qid):
+        if not isinstance(qid, str) or not ASK_ID.match(qid):
+            return None
+        return read(self.path("questions", qid + ".json"))
+
+    def questions(self, key=None):
+        """The questions still to answer, oldest first, each with its state as it stands."""
+        now = time.time()
+        out = []
+        for row in self.question_rows():
+            row["state"] = self.shown_state(row, now)
+            if row["state"] in QUESTION_STATES and (key is None or row.get("key") == key):
+                out.append(row)
+        return out
+
+    def reply(self, qid, answer):
+        """Your answer to a question: "now" when its hook is waiting and takes it back to the agent, "later" when it
+        isn't (the caller sends it as a message), or None when it is answered already or gone."""
+        with self.locked("questions"):
+            row = self.question_row(qid)
+            if not row or self.shown_state(row) not in QUESTION_STATES:
+                return None
+            if row.get("state") == "waiting" and float(row.get("until") or 0) > time.time():
+                os.makedirs(self.path("questions"), exist_ok=True)
+                try:
+                    fd = os.open(self.path("questions", qid + ".answer.json"), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                except FileExistsError:
+                    return None
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    json.dump({**answer, "at": time.time()}, handle, ensure_ascii=False)
+                said = "now"
+            else:
+                said = "later"
+            row.update(state="answered", answered_at=time.time(), answered=one_line(answered_words(answer), 300))
+            write(self.path("questions", qid + ".json"), row)
+        return said
+
+    def replied(self, qid):
+        return read(self.path("questions", qid + ".answer.json"))
+
+    def settle(self, qid, state):
+        """The hook stops waiting: your answer if it came just now, else the question becomes `state` ("open" or
+        "window", or "answered" when the hook had it another way). Gives the answer or None."""
+        with self.locked("questions"):
+            got = self.replied(qid)
+            gone(self.path("questions", qid + ".answer.json"))
+            row = self.question_row(qid)
+            if row and row.get("state") == "waiting":
+                row.update(state="answered" if got else state, until=None)
+                write(self.path("questions", qid + ".json"), row)
+        return got
+
+    def close_questions(self, key, kinds=("choices", "words"), state="done"):
+        """Its questions have been answered in its own window, or it has moved on."""
+        with self.locked("questions"):
+            for row in self.question_rows():
+                if row.get("key") == key and row.get("kind") in kinds and row.get("state") in QUESTION_STATES:
+                    row.update(state=state, until=None)
+                    write(self.path("questions", row["id"] + ".json"), row)
+
+    # Holding an agent at its next step to talk it through (await_hold): "asked" until a step comes, "held" while
+    # it waits there, "ended" (with why) until the agent has been told.
+    def hold_row(self, key):
+        row = read(self.path("holds", key + ".json")) if isinstance(key, str) and KEY.match(key) else None
+        if row and row.get("state") == "asked" and time.time() - float(row.get("asked_at") or 0) > HOLD_STALE:
+            gone(self.path("holds", key + ".json"))
+            return None
+        return row
+
+    def holds(self):
+        try:
+            names = os.listdir(self.path("holds"))
+        except OSError:
+            return {}
+        rows = (self.hold_row(name[:-5]) for name in names if name.endswith(".json"))
+        return {row["key"]: row for row in rows if row and row.get("key")}
+
+    def hold(self, key):
+        with self.locked("holds"):
+            row = self.hold_row(key)
+            if row and row.get("state") in ("asked", "held"):
+                return row
+            row = {"key": key, "state": "asked", "asked_at": time.time()}
+            write(self.path("holds", key + ".json"), row)
+        return row
+
+    def change_hold(self, key, **fields):
+        with self.locked("holds"):
+            row = self.hold_row(key)
+            if row and row.get("state") == "held":
+                row.update(fields)
+                write(self.path("holds", key + ".json"), row)
+            return row
+
+    def go_on(self, key):
+        """Carry on: "held" when a held agent is told at once or at its next step, "asked" when it never got
+        as far as a step (nothing to tell), or None when it isn't held."""
+        with self.locked("holds"):
+            row = self.hold_row(key)
+            if not row or row.get("state") not in ("asked", "held"):
+                return None
+            if row["state"] == "asked":
+                gone(self.path("holds", key + ".json"))
+                return "asked"
+            row.update(state="ended", why="carry on", ended_at=time.time())
+            write(self.path("holds", key + ".json"), row)
+            return "held"
+
+    def end_hold(self, key, why=None):
+        """Ends a hold from the hook's side and tells it once: why it ended, for the one step that tells the agent,
+        or None for any other step (another told it already)."""
+        with self.locked("holds"):
+            row = self.hold_row(key)
+            if not row or row.get("state") not in ("asked", "held", "ended"):
+                return None
+            gone(self.path("holds", key + ".json"))
+            return row.get("why") if row["state"] == "ended" else why
+
 
 def await_answer(box, key, tool, what, more=None):
     """For the hook: shows a permission request in the building, if someone is using it, and waits
@@ -432,6 +703,97 @@ def await_answer(box, key, tool, what, more=None):
         box.close(aid)
 
 
+def await_question(box, qid, key, until, tick=0.25, clock=time.time, sleep=time.sleep):
+    """For the hook, while someone is using the building: waits for your answer to a question an agent asked.
+    Gives ("answer", {"answers"} or {"text"}), ("words", rows) for a message you sent it meanwhile, which answers
+    it, ("stop", None) when you stopped it, or (None, None): no answer by `until`, or nobody there any more, so it
+    asks in its own window as it always did, or the question waits as a card. It never waits past `until`."""
+    while clock() < until:
+        got = box.replied(qid)
+        if got:
+            return "answer", got
+        if box.stopping(key, keep=True):
+            return "stop", None
+        rows = box.take(key)
+        if rows:
+            return "words", rows
+        if not box.watched():
+            break
+        sleep(tick)
+    return None, None
+
+
+def await_hold(box, key, most=None, nobody=None, budget=None, tick=0.25, on=lambda: True, clock=time.time, sleep=time.sleep,
+               held=None):
+    """For the hook, at an agent's next step while you hold it from the building: waits there, without ending its
+    turn, until something happens. Gives:
+
+    - ("words", rows): your messages, to hand over now; it is held again at its next step;
+    - ("carry on" | "ten minutes" | "nobody" | "off", []): the hold has ended, and why, for this step to tell it;
+    - ("stopped", []): you stopped it;
+    - ("still", []): this step waited as long as one hook may (hook_seconds) and it is still held;
+    - ("gone", []): another of its steps, run at the same time, handed over or told it;
+    - None: it isn't held.
+
+    A hold lasts `most` seconds from the step it first held at (ten minutes), and `nobody` seconds once nobody is
+    using the building (two minutes). Times are injectable, for the tests. `held(row)` is told the hold as it
+    waits, for the agent's screen."""
+    most = hold_seconds() if most is None else most
+    nobody = nobody_seconds() if nobody is None else nobody
+    budget = hook_seconds() if budget is None else budget
+    started = clock()
+    with box.locked("holds"):
+        row = box.hold_row(key)
+        if row is None:
+            return None
+        if row.get("state") == "asked":
+            row.update(state="held", since=started, until=started + most, handed=0)
+            write(box.path("holds", key + ".json"), row)
+    if row.get("state") == "ended":
+        why = box.end_hold(key)
+        return (why, []) if why else ("gone", [])
+    if held:
+        held(row)
+    handed = row.get("handed", 0)
+    checked = started
+    while True:
+        now = clock()
+        if box.stopping(key, keep=True):
+            box.end_hold(key, "stopped")
+            return "stopped", []
+        rows = box.take(key)
+        if rows:
+            box.change_hold(key, handed=handed + 1)
+            return "words", rows
+        row = box.hold_row(key)
+        if row is None:
+            return "gone", []
+        if row.get("state") == "ended":
+            why = box.end_hold(key)
+            return (why, []) if why else ("gone", [])
+        if row.get("handed", 0) != handed:
+            return "gone", []
+        if now >= float(row.get("until") or 0):
+            why = box.end_hold(key, "ten minutes")
+            return (why, []) if why else ("gone", [])
+        if box.watched():
+            if row.get("unwatched_since"):
+                box.change_hold(key, unwatched_since=None)
+        elif not row.get("unwatched_since"):
+            box.change_hold(key, unwatched_since=now)
+        elif now - float(row["unwatched_since"]) >= nobody:
+            why = box.end_hold(key, "nobody")
+            return (why, []) if why else ("gone", [])
+        if now - checked >= 2:
+            checked = now
+            if not on():
+                why = box.end_hold(key, "off")
+                return (why, []) if why else ("gone", [])
+        if now - started >= budget:
+            return "still", []
+        sleep(tick)
+
+
 class Refused(Exception):
     """A request the building can't carry out, in words for the person who made it."""
 
@@ -444,6 +806,7 @@ class Control:
     def __init__(self, data=DATA, claude=None):
         self.data = data
         self.box = Box(data)
+        self.lv = live.Live(data)  # each conversation's screen and your messages' progress (connect/live.py)
         self.token = secrets.token_urlsafe(24)
         self.claude = list(claude) if claude else shlex.split(os.environ.get("ARNHEIM_CLAUDE") or "claude")
         self.codex = shlex.split(os.environ.get("ARNHEIM_CODEX") or "codex")  # for carrying on in Codex (connect/carry_on.py)
@@ -517,6 +880,21 @@ class Control:
                 return answer(200, self.restore(given.get("id")))
             if name == "carry_on":
                 return answer(200, self.carry_on(given))
+            # Working beside your agents (docs/connect.md, "Work beside your agents")
+            if name == "live":
+                return answer(200, self.live_of(given.get("key")))
+            if name == "changes":
+                return answer(200, self.changes(given.get("key")))
+            if name == "reply_question":
+                return answer(200, self.reply_question(given))
+            if name == "comment":
+                return answer(200, self.comment(given))
+            if name == "walk_through":
+                return answer(200, self.walk_through(given.get("key")))
+            if name == "hold":
+                return answer(200, self.hold(given.get("key")))
+            if name == "go_on":
+                return answer(200, self.go_on(given.get("key")))
         except Refused as why:
             return answer(400, {"error": str(why)})
         return answer(404, {"error": "No such request."})
@@ -536,7 +914,24 @@ class Control:
             "projects": [{k: f[k] for k in ("project", "label", "floor", "check")} for f in self.floors()],
             "paused": self.box.paused(),
             "allowed": self.box.allowances(budget.local_day()),
+            **self.beside(),
         }
+
+    def beside(self):
+        """What state adds for working beside your agents: which parts are on, the questions waiting on you, the
+        holds, and each conversation's line from data/live/index.json (for a phone, which can't read that file)."""
+        parts = {name: switches.on(name, self.data) for name in PARTS}
+        try:
+            questions = [question_view(row) for row in self.box.questions()] if parts["questions"] else []
+        except Exception:  # a question that can't be read never costs the rest
+            questions = []
+        holds = {k: hold_view(row) for k, row in self.box.holds().items()}
+        return {"parts": parts, "questions": questions, "holds": holds, "live": self.lv.index() if parts["live"] else {}}
+
+    def part(self, name):
+        if not switches.on(name, self.data):
+            label = next((s[2] for s in switches.SWITCHES if s[0] == name), name)
+            raise Refused(f"{label} is switched off. Switch it on in Settings, under Switches.")
 
     def always(self, aid):
         """Allows a waiting request now, and its exact command on its floor from now on (connect/standing.py)."""
@@ -558,20 +953,177 @@ class Control:
 
     # ---------- talking, starting and stopping ----------
 
-    def say(self, key, text):
+    def say(self, key, text, via="message", taken_words=None):
+        """Sends a conversation your words: `sent` is "resumed" for an agent started here that had finished (it
+        carries on with them now) or "queued" for its next step. With Replies straight away on, it also answers at
+        once, in its own words (`reply`), says when it will read them (`when`, connect/live.py's instant), and your
+        message shows as queued, taken and answered (data/live/)."""
         key = self.conversation(key)
         text = self.words(text)
+        replies = switches.on("replies", self.data)
+        mid = secrets.token_hex(6)
+
+        def noted(sent, project):
+            """Its reply straight away, and your message on its screen, before the agent can take it."""
+            if not replies:
+                return {}
+            try:
+                said = self.instant(key, sent)
+                self.lv.posted(key, mid, text, said["reply"], sent, via, taken_words, project=project)
+                return said
+            except Exception:  # the message is on its way whatever the reply's trouble
+                return {}
         with self.lock:
             run = self.runs.get(key)
             if run and run.get("sid") and run.get("folder") and not self.alive(run):
                 # An agent started here that has finished: it carries on with what you said.
-                said = secrets.token_hex(6)
+                said = noted("resumed", run.get("project"))
                 self.box.stopping(key)  # an old request to stop isn't for this new turn
-                self.spawn(run, ["--resume", run["sid"]], text, answering=said)
-                return {"id": said, "sent": "resumed"}
+                self.spawn(run, ["--resume", run["sid"]], text, answering=mid)
+                return {"id": mid, "sent": "resumed", **said}
         if self.box.waiting(key) > 64_000:
             raise Refused("It has a lot waiting for it already. Let it catch up first.")
-        return {"id": self.box.post(key, text), "sent": "queued"}
+        said = noted("queued", self.project_of(key))
+        return {"id": self.box.post(key, text, mid), "sent": "queued", **said}
+
+    def instant(self, key, sent):
+        """The agent's reply the moment you send it something, built from what the building sees: what it is doing now
+        and for how long, a permission or question it waits on, a hold, every agent paused, or finished."""
+        if sent == "resumed":  # under the lock: nothing more to look at
+            said = live.instant(None, False, sent)
+            return {"reply": said["words"], "when": said["when"]}
+        asks = [row for row in self.box.asks() if row.get("key") == key]
+        now = time.time()
+        asking = any(q.get("state") == "waiting" and float(q.get("until") or 0) > now for q in self.box.questions(key))
+        said = live.instant(self.lv.read(key), self.working(key), sent, permission=asks[0].get("what") if asks else None,
+                            asking=asking, hold=self.box.hold_row(key), paused=bool(self.box.paused()), now=now)
+        return {"reply": said["words"], "when": said["when"]}
+
+    # ---------- working beside your agents ----------
+
+    def known(self, key):
+        """A conversation the building knows, or one it has a screen for."""
+        if isinstance(key, str) and KEY.match(key) and self.lv.read(key) is not None:
+            return key
+        return self.conversation(key)
+
+    def live_of(self, key):
+        """One conversation's screen (data/live/<key>.json), its questions waiting on you and its hold: for the page,
+        and for a phone, which can't read data/live/ itself."""
+        key = self.known(key)
+        return {"key": key, "on": switches.on("live", self.data), "live": self.lv.read(key),
+                "questions": [question_view(row) for row in self.box.questions(key)] if switches.on("questions", self.data) else [],
+                "hold": hold_view(self.box.hold_row(key))}
+
+    def changes(self, key):
+        """Its changes so far, file by file, from its own steps; and, for each of its floor's folders kept in git,
+        everything not yet committed there, by anyone. The folders come from data/company.json alone."""
+        self.part("live")
+        key = self.known(key)
+        doc = self.lv.read(key) or {}
+        project = self.project_of(key) or doc.get("project")
+        floor = next((f for f in floors_of(self.data) if f["project"] == project), None)
+        folders = folders_of(project, self.data)
+        git = []
+        for i, folder in enumerate(folders[:4]):
+            got = live.git_diff(folder)
+            name = (floor or {}).get("label") or project or "its floor"
+            got["label"] = (f"Everything not yet committed in {name}'s folder{f' ({i + 1})' if len(folders) > 1 else ''}, by anyone: "
+                            "not only this agent's changes.")
+            git.append(got)
+        return {"key": key, "project": project, "files": live.by_file(doc), "git": git}
+
+    def reply_question(self, given):
+        """Your answer to a question an agent asked: {"id", "answers": {question: answer}} for one with choices, or
+        {"id", "text"} in your own words. Handed back at once while its hook waits; else sent as a message, which an
+        agent started here resumes with, and any other is handed at its next step."""
+        self.part("questions")
+        row = self.box.question_row(given.get("id"))
+        if not row or self.box.shown_state(row) not in QUESTION_STATES:
+            raise Refused("That question isn't waiting any more: it was answered, or the agent moved on.")
+        answers = given.get("answers")
+        if answers is not None:
+            asked = [q.get("question") for q in row.get("questions") or [] if isinstance(q, dict)]
+            if row.get("kind") != "choices" or not isinstance(answers, dict) or set(answers) != set(asked):
+                raise Refused("Answer each of its questions, by the question's own words.")
+            clean = {}
+            for question, picked in answers.items():
+                if isinstance(picked, list) and picked and all(isinstance(p, str) for p in picked):
+                    picked = ", ".join(p.strip() for p in picked)
+                if not isinstance(picked, str) or not picked.strip() or len(picked) > 500:
+                    raise Refused("Each answer is one of its choices, or your own words, under 500 characters.")
+                clean[question] = picked.strip()
+            answer = {"answers": clean}
+        else:
+            answer = {"text": self.words(given.get("text"))}
+        if row.get("state") != "waiting":
+            self.conversation(row["key"])  # sent as a message: it must still be in the building
+        got = self.box.reply(row["id"], answer)
+        if got == "now":
+            if switches.on("replies", self.data):
+                self.lv.edit(row["key"], lambda doc: doc.update(asking=None))
+            return {"ok": True, "sent": "now", "reply": "Thanks, that's what I needed. I'm carrying on with it now."}
+        if got == "later":
+            asked = one_line(row.get("text"), 200)
+            out = self.say(row["key"], f'About your question ("{asked}"): {one_line(answered_words(answer), 1500)}', via="answer",
+                           taken_words="I've got your answer to my question, and I'm on it.")
+            return {"ok": True, **out}
+        raise Refused("That question isn't waiting any more: it was answered, or the agent moved on.")
+
+    def comment(self, given):
+        """A note on one changed line: {"key", "file", "line", "text" (the line as it reads), "words" (yours), and
+        "side": "old" for a line the change took out, numbered as the file was}. It reaches the agent as one message
+        tied to that file, line and text."""
+        self.part("review_together")
+        key = self.conversation(given.get("key"))
+        file, line, text, side = given.get("file"), given.get("line"), given.get("text"), given.get("side")
+        if not isinstance(file, str) or not file.strip() or len(file) > 300 or "\n" in file:
+            raise Refused("Say which file.")
+        if line is not None and (isinstance(line, bool) or not isinstance(line, int) or not 0 < line < 10_000_000):
+            raise Refused("A line is a number from 1.")
+        if text is not None and (not isinstance(text, str) or len(text) > 2000):
+            raise Refused("The line's text is too long.")
+        if side not in (None, "new", "old"):
+            raise Refused('A line is on the "new" side of a change, or the "old".')
+        words = self.words(given.get("words"))
+        where = f"{one_line(file, 300)}, line {line}" if line else one_line(file, 300)
+        if side == "old":
+            where += " as it was before your change"
+        shown = f' ("{one_line(text, 300)}")' if isinstance(text, str) and text.strip() else ""
+        return self.say(key, f"About your change to {where}{shown}: {words}", via="comment",
+                        taken_words=f"I've got your note on {where}, and I'm on it.")
+
+    def walk_through(self, key):
+        """Asks the agent to explain its changes file by file, briefly. Its answer comes back as any reply does."""
+        self.part("review_together")
+        return self.say(key, WALK, via="walk", taken_words="I've got your request to walk you through my changes, and I'm on it.")
+
+    def hold(self, key):
+        """Holds an agent at its next step, without ending its turn (await_hold), until you say carry on."""
+        self.part("hold")
+        key = self.conversation(key)
+        if not self.working(key):
+            raise Refused("It isn't at work now, so there's nothing to hold. Send it a message instead.")
+        row = self.box.hold(key)
+        view = hold_view(row)
+        try:
+            self.lv.edit(key, lambda doc: doc.update(hold=view))
+        except OSError:
+            pass
+        said = "I'm holding, as you asked." if row.get("state") == "held" else "Okay, I'll hold at my next step."
+        return {"ok": True, "hold": view, "reply": said}
+
+    def go_on(self, key):
+        """Carry on: a held agent goes on, told why, keeping what it has done."""
+        key = self.known(key)
+        was = self.box.go_on(key)
+        if was is None:
+            raise Refused("It isn't held.")
+        try:
+            self.lv.edit(key, lambda doc: doc.update(hold=None))
+        except OSError:
+            pass
+        return {"ok": True, "was": was, "reply": "Okay, carrying on." if was == "held" else "Okay, I'll carry on: I hadn't stopped yet."}
 
     def start(self, project, text):
         text = self.words(text)
@@ -586,7 +1138,7 @@ class Control:
         return {"key": key, "project": floor["project"]}
 
     def brief(self, text, floor):
-        return brief(self.data, text, floor)
+        return brief(self.data, text, floor, ask=switches.on("questions", self.data))
 
     def stop(self, key):
         key = self.conversation(key)
@@ -758,6 +1310,16 @@ class Control:
             if self.procs.get(run["key"]) is proc:
                 del self.procs[run["key"]]
             self.save(run)
+        self.answered(run, answering, said)
+
+    def answered(self, run, answering, said):
+        """An agent started here has finished its turn: its last words answer what you sent it, if its hook didn't
+        say so already."""
+        if answering and said:
+            try:
+                self.lv.answered(run["key"], said)
+            except Exception:
+                pass
 
     # ---------- carrying on in Codex at a limit (connect/carry_on.py) ----------
 
@@ -818,6 +1380,7 @@ class Control:
             if self.procs.get(run["key"]) is proc:
                 del self.procs[run["key"]]
             self.save(run)
+        self.answered(run, answering, said)
 
     def rekey(self, run, thread):
         """Codex names its thread once it starts: the run takes the key its hooks give that conversation, so the building

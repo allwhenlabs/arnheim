@@ -50,9 +50,13 @@ NO = re.compile(r"^(n|no|nope|q|quit|stop|cancel)[.!]?$", re.I)
 EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "Notification", "Stop", "TaskCreated",
           "TaskCompleted", "SessionEnd", "PermissionRequest", "StopFailure")  # StopFailure: a turn cut off by a plan's limit (connect/carry_on.py)
 TIMEOUTS = {"PermissionRequest": 150}
-# PreToolUse is for restore points only (docs/connect.md, step 16): just before a tool that changes files, or a
-# command that could delete them in bulk, so it never runs for the many tools that only read.
-MATCHERS = {"PreToolUse": "Edit|MultiEdit|Write|NotebookEdit|Bash"}
+# Claude Code's PreToolUse runs before every step, with no matcher (docs/connect.md, step 24): your messages and a
+# hold's words reach it there as added context (after a step they would sit in the tool's output, which Claude Code
+# rightly won't take instructions from), a question it asks with AskUserQuestion comes to the building first, and a
+# helper's long run shows on its screen. The restore point still acts only before a tool that changes files, or a
+# command that could delete them in bulk (step 16). An older install with a matcher is replaced by this one when
+# Connect runs again.
+MATCHERS = {}
 # Codex's hooks have the same names (docs/connect.md, step 9). It has no Notification: it asks through
 # PermissionRequest. Interrupt is you stopping it. SessionEnd and Interrupt may take 3 seconds at most there.
 CODEX_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Stop", "SessionEnd",
@@ -420,9 +424,8 @@ def codex_hooks_path():
 def plan_hooks(settings, codex=False):
     """(the settings to write or None, [events added], [(event, command) replaced]): Claude Code's, or with
     codex, Codex's hooks.json. This copy's hook only for some tools (a matcher), or by a relative path that
-    works in one folder only, is replaced by one for everything, or for PreToolUse by one for the tools that
-    change files (MATCHERS). Refuses when another copy of Arnheim
-    already has hooks there."""
+    works in one folder only, is replaced by one for everything, or by the matcher MATCHERS gives (Codex's
+    PreToolUse: the tools that change files). Refuses when another copy of Arnheim already has hooks there."""
     events, script, timeouts = (CODEX_EVENTS, CODEX_SCRIPT, CODEX_TIMEOUTS) if codex else (EVENTS, SCRIPT, TIMEOUTS)
     matchers = CODEX_MATCHERS if codex else MATCHERS
     name, who = os.path.basename(script), "Codex" if codex else "Claude Code"

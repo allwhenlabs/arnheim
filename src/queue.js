@@ -41,8 +41,9 @@ const seconds = (at) => {
 
 // asks and runs: the permissions waiting and the agents started from the page (control state), conversations
 // and tasks: as the page reads them (feeds included). A run names an agent whose conversation isn't in a feed
-// yet. Each item: { kind, id, key?, title, project?, what, at, until?, read?, ask?, task?, proof?, review? }.
-export function waitingOnYou({ asks = [], runs = [], conversations = [], tasks = [], now = Date.now() / 1000, recent = RECENT, hushed = new Map() } = {}) {
+// yet. questions: those agents asked you in the building (control state). Each item: { kind, id, key?, title,
+// project?, what, at, until?, read?, ask?, task?, proof?, review?, q? }.
+export function waitingOnYou({ asks = [], runs = [], conversations = [], tasks = [], questions = [], now = Date.now() / 1000, recent = RECENT, hushed = new Map() } = {}) {
   const items = [];
   const talks = new Map(conversations.filter((c) => c && c.id).map((c) => [c.id, c]));
   const started = new Map(runs.filter((r) => r && r.key).map((r) => [r.key, r]));
@@ -53,6 +54,16 @@ export function waitingOnYou({ asks = [], runs = [], conversations = [], tasks =
     asking.add(a.key);
     items.push({ kind: 'permission', id: `ask:${a.id}`, key: a.key, title: c?.title || 'An agent', project: c?.project,
       what: wantsTo(a.tool, a.what), tool: a.tool, read: READS.has(a.tool) && !SECRET.test(String(a.what || '')) && !HIDDEN.test(String(a.what || '')), at: seconds(a.at), until: seconds(a.until), ask: a });
+  }
+  // A question an agent asked you in the building (connect/control.py): one its hook waits on now comes first, with
+  // the permissions, since the agent is held up until you answer or its wait runs out.
+  for (const q of questions) {
+    if (!q || !q.id || !q.key) continue;
+    const c = talks.get(q.key) || started.get(q.key);
+    asking.add(q.key);
+    const first = Array.isArray(q.questions) ? q.questions.find((x) => x && x.question)?.question : null;
+    items.push({ kind: 'question', id: `q:${q.id}`, key: q.key, title: c?.title || q.title || 'An agent', project: c?.project || q.project,
+      what: String(q.text || first || 'It has a question for you.'), at: seconds(q.at), until: q.state === 'waiting' ? seconds(q.until) : 0, q, urgent: q.state === 'waiting' });
   }
   for (const c of talks.values()) {
     if (asking.has(c.id) || c.working) continue;
@@ -71,8 +82,9 @@ export function waitingOnYou({ asks = [], runs = [], conversations = [], tasks =
     if (!t || t.status !== 'needs_you' || (t.session && talks.has(t.session))) continue;
     items.push({ kind: 'task', id: `task:${t.id}`, title: t.title, project: t.project, what: t.note || '', at: seconds(t.at), task: t });
   }
-  return items.sort((a, b) => RANK[a.kind] - RANK[b.kind]
-    || (a.kind === 'permission' ? a.until - b.until : 0) // the one whose wait runs out first
+  const rank = (i) => (i.urgent ? RANK.permission : RANK[i.kind]);
+  return items.sort((a, b) => rank(a) - rank(b)
+    || (rank(a) === RANK.permission ? a.until - b.until : 0) // the one whose wait runs out first
     || (a.kind === 'turn' ? b.at - a.at : a.at - b.at)); // the newest finished; otherwise the longest waiting
 }
 

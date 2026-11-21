@@ -99,7 +99,12 @@ HERE_ONLY = ("127.0.0.1", "::1", "::ffff:127.0.0.1")  # what this computer's own
 SHARE_KEY = os.path.join(ROOT, ".share-key")  # the view-only link's key (--share), kept so the link stays the same
 VIEW = "arnheim_view"  # the cookie a view-only link leaves, so the page's own files come with it
 KEY = re.compile(r"^[A-Za-z0-9_-]{20,64}$")
-NEVER_AWAY = ("/data/control/",)  # control's mail with Claude Code: never to another computer, link or not
+# Control's mail with Claude Code, and each agent's screen (connect/live.py: its steps and the lines it changed): never to
+# another computer, link or not. A paired phone that controls agents reads the screens only through /control/live.
+NEVER_AWAY = ("/data/control/", "/data/live/")
+HERE_ONLY_FOLDERS = ("control", "live")  # the same, in data/, by what each is on disk
+# Control requests sent as POST that only read (an agent's screen, its changes): counted for a phone, never logged
+READS = ("live", "changes")
 NOT_SHARED = ("/data/notes.json",)  # the founder's notes: never through a view-only link
 NEVER_SERVED = ("/data/remote/",)  # the paired phones and their log: never to anyone, this computer included
 # A request that came through a proxy carries one of these. Without --remote it is refused; with it, it is a phone's.
@@ -324,7 +329,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
 
     def kept_back(self, full):
         """Whether a file is one this request never gets, by what it is on disk, however it was spelled: control's
-        mail never goes to another computer, the founder's notes never through a view-only link, and Markdown
+        mail and the agents' screens never go to another computer, the founder's notes never through a view-only link, and Markdown
         in data/ only if it is a how-to company.json lists."""
         data = os.path.join(ROOT, "data")
         folder = os.path.dirname(full)
@@ -335,7 +340,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if not self.here():
             folder = os.path.dirname(full)
             while folder.startswith(ROOT + os.sep):
-                if same_file(folder, os.path.join(data, "control")):
+                if any(same_file(folder, os.path.join(data, name)) for name in HERE_ONLY_FOLDERS):
                     return True
                 folder = os.path.dirname(folder)
             if self.server.share and same_file(full, os.path.join(data, "notes.json")):
@@ -385,7 +390,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             else:
                 code, data = 403, {"error": "Only on this computer, or from a phone it has let control agents."}
             kind, data, extra = "application/json; charset=utf-8", json.dumps(data).encode(), {}
-        elif not self.here() and not self.server.remote.acted(self.phone(), f"{method} {name}" if method == "POST" else "", 0):
+        elif not self.here() and not self.server.remote.acted(self.phone(), f"{method} {name}" if method == "POST" and name not in READS else "", 0):
             code, kind, data, extra = 429, "application/json; charset=utf-8", b'{"error": "Too many at once from this phone. Wait a minute."}', {}
         else:
             code, kind, data, extra = control.handle(method, name, body, self.headers.get("X-Arnheim-Control", ""))
