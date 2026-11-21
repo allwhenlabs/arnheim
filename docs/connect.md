@@ -908,7 +908,9 @@ step 2's hooks; the rest need control on (step 4).
 **Codex** gets all of it but the question tool, which it doesn't have: its commands and patches on its
 screen, a turn that ends with a question, and holding before its next command or patch, since its hooks can
 turn a step down or add words to it. Stop there turns the step down and stops it at the one after, as for a
-permission. This is built from Codex's hooks documentation and hasn't been tried with a real Codex yet.
+permission. Tried with a real Codex (0.169): its commands showed on its screen, a message sent mid-task was
+followed, Hold on, words while held and Carry on worked, and a turn that ended with a question went on with
+the answer given in the building. Codex runs a project's own hooks only in a folder it trusts.
 
 `python3 connect/setup.py` adds what this needs. Claude Code's PreToolUse hook now runs before every step,
 with no matcher: your messages and a hold's words reach Claude there, as words added before the step, and
