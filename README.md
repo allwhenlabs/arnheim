@@ -485,6 +485,16 @@ about five minutes. A phone gets in only once you pair it with a one-time code f
 here. It can look round and talk to everyone; answering and instructing agents from it needs
 **Control for 15 minutes** on this computer, and each such request is written down.
 
+### On the home screen
+
+On an iPhone or iPad, open Arnheim in Safari, press Share, then **Add to Home Screen**, and keep
+**Open as Web App** on. Arnheim then has its own icon, a tower with one floor lit, and opens full
+screen without Safari's bars, like an app. It is still the page this computer serves, so Arnheim has
+to be running here. It works through a view-only link too. The icon may keep its own saved settings,
+apart from Safari's: if it asks to pair again, make a new code in Settings and type it there. Android
+phones and computers' browsers may offer the same as Install app. So far it has been tried in Apple's
+iPhone simulator only.
+
 ### A view-only link
 
 ```bash

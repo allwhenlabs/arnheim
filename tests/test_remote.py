@@ -94,6 +94,8 @@ class RemoteTest(unittest.TestCase):
         self.assertIn(b"Pair this phone with Arnheim", page)
         for path in ("/src/demo.js", "/sample/company.json", "/control/token", "/brain/status", "/voice/status"):
             self.assertEqual(self.phone(path)[0], 403, path)
+        for path in serve.HOME_SCREEN:  # its home-screen icon, fetched without the phone's cookie: public files
+            self.assertEqual(self.phone(path)[0], 200, path)
 
     def test_pairing_takes_the_code_once(self):
         code = self.code()

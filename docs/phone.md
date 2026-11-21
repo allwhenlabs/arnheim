@@ -38,6 +38,10 @@ through one looks to Arnheim as if it came from this computer itself, with every
    for five minutes.
 6. **Talk.** On the phone, tap **Talk**, then **Voice**. Phones put sound to sleep when the screen
    locks; if the panel says "Tap anywhere to wake the voice", tap once.
+7. **Put it on your home screen**, if you like. In Safari, press Share, then **Add to Home Screen**,
+   and keep **Open as Web App** on. Arnheim then opens from its own icon, full screen. The icon may
+   keep its own saved data, apart from Safari's, so if it shows the pairing page, make a new code
+   here and type it there.
 
 ## What a paired phone can do
 
@@ -83,5 +87,7 @@ place.
 
 The pairing, the keys, control and refusals are tested on this computer with a stand-in for the
 phone. A real iPhone and Android phone over Tailscale, the microphone there, and sound waking after
-the screen locks are expected to work as on any https page, but haven't been tried yet. If your phone
+the screen locks are expected to work as on any https page, but haven't been tried yet. Nor has
+whether a phone's pairing carries over to its home-screen icon: the icon was tried in Apple's iPhone
+simulator, on this computer's own address. If your phone
 does something else, the page's console and `http://127.0.0.1:8740/voice/status` say what went wrong.

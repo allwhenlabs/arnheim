@@ -3,6 +3,11 @@
 // floor where something waits on you, and a flag on its mast.
 //
 //   swiftc mac/icon.swift -o make-icon && ./make-icon Arnheim.iconset
+//
+// With --web it draws the icon for a phone's or tablet's home screen instead, into src/app/: square to the edges,
+// since the phone rounds the corners itself, with the tower inside the middle 80% that Android's masks keep.
+//
+//   ./make-icon --web src/app
 import AppKit
 
 func colour(_ hex: UInt32, _ alpha: CGFloat = 1) -> NSColor {
@@ -10,15 +15,19 @@ func colour(_ hex: UInt32, _ alpha: CGFloat = 1) -> NSColor {
             blue: CGFloat(hex & 0xff) / 255, alpha: alpha)
 }
 
-/// The icon in a 1024 by 1024 space, y upwards. Apple's grid puts the rounded square at 824 in the middle.
-func draw() {
-    let tile = NSBezierPath(roundedRect: NSRect(x: 100, y: 100, width: 824, height: 824), xRadius: 185, yRadius: 185)
+/// The icon in a 1024 by 1024 space, y upwards. Apple's grid puts the rounded square at 824 in the middle; a home
+/// screen's icon (square) fills the whole space, with the same tower in the same place.
+func draw(square: Bool = false) {
+    let tile = square ? NSBezierPath(rect: NSRect(x: 0, y: 0, width: 1024, height: 1024))
+        : NSBezierPath(roundedRect: NSRect(x: 100, y: 100, width: 824, height: 824), xRadius: 185, yRadius: 185)
     NSGraphicsContext.saveGraphicsState()
-    let shadow = NSShadow()
-    shadow.shadowColor = colour(0x000000, 0.35)
-    shadow.shadowBlurRadius = 22
-    shadow.shadowOffset = NSSize(width: 0, height: -10)
-    shadow.set()
+    if !square {
+        let shadow = NSShadow()
+        shadow.shadowColor = colour(0x000000, 0.35)
+        shadow.shadowBlurRadius = 22
+        shadow.shadowOffset = NSSize(width: 0, height: -10)
+        shadow.set()
+    }
     colour(0x111726).setFill()
     tile.fill()
     NSGraphicsContext.restoreGraphicsState()
@@ -31,7 +40,7 @@ func draw() {
         NSBezierPath(ovalIn: NSRect(x: x - r, y: y - r, width: r * 2, height: r * 2)).fill()
     }
     colour(0x0a0e17).setFill()
-    NSRect(x: 100, y: 100, width: 824, height: 150).fill()  // the ground
+    (square ? NSRect(x: 0, y: 0, width: 1024, height: 250) : NSRect(x: 100, y: 100, width: 824, height: 150)).fill()  // the ground
 
     let stone = NSGradient(starting: colour(0xe6e8ee), ending: colour(0xa4abba))!
     stone.draw(in: NSRect(x: 362, y: 250, width: 300, height: 490), angle: 0)  // the tower
@@ -76,13 +85,14 @@ func draw() {
 }
 
 let arguments = CommandLine.arguments
-guard arguments.count == 2 else {
-    print("Give the .iconset folder to write: make-icon Arnheim.iconset")
+let web = arguments.count == 3 && arguments[1] == "--web"
+guard arguments.count == 2 || web else {
+    print("Give the .iconset folder to write: make-icon Arnheim.iconset (or make-icon --web src/app)")
     exit(2)
 }
-let folder = URL(fileURLWithPath: arguments[1], isDirectory: true)
+let folder = URL(fileURLWithPath: arguments[web ? 2 : 1], isDirectory: true)
 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-let sizes: [(String, Int)] = [
+let sizes: [(String, Int)] = web ? [("icon-180.png", 180), ("icon-192.png", 192), ("icon-512.png", 512)] : [
     ("icon_16x16.png", 16), ("icon_16x16@2x.png", 32), ("icon_32x32.png", 32), ("icon_32x32@2x.png", 64),
     ("icon_128x128.png", 128), ("icon_128x128@2x.png", 256), ("icon_256x256.png", 256), ("icon_256x256@2x.png", 512),
     ("icon_512x512.png", 512), ("icon_512x512@2x.png", 1024),
@@ -100,7 +110,7 @@ for (name, pixels) in sizes {
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = context
     context.cgContext.scaleBy(x: CGFloat(pixels) / 1024, y: CGFloat(pixels) / 1024)
-    draw()
+    draw(square: web)
     context.flushGraphics()
     NSGraphicsContext.restoreGraphicsState()
     guard let png = picture.representation(using: .png, properties: [:]) else {

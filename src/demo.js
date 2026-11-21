@@ -3173,6 +3173,8 @@ function applyTheme() {
   $('theme').replaceChildren(icon(dark ? 'sun' : 'moon', 15), dark ? 'Light mode' : 'Dark mode');
   $('theme').setAttribute('aria-label', dark ? 'Switch to light mode' : 'Switch to dark mode');
   building?.setTheme(dark);
+  // The phone's bar above the page, on the home screen or in Safari, takes the top bar's colour.
+  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', getComputedStyle(document.documentElement).getPropertyValue('--panel-bg').trim() || (dark ? '#101317' : '#fafaf8'));
 }
 
 function setupTheme() {

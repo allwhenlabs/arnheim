@@ -90,6 +90,10 @@ TYPES = {
     ".bin": "application/octet-stream",  # the photo-real floors' shapes (baked/)
     ".md": "text/markdown; charset=utf-8",  # the company's how-tos (docs/data.md, "How-tos")
 }
+ICONS = {".png": "image/png"}  # the home-screen icons (src/app/): from src/ only, so a picture left in data/ stays put
+# What a phone fetches for its home-screen icon, without the cookie a view-only link or a pairing left: the same public
+# files for everyone, so they pass those two gates. Nothing else does.
+HOME_SCREEN = ("/src/app/manifest.json", "/src/app/icon-180.png", "/src/app/icon-192.png", "/src/app/icon-512.png")
 PORT_TAKEN = {errno.EADDRINUSE, getattr(errno, "WSAEADDRINUSE", errno.EADDRINUSE)}
 HERE_ONLY = ("127.0.0.1", "::1", "::ffff:127.0.0.1")  # what this computer's own requests come from
 SHARE_KEY = os.path.join(ROOT, ".share-key")  # the view-only link's key (--share), kept so the link stays the same
@@ -173,6 +177,14 @@ def without_pings(raw):
 
 
 VOICE = Voice()
+
+
+def kind_of(full):
+    """The Content-Type a file of Arnheim's is sent with, or None for a kind it never sends. A PNG only from src/."""
+    ext = os.path.splitext(full)[1]
+    if ext in ICONS:
+        return ICONS[ext] if full.startswith(os.path.join(ROOT, "src") + os.sep) else None
+    return TYPES.get(ext)
 
 
 def host_ok(host, port, lan=False):
@@ -273,6 +285,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         if low.startswith(NEVER_SERVED) or (not self.here() and low.startswith(NEVER_AWAY)):
             self.send_error(404)
             return False
+        if path in HOME_SCREEN and self.command in ("GET", "HEAD"):
+            named = os.path.join(ROOT, *path.split("/")[1:])
+            if os.path.realpath(named) == named:  # the file itself, never a link to something else
+                return True
         if self.away():
             if self.phone() is not None:
                 if low.startswith("/remote/") and path not in ("/remote/me", "/remote/leave"):
@@ -696,7 +712,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
                 self.send_error(404)
                 return None
         full = os.path.realpath(os.path.join(ROOT, *path.split("/")[1:]))
-        kind = TYPES.get(os.path.splitext(full)[1])
+        kind = kind_of(full)
         if not kind or not full.startswith(ROOT + os.sep) or not os.path.isfile(full) or self.kept_back(full):
             self.send_error(404)
             return None
