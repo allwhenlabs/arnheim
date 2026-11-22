@@ -1231,11 +1231,12 @@ margin). With no forecast (no reading in the last six hours, or not enough to te
 nothing and says why. The cap is set once a night, from the reading when its first run on that agent
 starts, and each start after that waits for a reading taken since the last one began, so it never runs
 twice on the same old numbers. Codex reports its limits through its hooks as it works. Claude Code says
-them once a run, as its first request is answered (its `rate_limit_event`), and not again: so while a
-Claude Code night run works and the newest reading is more than 10 minutes old, the night shift asks
+them as a run's first request is answered (its `rate_limit_event`), and again only when the week's or
+the five hours' use moves by a whole point, so a quiet stretch brings none: while a Claude Code night
+run works and the newest reading is more than 10 minutes old, the night shift asks
 for a fresh one with a tiny probe of its own (`claude -p "ok"` on Haiku, one turn, no tools, no hooks,
 no session kept, in an empty folder under `data/night/`, at most a minute, one at a time), kept as a
-run's reading is. Claude Code keeps no conversation of it, only an empty folder for that folder among
+run's reading is. Claude Code keeps no conversation of it, only a small folder for that folder among
 its projects.
 
 **Each run.** One agent at a time on each floor, Claude Code or Codex as the floor says, started through

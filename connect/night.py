@@ -154,8 +154,9 @@ WRITE_WORDS = re.compile(
 NO_PUSH_SCHEME = "night-shift-never-pushes://"
 NO_PUSH_FROM = ("https://", "http://", "ssh://", "git://", "git@", "git+ssh://", "ssh+git://", "ftp://", "ftps://")
 STALE = 15 * 60  # seconds: a Codex night run at work this long since its last weekly reading is stopped, to be safe
-# Claude Code tells its limits once a run, at its first request (seen with 2.1.325), so a long Claude Code night run
-# asks again with a tiny probe of its own: no tools, no hooks, no session kept.
+# Claude Code tells its limits as a run's first request is answered, and again only when a window's use moves by a whole
+# point (2.1.325), so in a quiet stretch none comes: a Claude Code night run with no reading for a while asks with a tiny
+# probe of its own (no tools, no hooks, no session kept).
 PROBE_AFTER = 10 * 60  # seconds: a Claude Code night run whose newest weekly reading is older than this sends a probe
 PROBE_WAIT = 60  # seconds the probe may take
 PROBE_GAP = 60  # seconds between one probe's end and the next one's start
@@ -771,9 +772,9 @@ def stale_why(r, win, now, data=None, ctrl=None):
     """Why a run must stop because nothing says how close the limit is, or None, so a long run never goes past the cap
     unseen. Measured from its agent's newest weekly reading, or from the run's start if that is later.
 
-    Claude Code tells its limits once a run, at its first request, and none after: so while a Claude Code night run
-    works and that reading is more than PROBE_AFTER old, a tiny probe asks for a fresh one (probe), one at a time for the
-    whole building. A reading it brings is kept as a run's is, and the brake decides on it (brake_why). Only when
+    Claude Code tells its limits at a run's first request, then only when a window's use moves by a whole point: so
+    while a Claude Code night run works and its newest reading is more than PROBE_AFTER old, a tiny probe asks for a
+    fresh one (probe), one at a time for the whole building. A reading it brings is kept as a run's is, and the brake decides on it (brake_why). Only when
     PROBE_MISSES probes in a row bring none, and nothing else has since, does the run stop. Codex reports its limits
     through its hooks as it works, so a Codex run stops when no reading has come for STALE seconds. The next start waits
     for a fresh reading anyway (can_take), so the rest of the night may go on once one comes."""
