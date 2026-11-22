@@ -126,6 +126,32 @@ export function voiceRefused({ spoken = false, on = false, risk = null } = {}) {
   return !!spoken && (risk === 'Look first' || !on);
 }
 
+// The building learns from your corrections (connect/deputy.py): after an Undo it asks once, "Should the leads stop
+// answering this kind of question for you?", and after Show me's Not quite, "Should Show me ask you before calling this
+// kind of change done?". A yes or a no, said or typed while it asks: 'yes', 'no', or null for anything else.
+const LEARN_YES = /^(?:yes|yeah|yep|yes please|please do|do that|go ahead|stop answering(?: it| them)?|ask me(?: first)?)[.!]?$/i;
+const LEARN_NO = /^(?:no|nope|no thanks|no thank you|keep answering(?: it| them)?|leave it)[.!]?$/i;
+const PUT_BACK = /^(?:undo|undo it|undo that|put it back)[.!]?$/i;
+export function learnHeard(text) {
+  const said = String(text || '').trim();
+  return LEARN_YES.test(said) ? 'yes' : LEARN_NO.test(said) ? 'no' : null;
+}
+
+// The question with Yes and No, where the correction was made: Needs you's Answered for you, the sitting, a Show me
+// card. yes() and no() are what each does.
+export function learnAsk(ask, { yes, no } = {}) {
+  styled();
+  return h('div.learn-ask', { role: 'group', 'aria-label': 'Learn from this' },
+    h('p.learn-q', ask),
+    h('div.learn-do', btn('Yes', () => yes?.(), '.primary'), btn('No', () => no?.())));
+}
+
+// A decision set aside after two Undos, said where the second was made, with Undo.
+export function asideNote(said, undo) {
+  styled();
+  return h('div.learn-ask.learn-aside', { role: 'status' }, h('p.learn-q', said), h('div.learn-do', btn('Undo', () => undo?.(), '.quiet')));
+}
+
 // The summary at the end, in a sentence or two.
 export function summaryOf(done = {}) {
   const parts = [];
@@ -143,7 +169,7 @@ export function summaryOf(done = {}) {
 /* ---------- on the page ---------- */
 
 function styled() {
-  if (document.querySelector('link[data-arnheim-sitting]')) return;
+  if (typeof document === 'undefined' || document.querySelector('link[data-arnheim-sitting]')) return;
   const link = document.createElement('link');
   link.rel = 'stylesheet';
   link.href = CSS;
@@ -181,6 +207,7 @@ export function createSitting(env) {
   let note = '';
   let picks = new Map(); // question id -> the lead's pick, or 'asking'
   let busy = false;
+  let asking = null; // after an Undo: { id, ask } or { id, aside: said }, shown above the next card until answered
   let lastSig = '';
   let unwatch = null;
 
@@ -314,12 +341,32 @@ export function createSitting(env) {
     ];
   }
 
+  // What the building asks after an Undo, or says when it set the decision aside: answered here, once.
+  function learned(out, id) {
+    const l = out?.learn;
+    asking = l?.ask ? { id, ask: l.ask } : l?.set_aside ? { id, aside: l.said } : null;
+  }
+  function learnAnswer(yes) {
+    const was = asking;
+    asking = null;
+    const call = !was ? null : was.aside ? (yes ? C().learnUndo?.(was.id) : null) : (yes ? C().learnYes : C().learnNo)?.({ id: was.id });
+    if (!call) { draw(); return Promise.resolve(''); }
+    return Promise.resolve(call).then((r) => { note = r?.reply || ''; draw(); return r?.reply || ''; },
+      (error) => { note = error?.message || 'That didn\'t go through.'; draw(); return note; });
+  }
+  function learnPart() {
+    if (!asking) return null;
+    if (asking.aside) return asideNote(asking.aside, () => learnAnswer(true));
+    return learnAsk(asking.ask, { yes: () => learnAnswer(true), no: () => learnAnswer(false) });
+  }
+
   function answeredCard(x) {
     const a = x.row;
     const undo = (event) => {
       event?.preventDefault?.();
       const words = el.querySelector('input[name="instead"]')?.value.trim() || null;
-      act(C().undoAnswer(a.id, words), 'undone', (r) => r?.note || 'Undone. It hears that you changed it before its next step.');
+      act(C().undoAnswer(a.id, words).then((r) => { learned(r, a.id); return r; }), 'undone',
+        (r) => r?.note || 'Undone. It hears that you changed it before its next step.');
     };
     return [
       ...head('Answered for you', `${a.title || 'An agent'} asked: "${clip(a.question, 300)}"`, where(a)),
@@ -363,6 +410,7 @@ export function createSitting(env) {
         h('span.sit-count', { id: 'sit-count' }, x ? `${Math.min(pos + 1, total)} of ${total}` : 'The sitting'),
         h('button.btn.quiet.sit-close', { type: 'button', onclick: () => close(), 'aria-label': 'Close the sitting' }, icon('x', 16), 'Close')),
       note && h('p.small.note.sit-note', { role: 'status' }, note),
+      learnPart(),
       h('div.sit-card', body)));
     note = '';
   }
@@ -391,6 +439,7 @@ export function createSitting(env) {
     pos = 0;
     done = {};
     note = '';
+    asking = null;
     picks = new Map();
     el = h('div.sit', { 'aria-label': 'Office hours' });
     document.body.append(el);
@@ -422,6 +471,11 @@ export function createSitting(env) {
   // Spoken or typed in Talk while the sitting is open: what it did, in words, or null for Talk to answer as usual.
   // { spoken }: said out loud, so a permission follows the voice rule (voiceRefused).
   function heard(text, { spoken = false } = {}) {
+    if (asking) { // what the building asked after an Undo, answered out loud
+      const said = learnHeard(text);
+      if (asking.aside && PUT_BACK.test(String(text || '').trim())) return learnAnswer(true).then((r) => r || 'Put back.');
+      if (said && !asking.aside) return learnAnswer(said === 'yes').then((r) => r || 'Fine.');
+    }
     const x = current();
     if (!x) return null;
     const one = x.kind === 'parked' && x.row.kind === 'question' ? (x.row.questions || [])[0] : x.kind === 'question' ? (x.row.questions || [])[0] : null;
@@ -440,7 +494,10 @@ export function createSitting(env) {
       if (voiceRefused({ spoken, on, risk: env.risk?.(i)?.word || null })) return on ? LOOK_SAID : OFF_SAID; // nothing is answered
       return run(env.answerAsk(i, got.do), got.do === 'allow' ? 'allowed' : 'denied', got.do === 'allow' ? 'Allowed.' : 'Denied.');
     }
-    if (got.do === 'undo') return run(C().undoAnswer(x.id, null), 'undone', 'Undone.');
+    if (got.do === 'undo') {
+      return act(C().undoAnswer(x.id, null).then((r) => { learned(r, x.id); return r; }), 'undone', 'Undone.')
+        .then(() => (asking?.ask ? `Undone. ${asking.ask}` : asking?.aside ? `Undone. ${asking.aside} Say undo to put it back.` : `Undone.${then()}`));
+    }
     if (got.do === 'start' && typeof C().startReady === 'function') {
       let reply = 'Started.'; // or the front door's own words: queued, and why
       return act(C().startReady(x.id).then((out) => { reply = out?.reply || reply; return out; }), 'started', () => reply).then(() => `${reply}${then()}`);

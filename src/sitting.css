@@ -40,6 +40,18 @@ body.sit-open .td-dock { z-index: 47; }
 .office-banner p { margin: 0; }
 .urgent-note { color: rgb(var(--failed-rgb)); font-weight: 600; }
 
+/* The building learns from your corrections: the question asked once after an Undo or a Not quite, with Yes and No,
+   and a decision set aside after two Undos, with Undo. On Needs you, in the sitting and on a Show me card. */
+.learn-ask {
+  display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between;
+  margin-top: 8px; padding: 10px 12px; border-radius: 10px; background: var(--surface-2);
+}
+.learn-q { margin: 0; flex: 1 1 220px; font-weight: 600; overflow-wrap: anywhere; }
+.learn-aside .learn-q { font-weight: 500; }
+.learn-do { display: flex; gap: 8px; }
+.learn-do .btn { min-height: 36px; }
+.learn-from { overflow-wrap: anywhere; }
+
 @media (max-width: 480px) {
   .sit { padding: 12px 16px; }
   .sit-card { padding: 16px; }

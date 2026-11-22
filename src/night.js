@@ -311,6 +311,7 @@ export function createNight(env) {
   return {
     start,
     on: () => !!current(),
+    now: () => current(), // the night as this page has it, or null: for the morning briefing (morning.js)
     // Needs you: the morning's report, until you've seen it.
     home() {
       ensure();

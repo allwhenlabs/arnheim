@@ -1,5 +1,5 @@
 {
-  "about": "Fernhollow's last six days, for the weekly report and the receptionist's history. Made up, like the rest of Fernhollow. Each day is \"back\" days before the page opened, and each moment at its clock time that day.",
+  "about": "Fernhollow's last six days, for the weekly report, the receptionist's history and the week on one page (\"page\"). Made up, like the rest of Fernhollow. Each day is \"back\" days before the page opened, and each moment at its clock time that day. The page's days with no entry here (four and six days back) show as days with no readings.",
   "days": [
     {
       "back": 1,
@@ -350,5 +350,143 @@
         }
       ]
     }
-  ]
+  ],
+  "page": {
+    "about": "The week on one page for Fernhollow (src/week.js): what finished and was proven on each floor, what was undone, what waits, and where the allowance went, in new tokens. Made up, like the rest of Fernhollow, and it says so on the page.",
+    "floors": [
+      {
+        "project": "Studio",
+        "label": "Studio",
+        "finished": [
+          {
+            "title": "Invoices for October",
+            "proof": "unchecked"
+          },
+          {
+            "title": "Planning next quarter",
+            "proof": "unchecked"
+          }
+        ],
+        "undone": [],
+        "waits": [
+          {
+            "title": "Approve the supplier's quote",
+            "why": "It needs you."
+          }
+        ]
+      },
+      {
+        "project": "Lantern",
+        "label": "Lantern",
+        "finished": [
+          {
+            "title": "Reading streak ideas",
+            "proof": "proven"
+          },
+          {
+            "title": "Faster first page",
+            "proof": "proven",
+            "how": "plan"
+          },
+          {
+            "title": "Bookmark tests",
+            "proof": "proven"
+          },
+          {
+            "title": "Night reading theme",
+            "proof": "failed"
+          },
+          {
+            "title": "Get \"Pictures for the app store\" past the picture sizes check",
+            "proof": "proven",
+            "how": "night"
+          }
+        ],
+        "undone": [
+          {
+            "title": "Files put back to how they were at 16:40",
+            "how": "you"
+          }
+        ],
+        "waits": [
+          {
+            "title": "Faster first page",
+            "why": "Its Show me card waits for Looks good or Not quite."
+          },
+          {
+            "title": "Add a dark theme to the reading screen",
+            "why": "A ready task waits for Start."
+          }
+        ]
+      },
+      {
+        "project": "Tidepool",
+        "label": "Tidepool",
+        "finished": [
+          {
+            "title": "Rain gauge supplier",
+            "proof": "proven",
+            "how": "plan"
+          },
+          {
+            "title": "Tidy the field notes",
+            "proof": "proven",
+            "how": "night"
+          }
+        ],
+        "undone": [
+          {
+            "title": "Calibrate the wind sensor",
+            "how": "night shift"
+          }
+        ],
+        "waits": [
+          {
+            "title": "Publish the build guide",
+            "why": "Today's plan proposes it, for you to approve."
+          }
+        ]
+      },
+      {
+        "project": "Kitefield",
+        "label": "Kitefield",
+        "finished": [
+          {
+            "title": "Template wish list",
+            "proof": "proven"
+          },
+          {
+            "title": "Wind in the simulator",
+            "proof": "proven"
+          },
+          {
+            "title": "Add a stunt kite template",
+            "proof": "proven",
+            "how": "night"
+          }
+        ],
+        "undone": [],
+        "waits": []
+      }
+    ],
+    "allowance": {
+      "plans": 1150000,
+      "night": 1380000,
+      "show": 240000,
+      "own": 3850000,
+      "sent_back": 2
+    },
+    "limits": [
+      {
+        "source": "Claude Code",
+        "used": 64,
+        "resets_in_days": 2
+      },
+      {
+        "source": "Codex",
+        "used": 41,
+        "resets_in_days": 4
+      }
+    ]
+  }
 }

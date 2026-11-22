@@ -1,0 +1,14 @@
+/* A morning briefing out loud (morning.js): its card at the top of Needs you, when it isn't said out loud. The page's
+   own colours (demo.css), light and dark. On a phone the buttons share the width, and long titles wrap rather than
+   scroll sideways. */
+
+.morning-card p { margin: 0 0 6px; overflow-wrap: anywhere; }
+.morning-hello { font-size: 15px; }
+.morning-floors { margin: 2px 0 8px; padding: 0 0 0 18px; display: grid; gap: 4px; overflow-wrap: anywhere; }
+.morning-ask { margin: 10px 0 0; }
+.morning-do { margin: 10px 0 0; }
+.morning-change { margin: 10px 0 0; }
+
+@media (max-width: 520px) {
+  .morning-do .btn { flex: 1 1 auto; }
+}

@@ -394,6 +394,109 @@ class NightShiftTest(unittest.TestCase):
         self.assertEqual(len(did), 1, did)
         self.assertIn("sort the readings", did[0].lower())
 
+    def test_a_plan_item_that_waits_for_your_look_on_show_me_waits_at_night_too(self):
+        # Found by the Checker: the docs say work Show me asks you about first isn't done until your Looks good, plan
+        # items the night shift runs included, but the night marked its plan item done as the run ended, and started the
+        # floor's next work while your look still waited.
+        self.quiet_around(daily_cycle=True)
+        self.limits(used=40, resets_in=HOUR)
+        self.plan(["Write the notes for version 2", "Tidy the changelog"], floor="Lantern")
+        did = night.tick(self.data, self.control, self.now)
+        self.assertEqual(len(did), 1, did)
+        self.wait_done()
+        key = self.tonight()["ran"][0]["key"]
+        # Show me asks you first about this kind of change (tests/test_learning.py sets that up for real): Control marks
+        # the run so, and says whether its finished work still waits for your look
+        held = {"on": True}
+        self.control.runs[key]["look"] = {"rule": "a-rule", "since": self.now}
+        self.control.awaiting_look = lambda run: held["on"] and (run if isinstance(run, str) else (run or {}).get("key")) == key
+        item = lambda n: day.load(self.data, day.today(self.now))["plan"][0]["items"][n]  # noqa: E731
+        night._LAST.clear()
+        night.tick(self.data, self.control, self.now + 30)
+        r = self.tonight()["ran"][0]
+        self.assertEqual((r["state"], r.get("item_waits")), ("done", True))
+        self.assertEqual(item(0)["state"], "started")  # not counted done while your look waits
+        self.assertIn("waits for you to look at it on Show me", night.busy(self.data, self.control, "Lantern", self.tonight(), {}))
+        self.limits(used=45, resets_in=HOUR, at=self.now + 40)  # a fresh reading: only the hold keeps the next from starting
+        night._LAST.clear()
+        self.assertEqual(night.tick(self.data, self.control, self.now + 60), [])
+        self.assertEqual(item(1)["state"], "approved")
+        # Looks good: the item is done, and the floor may take the next
+        held["on"] = False
+        self.assertIsNone(night.busy(self.data, self.control, "Lantern", self.tonight(), {}))
+        night._LAST.clear()
+        night.tick(self.data, self.control, self.now + 90)
+        self.assertEqual(item(0)["state"], "done")
+        self.assertNotIn("item_waits", self.tonight()["ran"][0])
+
+    def held_night_item(self):
+        """A plan item the night shift ran, whose finished work waits for your look on Show me (stood in for, as above):
+        gives its run's key, the hold (on while your look waits), and the plan's items."""
+        self.quiet_around(daily_cycle=True)
+        self.limits(used=40, resets_in=HOUR)
+        self.plan(["Write the notes for version 2", "Tidy the changelog"], floor="Lantern")
+        self.assertEqual(len(night.tick(self.data, self.control, self.now)), 1)
+        self.wait_done()
+        key = self.tonight()["ran"][0]["key"]
+        held = {"on": True}
+        self.control.runs[key]["look"] = {"rule": "a-rule", "since": self.now}
+        self.control.awaiting_look = lambda run: held["on"] and (run if isinstance(run, str) else (run or {}).get("key")) == key
+        night._LAST.clear()
+        night.tick(self.data, self.control, self.now + 30)
+        self.assertTrue(self.tonight()["ran"][0].get("item_waits"))
+        return key, held, lambda n: day.load(self.data, day.today(self.now))["plan"][0]["items"][n]
+
+    def test_not_quite_on_a_held_night_item_keeps_it_open_until_the_work_it_sent_back_is_looked_at(self):
+        # Found by the Checker: after Not quite the same run is at work again and no longer waits for your look, so the
+        # next tick marked its plan item done while the agent was still redoing it.
+        key, held, item = self.held_night_item()
+        self.hold()
+        held["on"] = False  # Not quite: the card is answered, and the agent is sent back to work
+        self.assertEqual(self.control.say(key, "The notes should say what changed")["sent"], "resumed")
+        self.assertTrue(self.control.working(key))
+        night._LAST.clear()
+        night.tick(self.data, self.control, self.now + 60)
+        self.assertEqual(item(0)["state"], "started")  # at work again: not done
+        self.assertTrue(self.tonight()["ran"][0].get("item_waits"))
+        self.release()
+        self.wait_done()
+        held["on"] = True  # its next finish waits for your look again
+        night._LAST.clear()
+        night.tick(self.data, self.control, self.now + 90)
+        self.assertEqual(item(0)["state"], "started")
+        held["on"] = False  # Looks good
+        night._LAST.clear()
+        night.tick(self.data, self.control, self.now + 120)
+        self.assertEqual(item(0)["state"], "done")
+        self.assertNotIn("item_waits", self.tonight()["ran"][0])
+
+    def test_a_held_night_item_ends_as_the_work_it_was_sent_back_for_ended(self):
+        # With the Checker's fix: the item is settled as the run last ended, not as it first did. Here you stop the
+        # work Not quite sent it back for, so the item is stopped, not done.
+        key, held, item = self.held_night_item()
+        self.hold()
+        held["on"] = False
+        self.control.say(key, "The notes should say what changed")
+        self.control.stop(key)
+        self.wait_done()
+        self.assertEqual(self.control.runs[key]["state"], "stopped")
+        night._LAST.clear()
+        night.tick(self.data, self.control, self.now + 60)
+        self.assertEqual(item(0)["state"], "stopped")
+        self.assertEqual(self.tonight()["ran"][0]["state"], "done")  # the night's report still says how its own run went
+
+    def test_a_held_night_item_is_settled_on_a_tick_after_the_quiet_hours_end(self):
+        # A test gap the Checker found: your Looks good after the quiet hours ended is seen by the next tick, which
+        # settles last night's waiting items too.
+        _, held, item = self.held_night_item()
+        held["on"] = False
+        later = self.now + 3 * HOUR  # the quiet hours ended an hour ago
+        self.assertFalse(night.span(night.settings(self.data)["quiet"], later)["in"])
+        night._LAST.clear()
+        night.tick(self.data, self.control, later)
+        self.assertEqual(item(0)["state"], "done")
+        self.assertNotIn("item_waits", self.tonight()["ran"][0])
+
     # ---------- the brake ----------
 
     def test_the_brake_stops_it_before_the_limit_and_the_rest_waits(self):
@@ -557,6 +660,45 @@ class NightShiftTest(unittest.TestCase):
         self.assertEqual(code, 200, got)
         with open(os.path.join(self.tidepool, "app.py"), encoding="utf-8") as handle:
             self.assertEqual(handle.read(), "print('one')\n")
+
+    def test_a_run_that_changed_files_with_its_shell_never_reads_changed_nothing(self):
+        # Found in a real Codex night run: Codex added a line with `printf >> NOTES.md`. The hook saw every step but counts
+        # only edit tools as changes, so the morning said "Changed nothing" and hid Undo. Git now says what differs from
+        # the run's own restore point when it ends.
+        self.limits(used=40, resets_in=HOUR)
+        rid = self.ready("tidy the field notes on Tidepool")
+        self.tick_tonight(rid)
+        self.hold()
+        night.tick(self.data, self.control, self.now)
+        r = self.tonight()["ran"][0]
+        point = next(p for p in restore.read_points(self.data) if p["id"] == r["point"])
+        self.assertEqual(restore.changed_since(point, self.data), 0)
+        with open(os.path.join(self.tidepool, "app.py"), "w", encoding="utf-8") as handle:
+            handle.write("print('changed overnight')\n")  # what its shell did: no edit tool, so the hook counted no change
+        with open(os.path.join(self.tidepool, "notes.md"), "w", encoding="utf-8") as handle:
+            handle.write("a new file\n")
+        self.assertEqual(restore.changed_since(point, self.data), 2)
+        self.feed([{"id": r["key"], "project": "Tidepool", "title": r["title"], "working": False}])  # seen, no edit counted
+        self.release()
+        self.wait_done()
+        after = self.tonight()["ends"] + 60
+        night.tick(self.data, self.control, after)
+        self.assertEqual(self.tonight()["ran"][0]["touched"], 2)
+        report = night.view(self.data, self.control, after)["report"]
+        item = report["items"][0]
+        self.assertEqual((item["proof"]["state"], item["proof"]["word"]), ("claimed", "Not proven"))
+        # git sees what differs, not who changed it: the words never say it was the run
+        self.assertTrue(item["proof"]["line"].startswith("2 files on its floor differ from how they were before it started"), item["proof"]["line"])
+        self.assertNotIn("own commands", item["proof"]["line"])
+        self.assertTrue(report["words"].startswith("1 thing finished overnight, none proven."), report["words"])
+        self.assertTrue(item["undo"])
+        self.assertNotIn("no_undo", item)
+        code, got = self.call("night_undo", {"id": r["id"]})
+        self.assertEqual(code, 200, got)
+        with open(os.path.join(self.tidepool, "app.py"), encoding="utf-8") as handle:
+            self.assertEqual(handle.read(), "print('one')\n")
+        self.assertEqual(restore.changed_since({**point, "commit": "0" * 40}, self.data), None)  # not one git holds
+        self.assertIsNone(restore.changed_since({"id": "rp-000000000000"}, self.data))
 
     def test_moving_the_end_of_the_quiet_hours_tonight_makes_no_early_report(self):
         # Found in a real night: quiet hours moved later during the night kept the old end, so the report came mid-night.

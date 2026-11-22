@@ -40,6 +40,10 @@
 .sm-again input { flex: 1 1 180px; }
 .sm-decided { margin: 8px 0 0; font-weight: 600; overflow-wrap: anywhere; }
 .sm-approved .sm-decided { color: var(--ok, #1d7f55); }
+/* The building learns from your corrections: work that waits for your look, and the question after Not quite */
+.sm-held { margin: 6px 0 0; overflow-wrap: anywhere; }
+.sm-asking { margin: 0 0 12px; }
+.sm-asking p { margin: 0; overflow-wrap: anywhere; }
 .sm-swipe-hint { display: none; margin: 6px 0 0; }
 @media (hover: none) and (pointer: coarse) { .sm-swipe-hint { display: block; } }
 .sm-lean-good { background: var(--ok-bg, #e8f5ee); box-shadow: inset 4px 0 0 var(--ok, #1d7f55); }

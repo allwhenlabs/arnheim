@@ -605,7 +605,18 @@ class Intake:
             return f"{label} is over today's budget, so it starts once you let its agents go on."
         if self.busy(task["project"]):
             return f"An agent started from the building is at work on {label}, so it starts when that one finishes."
+        if self.looking(task["project"]):
+            return f"Work on {label} waits for you to look at it on Show me, so it starts once you say Looks good."
         return None
+
+    def looking(self, project):
+        """Finished work on this floor waits for your look on Show me before it counts as done (Control.awaiting_look)."""
+        waits = getattr(self.control, "awaiting_look", None)
+        if waits is None:
+            return False
+        with self.control.lock:
+            runs = [r for r in self.control.runs.values() if r.get("project") == project and r.get("look")]
+        return any(waits(r) for r in runs)
 
     def launch(self, task, night=False):
         """Starts its agent: Claude Code through Control.start, Codex as carrying on does. Under the lock. `night`: the
@@ -710,6 +721,8 @@ class Intake:
                 if task["state"] != "started":
                     continue
                 run = next((r for r in runs if r.get("ready") == task["id"]), None) or next((r for r in runs if r.get("key") == task.get("key")), None)
+                if run is not None and getattr(self.control, "awaiting_look", lambda r: False)(run):
+                    continue  # Show me asks you first about this kind of change: done once you say Looks good (reviewed)
                 if run is None or (run.get("state") != "working" or not self.control.alive(run)):
                     task.update(state="finished", outcome=(run or {}).get("state") or "done", finished=now)
                     self.save(task)

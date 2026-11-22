@@ -104,6 +104,7 @@ FILES_KEPT = 30
 HISTORY = os.path.join(DATA, "feeds", "history")
 HISTORY_DAYS = 7
 HISTORY_MOST = 5000  # moments in a day at most
+PROOFS_MOST = 500  # checks' results kept in a day at most (each is written whole with every moment)
 COUNT = {"PostToolUse", "Stop", "UserPromptSubmit", "SubagentStop", "SessionEnd", "PreCompact"}  # moments its spending is counted
 
 
@@ -490,7 +491,9 @@ def log(event, talk, project, extra, verdict, spent=None):
 
 def add_moment(talk, project, kind, what, spent=None):
     """Adds a moment to today's history, for the replay. Any connector can (connect/agents.py). `spent`, tokens
-    by project, keeps the day's highest for each."""
+    by project, keeps the day's highest for each. Each moment carries what its conversation has spent today so far, when
+    that is known, and the checks' results (note_proof) are kept as they were: the week on one page reads both
+    (connect/week.py)."""
     now = time.time()
     day = budget.local_day()
     path = os.path.join(HISTORY, day + ".json")
@@ -499,8 +502,9 @@ def add_moment(talk, project, kind, what, spent=None):
             kept = json.load(handle)
         rows = kept.get("moments") or []
         had = kept.get("spent") if isinstance(kept.get("spent"), dict) else {}
+        proofs = kept.get("proofs") if isinstance(kept.get("proofs"), dict) else {}
     except (OSError, ValueError, AttributeError):
-        rows, had = [], {}
+        rows, had, proofs = [], {}, {}
     spent_now = dict(had)
     for p, tokens in (spent or {}).items():
         if isinstance(p, str) and isinstance(tokens, int) and tokens > (had.get(p) if isinstance(had.get(p), int) else -1):
@@ -509,13 +513,12 @@ def add_moment(talk, project, kind, what, spent=None):
     if kind == "changed" and any(r.get("key") == key and r.get("kind") == "changed" and r.get("what") == what and now - r.get("at", 0) < 300
                                  for r in rows[-40:]):
         return  # the same file again within five minutes: once is enough
-    rows = (rows + [{"at": round(now, 1), "key": key, "project": project, "title": talk.get("title"), "kind": kind, "what": line(what, 160)}])[-HISTORY_MOST:]
-    os.makedirs(HISTORY, exist_ok=True)
-    part = f"{path}.{os.getpid()}.part"
-    with open(part, "w", encoding="utf-8") as handle:
-        json.dump({"about": "The day's moments, for the building's replay and its history (docs/connect.md, \"Replay the day\"). Safe to delete.",
-                   "moments": rows, "spent": spent_now}, handle, ensure_ascii=False)
-    os.replace(part, path)
+    row = {"at": round(now, 1), "key": key, "project": project, "title": talk.get("title"), "kind": kind, "what": line(what, 160)}
+    mine = talk.get("spent") if isinstance(talk.get("spent"), dict) else {}
+    if mine.get("day") == day and isinstance(mine.get("tokens"), int) and not isinstance(mine.get("tokens"), bool):
+        row["tokens"] = mine["tokens"]  # what this conversation has spent today so far (connect/week.py)
+    rows = (rows + [row])[-HISTORY_MOST:]
+    keep_history(path, rows, spent_now, proofs)
     oldest = (datetime.date.today() - datetime.timedelta(days=HISTORY_DAYS)).isoformat()
     for name in os.listdir(HISTORY):  # a week is kept
         if name.endswith(".json") and name[:10] < oldest:
@@ -523,6 +526,39 @@ def add_moment(talk, project, kind, what, spent=None):
                 os.remove(os.path.join(HISTORY, name))
             except OSError:
                 pass
+
+
+def keep_history(path, rows, spent, proofs):
+    """Writes a day's history whole, as a new file renamed over the old one."""
+    os.makedirs(HISTORY, exist_ok=True)
+    part = f"{path}.{os.getpid()}.part"
+    with open(part, "w", encoding="utf-8") as handle:
+        json.dump({"about": "The day's moments, for the building's replay and its history (docs/connect.md, \"Replay the day\"). Safe to delete.",
+                   "moments": rows, "spent": spent, **({"proofs": proofs} if proofs else {})}, handle, ensure_ascii=False)
+    os.replace(part, path)
+
+
+def note_proof(talk, project, proof):
+    """Keeps what a floor's check made of a conversation's work in today's history, newest for each conversation, for
+    the week on one page (connect/week.py): the feed forgets a conversation after it leaves. Under the feed's lock, as
+    add_moment is (connect/prove.py calls it from inside edit_feed). A check still running isn't kept."""
+    state = (proof or {}).get("state")
+    key = (talk or {}).get("id")
+    if state not in ("passed", "failed", "timeout", "error") or not key or not project:
+        return
+    path = os.path.join(HISTORY, budget.local_day() + ".json")
+    try:
+        with open(path, encoding="utf-8") as handle:
+            kept = json.load(handle)
+        kept = kept if isinstance(kept, dict) else {}
+    except (OSError, ValueError):
+        kept = {}
+    proofs = kept.get("proofs") if isinstance(kept.get("proofs"), dict) else {}
+    proofs.pop(key, None)  # newest last, so the oldest go first
+    proofs[key] = {"project": project, "title": line(talk.get("title"), 90) or None, "state": state,
+                   "at": round(float(proof.get("done") or proof.get("at") or time.time()), 1)}
+    keep_history(path, kept.get("moments") if isinstance(kept.get("moments"), list) else [],
+                 kept.get("spent") if isinstance(kept.get("spent"), dict) else {}, dict(list(proofs.items())[-PROOFS_MOST:]))
 
 
 def clash(talk, talks, project, now, mine=None):

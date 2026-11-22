@@ -568,6 +568,9 @@ def start_item(ctrl, floor, item):
                 if said.get("state") == "queued" or (task and task.get("state") == "queued"):
                     raise Refused(one_line(said.get("why") or (task or {}).get("why") or got.get("reply") or "It waits its turn at the front door.", 200))
                 return None, "front door"
+    # Without the front door (which queues it behind the agent at work), one agent at a time on a floor all the same
+    if floor["floor"] in busy_floors(ctrl):
+        raise Refused(f"An agent is at work on {floor['label']} now. It starts when that one is done.")
     try:
         got = ctrl.start(floor["floor"], words)
     except Exception as why:  # Control's Refused, in its own words
@@ -887,10 +890,11 @@ def change(data, ctrl, floor, words, now=None):
 # ---------- starting approved items, one at a time on each floor ----------
 
 def running(ctrl, key):
+    """At work still, or finished work that waits for your look on Show me before it is counted done (Control.awaiting_look)."""
     if not key:
         return False
     try:
-        return bool(ctrl.working(key))
+        return bool(ctrl.working(key)) or bool(getattr(ctrl, "awaiting_look", lambda k: False)(key))
     except Exception:
         return False
 
@@ -913,6 +917,16 @@ def spent_by(work, key, date):
         if isinstance(t, dict) and isinstance(t.get("tokens"), int):
             return t["tokens"]
     return None
+
+
+def busy_floors(ctrl):
+    """The floors with an agent started from the building at work now (yours, the front door's, the night's), by name."""
+    lock, runs = getattr(ctrl, "lock", None), getattr(ctrl, "runs", None)
+    if lock is None or not isinstance(runs, dict):
+        return set()
+    with lock:
+        rows = list(runs.values())
+    return {x.get("project") for x in rows if isinstance(x, dict) and x.get("state") == "working" and ctrl.alive(x)}
 
 
 def step(data, ctrl, now=None):

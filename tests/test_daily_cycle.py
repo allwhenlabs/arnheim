@@ -301,6 +301,24 @@ class DailyCycleTest(unittest.TestCase):
         self.assertEqual(self.states(v, "Tidepool"), ["done", "started", "approved"])
         self.assertEqual(self.states(v, "Lantern"), ["done", "started"])
 
+    def test_never_beside_an_agent_already_at_work_on_the_floor(self):
+        # one agent at a time on a floor, with the front door off too (it queues them itself): your own agent at work on
+        # Tidepool keeps the plan's next item waiting there (found by the Checker)
+        self.switches({"daily_cycle": True, "front_door": False})
+        self.hold()
+        self.control.start("Tidepool", "your own work on the field notes")
+        self.wait_for_starts(1)
+        self.call("day_plan")
+        code, got = self.call("day_approve")
+        self.assertEqual(code, 200, got)
+        v = got["day"]
+        self.assertEqual(self.states(v, "Lantern"), ["started", "approved"])
+        self.assertEqual(self.states(v, "Tidepool"), ["approved", "approved", "approved"])
+        first = next(f for f in v["plan"] if f["label"] == "Tidepool")["items"][0]
+        self.assertIn("An agent is at work on Tidepool now", first.get("waiting") or "")
+        self.release()
+        self.wait_done()
+
     def wait_for_starts(self, n, most=10):
         until = time.time() + most
         while time.time() < until:

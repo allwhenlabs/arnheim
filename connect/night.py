@@ -888,6 +888,15 @@ def settle(data, ctrl, doc, now, win=None):
     changed = False
     talks = None
     for r in doc.get("ran") or []:
+        if r.get("item_waits") and r.get("state") != "working":
+            # Its plan item waits while the run is at work again (Not quite carries the same run on) or waits for your
+            # look; once neither, it is settled as the run last ended, after any work Not quite sent it back for.
+            if not day.running(ctrl, r.get("key")):
+                r.pop("item_waits", None)
+                latest = (run_of(ctrl, r) or {}).get("state")
+                settle_item(data, dict(r, state=latest) if latest in ("done", "failed", "stopped") else r, now)
+                changed = True
+            continue
         if r.get("state") != "working":
             continue
         talks = talks if talks is not None else feed_talks(data)
@@ -925,10 +934,41 @@ def settle(data, ctrl, doc, now, win=None):
         spent = ((talks or {}).get(r.get("key")) or {}).get("spent")
         if isinstance(spent, dict) and isinstance(spent.get("tokens"), int):
             r["spent"] = spent["tokens"]
+        touched = files_changed(data, r)
+        if touched is not None:
+            r["touched"] = touched  # how many of its floor's files differ from its own restore point, as it ended
         if r.get("kind") == "day":
-            settle_item(data, r, now)
+            if r.get("state") == "done" and awaiting_look(ctrl, r):
+                r["item_waits"] = True  # Show me asks you first about this kind of change: the item waits for your look
+            else:
+                settle_item(data, r, now)
         changed = True
     return changed
+
+
+def awaiting_look(ctrl, r):
+    """Whether this run's finished work waits for your look on Show me before it counts as done (Control.awaiting_look)."""
+    if ctrl is None or not r.get("key"):
+        return False
+    try:
+        return bool(getattr(ctrl, "awaiting_look", lambda k: False)(r["key"]))
+    except Exception:
+        return False
+
+
+def files_changed(data, r):
+    """How many of the floor's files differ from the restore point the night shift kept just before this run, or None
+    when that can't be told. The hook counts only an agent's edit tools as changing files, and Codex often changes them
+    with its shell (seen in a real night run: printf >> NOTES.md), so the report asks git instead of saying "Changed
+    nothing"."""
+    own = next((p for p in restore.read_points(data) if r.get("point") and p.get("id") == r["point"]), None)
+    if not own:
+        return None
+    try:
+        return restore.changed_since(own, data)
+    except Exception as error:  # the report goes on without it
+        note(data, error)
+        return None
 
 
 def settle_item(data, r, now):
@@ -950,13 +990,18 @@ def settle_item(data, r, now):
 
 
 def busy(data, ctrl, project, doc, talks):
-    """Why a floor can't take another agent now, or None: one from the building at work there, one of the night's, or
-    any conversation the feed says is at work there."""
+    """Why a floor can't take another agent now, or None: one from the building at work there, one of the night's, any
+    conversation the feed says is at work there, or finished work there that waits for your look on Show me."""
     if any(r.get("project") == project and r.get("state") == "working" for r in doc.get("ran") or []):
         return "One of the night's agents is at work on this floor."
     try:
         if ctrl is not None and ctrl.intake.busy(project):
             return "An agent started from the building is at work on this floor."
+    except Exception:
+        pass
+    try:
+        if ctrl is not None and ctrl.intake.looking(project):
+            return "Work on this floor waits for you to look at it on Show me, so the next starts once you say Looks good."
     except Exception:
         pass
     if any(c.get("project") == project and c.get("working") for c in talks.values()):
@@ -1173,7 +1218,7 @@ def tick(data=None, ctrl=None, now=None):
             if not (sp["in"] and doc["night"] == sp["night"]) and float(doc.get("ends") or 0) > now:
                 doc["ends"] = now  # the quiet hours were moved to end earlier: this night is over now
                 keep(data, doc)
-            if doc["night"] != sp["night"] and any(r.get("state") == "working" for r in doc["ran"]):
+            if doc["night"] != sp["night"] and any(r.get("state") == "working" or r.get("item_waits") for r in doc["ran"]):
                 if settle(data, ctrl, doc, now):
                     keep(data, doc)
         if sp["in"]:
@@ -1276,12 +1321,27 @@ UNSEEN = {"state": "unseen", "word": "Not proven",
           "line": "Arnheim didn't see its steps (its hooks aren't set up where it ran), so nothing checked its work."}
 
 
+def by_commands(n):
+    """The proof of a run the hook saw change nothing, whose floor's files differ from its restore point all the same."""
+    return {"state": "claimed", "word": "Not proven",
+            "line": f"{plural(n, 'file', 'files')} on its floor {'differs' if n == 1 else 'differ'} from how "
+                    f"{'it was' if n == 1 else 'they were'} before it started, and its edit tools changed nothing, so nothing "
+                    f"checked {'it' if n == 1 else 'them'}."}
+
+
+def seen_nothing(r, talk):
+    """Whether a run is known to have changed nothing: the hook saw no change, and git saw none either (or couldn't say)."""
+    return talk is not None and proof_of(talk)["state"] == "none" and not r.get("touched")
+
+
 def item_view(data, r, doc, talks, kept_points, now):
     talk = talks.get(r.get("key"))
     if r.get("state") == "working":
         proof = {"state": "checking", "word": "At work", "line": "It is still at work."}
     else:  # no record of it at all is not the same as a record that it changed nothing
         proof = proof_of(talk, now) if talk is not None else dict(UNSEEN)
+        if proof["state"] == "none" and isinstance(r.get("touched"), int) and r["touched"] > 0:
+            proof = by_commands(r["touched"])  # its shell changed files the hook doesn't count as edits
     point = point_of(data, r, kept_points)
     nothing = proof["state"] == "none"
     later = [x for x in doc.get("ran") or [] if x is not r and x.get("project") == r.get("project")
@@ -1454,8 +1514,7 @@ def undo(data, ctrl, rid):
     if any(x.get("project") == r.get("project") and x.get("state") == "working" and ctrl.alive(x) for x in runs):
         raise Refused(f"An agent started from the building is at work on {r.get('label') or r.get('project')}. Let it finish "
                       "or stop it first, then undo this.")
-    talk = feed_talks(data).get(r.get("key"))
-    if talk is not None and proof_of(talk)["state"] == "none":
+    if seen_nothing(r, feed_talks(data).get(r.get("key"))):
         raise Refused("It changed no files, so there is nothing to put back.")
     point = point_of(data, r)
     if not point:

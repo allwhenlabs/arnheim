@@ -38,10 +38,12 @@ import { createAlerts, freshAlerts } from './alerts.js';
 import { setVoiceSaved, voiceSaved, voiceWanted } from './voice.js';
 import { createBeside } from './beside-page.js';
 import { createFrontDoor } from './front-door.js'; // one front door: work in your words becomes a ready task
-import { createSitting, dueOffice, officeAlert, parseTimes } from './sitting.js'; // a chain of command and office hours
+import { asideNote, createSitting, dueOffice, learnAsk, officeAlert, parseTimes } from './sitting.js'; // a chain of command and office hours
 import { createShowMe } from './show-me.js'; // Show me: pictures of finished work, Looks good or Not quite
 import { createDay } from './day-page.js'; // the daily cycle: a plan in the morning, a close in the evening
 import { createNight } from './night.js'; // the night shift: approved work, overnight, on allowance that would go unused
+import { createWeek } from './week.js'; // the week on one page: each floor's week, and where the allowance went
+import { createMorning, soundAllowed } from './morning.js'; // a morning briefing out loud: the night, the plan, "Approve the day?"
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -175,6 +177,55 @@ const night = createNight({
   href: (key) => { const c = convoNow(key); return c ? convoHref(c) : null; },
   done: (promise, said) => controlDone(Promise.resolve(promise), said),
   sampleUrl: () => `${dir}/night.json`,
+});
+// The week on one page (week.js; docs/connect.md, "The week on one page"): on Needs you on Sundays, in Activity any time,
+// and what the receptionist says to "how did the week go?". Your own company's through control, a phone's too; the
+// made-up company's from sample/week.json.
+const week = createWeek({
+  control,
+  where: () => {
+    if (!org || !work) return 'none';
+    if (madeUp() || dir !== 'data') return 'sample';
+    if (fromAway()) return phoneMe?.phone && phoneMe?.control && control.on ? 'phone' : 'none';
+    return 'here';
+  },
+  changed: () => render(),
+  href: (project) => { const f = floorOf(project); return f ? `#/${f.id}` : null; },
+  switchOn: (name) => { const s = switchBoard?.switches?.find((x) => x.name === name); return s ? !!s.on : null; },
+  sampleUrl: () => `${dir}/week.json`,
+});
+// A morning briefing out loud (morning.js; docs/connect.md, "A morning briefing out loud"): the first time the page
+// opens each day, once today's plan is made, the receptionist says how the night went and the plan floor by floor, and
+// asks "Approve the day?". She says it in Talk while this device's voice is on and the browser lets the page make sound;
+// otherwise the same words are a card at the top of Needs you. Your own company's through control, the made-up one's own.
+const morningVoice = () => voiceSaved() && features.get('talk') && !!dock;
+const morning = createMorning({
+  company: () => org?.company || '',
+  day: () => dayCycle.now(),
+  night: () => night.now(),
+  known: () => {
+    if (!org || !work) return false;
+    if (madeUp() || dir !== 'data') return !!dayCycle.now() && !!night.now();
+    const s = control.state();
+    return control.on && 'day' in s && 'night' in s;
+  },
+  // its switch, on this computer's own page; the made-up company and a phone have it on
+  switchOn: () => (madeUp() || dir !== 'data' || fromAway() ? null : switchBoard ? switchOn('morning') : undefined),
+  approve: () => dayCycle.approve(null),
+  change: (words) => dayCycle.change(words),
+  speakable: () => morningVoice() && !walkOn() && !building?.walking?.() && !tour.isOpen && !sitting.isOpen && soundAllowed(),
+  speak: (again) => {
+    if (!morningVoice() || walkOn() || building?.walking?.()) return false;
+    if (again && dock.isOpen) dock.close();
+    deskVoice = null; // only the last question waits for your word
+    starting = null;
+    doorWait = null;
+    return dock.open(deskWho(), { greet: again ? 'again' : true }) !== false;
+  },
+  voiceOn: morningVoice,
+  ready: () => { const v = dock?.voice?.info?.(); return !!v?.on && v.server?.state === 'ready'; },
+  changed: () => render(),
+  done: (promise) => controlDone(Promise.resolve(promise), (said) => said),
 });
 // The agents Talk can put you through to: those at work or asking you something, the one whose page is open, and
 // the one you are talking to.
@@ -575,7 +626,8 @@ function setupDesk() {
   };
   const weekly = {
     id: 'weekly',
-    answer: (c) => !c.floor && WEEKLY_ASKED.test(c.text) && { lines: [sayWeek(weekReport(weekDays(), Date.now() / 1000, heldNow()), label)], go: c.go('#/activity', 'Show me') },
+    // the week on one page when it is on (week.js), or else the weekly report
+    answer: (c) => !c.floor && WEEKLY_ASKED.test(c.text) && { lines: [week.heard(c.text) || sayWeek(weekReport(weekDays(), Date.now() / 1000, heldNow()), label)], go: c.go('#/activity', 'Show me') },
   };
   const shelf = {
     id: 'howto',
@@ -660,6 +712,9 @@ function setupDesk() {
       // The night shift (night.js): "how did the night go?", "what's on tonight?"
       const overnight = night.heard(text);
       if (overnight != null) return (async function* nightShift() { yield await overnight; })();
+      // The week on one page (week.js): "how did the week go?", "where did the allowance go?"
+      const theWeek = week.heard(text);
+      if (theWeek != null) return (async function* weekPage() { yield theWeek; })();
       const reads = control.on ? allowReadsAsked(text, waitingNow()) : null;
       if (reads) return (async function* allowed() { yield await allowReads(reads); })();
       const decision = rememberAsked(text);
@@ -981,6 +1036,8 @@ const talk = {
     const stand = standOf(who);
     if (stand) return stand.greet();
     if (who.href === DESK) {
+      const briefing = sitting.isOpen ? null : morning.greeting(); // a morning briefing out loud (morning.js): her greeting is the briefing, never during the sitting, whose "yes" is its own
+      if (briefing) { briefTold = true; return briefing; }
       const hr = new Date().getHours();
       const hello = hr >= 5 && hr < 12 ? 'Good morning' : hr >= 12 && hr < 18 ? 'Good afternoon' : hr >= 18 && hr < 23 ? 'Good evening' : 'Hello';
       const b = briefTold ? null : briefNow();
@@ -1000,11 +1057,17 @@ const talk = {
     if (sitting.isOpen) { const said = sitting.heard(text, { spoken }); if (said) return said; } // office hours' sitting: "next", "allow", "the first one"
     const lead = leads.floorOf(who);
     // The daily cycle first (day-page.js): a lead answers for their floor's part, the desk and the assistant for the day
+    if (who.href === DESK && !sitting.isOpen) { // the sitting's own words are never an answer to "Approve the day?"
+      const morningSaid = morning.heard(text); // "Approve the day?" from the morning briefing: yes, change ..., not now (morning.js)
+      if (morningSaid != null) return morningSaid;
+    }
     if (lead || who.href === DESK || isAide(who)) {
       const today = dayCycle.heard(text, lead ? { project: lead.project, label: lead.label } : null);
       if (today != null) return today;
       const overnight = night.heard(text); // the night shift (night.js): "how did the night go?", "what's on tonight?"
       if (overnight != null) return overnight;
+      const theWeek = week.heard(text); // the week on one page (week.js): "how did the week go?"
+      if (theWeek != null) return theWeek;
     }
     if (lead) return leads.says(lead, text, { spoken });
     const stand = standOf(who);
@@ -1093,7 +1156,12 @@ const talk = {
   speakUp(who) {
     const lead = leads.floorOf(who);
     if (lead) return leads.speakUp(lead);
-    if (who.href === DESK || isAide(who)) return leads.speakUp(null);
+    if (who.href === DESK && !sitting.isOpen) { const briefing = morning.unasked(); if (briefing) return briefing; } // the morning briefing, once her voice is ready (morning.js), never during the sitting
+    if (who.href === DESK || isAide(who)) {
+      const news = leads.speakUp(null);
+      if (news) morning.drop(); // a lead's news took the conversation: a "yes" now is to that, never to "Approve the day?"
+      return news;
+    }
     // an agent: its question, that it has your note, its answer, that it is holding (beside-page.js)
     const item = talkItem(who);
     return item && isConvo(item) ? beside.speakUp(item.id) : null;
@@ -1371,6 +1439,8 @@ const SWITCH_SETS = [
 ];
 SWITCH_SETS.find(([label]) => label === 'While Arnheim runs')?.[1].push('daily_cycle'); // the daily cycle (day-page.js)
 SWITCH_SETS.find(([label]) => label === 'While Arnheim runs')?.[1].push('night'); // the night shift (night.js)
+SWITCH_SETS.find(([label]) => label === 'On this page')?.[1].push('week'); // the week on one page (week.js)
+SWITCH_SETS.find(([label]) => label === 'On this page')?.[1].push('morning'); // a morning briefing out loud (morning.js)
 // The words sit outside the label, so tapping them to read them all (a phone has no pointing) never flips the switch.
 const aboutLine = (text) => h('span.small.muted.switch-about', text); // in full: rows that open on a hover move under the pointer
 function switchRow(s) {
@@ -1510,7 +1580,16 @@ const officeQuiet = () => { const o = officeNow(); return !!o.on && !o.open; };
 const SAMPLE_ACTIONS = {
   on: true,
   replyQuestion: () => Promise.resolve({ sample: true }),
-  undoAnswer: (id) => { const a = (sampleChain?.answered || []).find((x) => x.id === id); if (a) a.undone = true; return Promise.resolve({ sample: true, note: 'Undone, in this tab only: the company is made up.' }); },
+  undoAnswer: (id) => {
+    const a = (sampleChain?.answered || []).find((x) => x.id === id);
+    const learn = { ask: 'Should the leads stop answering this kind of question for you?' }; // asked once, as for your own company
+    if (a) { a.undone = true; a.learn = learn; }
+    return Promise.resolve({ sample: true, note: 'Undone, in this tab only: the company is made up.', learn });
+  },
+  // The building learns from your corrections: Yes or No to what it asked, in this tab only
+  learnYes: ({ id }) => { const a = (sampleChain?.answered || []).find((x) => x.id === id); if (a) a.learn = null; return Promise.resolve({ sample: true, reply: 'Done, in this tab only: the company is made up, so nothing is kept.' }); },
+  learnNo: ({ id }) => { const a = (sampleChain?.answered || []).find((x) => x.id === id); if (a) a.learn = null; return Promise.resolve({ sample: true, reply: '' }); },
+  learnUndo: () => Promise.resolve({ sample: true, reply: 'Put back, in this tab only.' }),
   setOffice: () => Promise.resolve({ sample: true }),
   startReady: () => Promise.resolve({ sample: true, reply: 'This company is made up, so nothing real starts.' }), // its ready tasks (front-door.js)
 };
@@ -1531,6 +1610,7 @@ const sitting = createSitting({
 });
 function openSitting() {
   if (!chainHere() && !madeUp()) { controlNote = notConnected(); noteFresh = true; render(); return; }
+  morning.drop(); // "Approve the day?" stops waiting: a "yes" in the sitting is the sitting's
   sitting.open();
 }
 
@@ -1590,8 +1670,20 @@ function answeredCard() {
         `${a.undone ? 'Undone. ' : ''}Answered ${a.answer}, from ${a.from}${/[.!?]['"”’]?$/.test(a.from || '') ? '' : '.'} ${a.project ? floorLabel(a.project) : ''}`.trim(), a.undone ? 'quiet' : 'ok');
       li.classList.add('answered-row');
       if (!a.undone) li.append(undoForm(a, sample));
+      else if (a.learn) li.append(learnPart(a, sample));
       return li;
     })));
+}
+// The building learns from your corrections (connect/deputy.py): after an Undo, asked once, here: "Should the leads stop
+// answering this kind of question for you?" Yes keeps it with you, No says nothing more. Or, after a second Undo of the
+// same decision, that it was set aside, with Undo.
+function learnPart(a, sample) {
+  const acts = sample ? SAMPLE_ACTIONS : control;
+  if (a.learn.set_aside) return asideNote(a.learn.said, () => controlDone(acts.learnUndo(a.id), (r) => r?.reply || 'Put back.'));
+  return learnAsk(a.learn.ask, {
+    yes: () => controlDone(acts.learnYes({ id: a.id }), (r) => r?.reply || ''),
+    no: () => controlDone(acts.learnNo({ id: a.id }), () => ''),
+  });
 }
 function undoForm(a, sample) {
   const go = (event) => {
@@ -1639,19 +1731,24 @@ function officeCard() {
     noteOnce());
 }
 
-// Settings: the decisions the leads answer from, each to take out. Shown while Leads answer what you've decided is on.
+// Settings: the decisions the leads answer from, each to take out. Shown while Leads answer what you've decided is on,
+// or while Show me asks you first about a kind of change (learned from a Not quite), so it can be taken out too.
 function decisionsCard() {
-  if (!chainHere() || !control.chainOn()) return null;
-  const { decisions = [], always_ask: always = [] } = control.decisions();
-  const line = (glyph, title, sub, id, said) => h('li', h('div.row.memory-row', dot(glyph), h('span.row-main', h('span.row-title', title), sub && h('span.row-sub', sub)),
-    btn('Remove', () => controlDone(control.forgetDecision(id), () => said))));
+  if (!chainHere()) return null;
+  const { decisions = [], always_ask: always = [], set_aside: aside = [] } = control.decisions();
+  if (!control.chainOn() && !always.some((a) => a.show)) return null;
+  const line = (glyph, title, sub, id, said, label = 'Remove') => h('li', h('div.row.memory-row', dot(glyph), h('span.row-main', h('span.row-title', title), sub && h('span.row-sub.learn-from', sub)),
+    btn(label, () => controlDone(control.forgetDecision(id), () => said))));
+  const where = (r) => [r.project ? floorLabel(r.project) : null, r.from ? `Learned: ${r.from}` : null].filter(Boolean).join('. ') || null;
   return h('section.panel-card.decisions-card',
     sectHead('check-check', 'What the leads answer from'),
-    h('p.small.muted', 'Your answers with Remember my answer ticked: the same question on the same floor is answered with them. The company\'s memory, above, counts too. And the questions you always answer yourself.'),
-    decisions.length || always.length
+    h('p.small.muted', 'Your answers with Remember my answer ticked: the same question on the same floor is answered with them. The company\'s memory, above, counts too. And the questions you always answer yourself, the kinds of change Show me asks you about first, and the decisions set aside after two Undos, with what each was learned from.'),
+    decisions.length || always.length || aside.length
       ? h('ul.list', [
         ...decisions.map((d) => line('quiet', `"${d.question}": ${d.answer}`, d.project ? floorLabel(d.project) : null, d.id, 'Removed. That question comes to you again.')),
-        ...always.map((a) => line('needs', `Always ask me: "${a.question}"`, a.project ? floorLabel(a.project) : null, a.id, 'Removed. The leads may answer it again from your decisions.')),
+        ...always.filter((a) => !a.show).map((a) => line('needs', `Always ask me: "${a.question}"`, where(a), a.id, 'Removed. The leads may answer it again from your decisions.')),
+        ...always.filter((a) => a.show).map((a) => line('needs', `Show me asks me first: changes like "${a.question}"`, where(a), a.id, 'Removed. Work like that counts as done when its agent finishes again.')),
+        ...aside.map((n) => line('quiet', `Set aside: "${n.text || 'a decision'}"`, 'Undone twice, so the leads don\'t answer from it.', n.id, 'Put back. The leads may answer from it again.', 'Put back')),
       ])
       : empty('Nothing yet. Tick Remember my answer when you answer an agent\'s question.'));
 }
@@ -1907,7 +2004,7 @@ function weekCard() {
     else done("This browser can't copy from here.");
   };
   return h('section.panel-card',
-    sectHead('calendar-days', 'This week'),
+    week.on() ? sectHead('messages-square', "The week's conversations") : sectHead('calendar-days', 'This week'), // beside the week on one page (week.js)
     h('p', sayWeek(report, label)),
     h('ul.list', report.floors.map((f) => row(floorOf(f.project) ? `#/${floorOf(f.project).id}` : null, label(f.project) || 'No floor', floorLine(f), 'quiet'))),
     h('div.control-row', btn('Copy the report', copy)),
@@ -2473,6 +2570,7 @@ function viewOverview() {
     body: [
       h('div.home-head', h('h2', { id: 'view-title', tabindex: '-1' }, heading), h('p', sub), noteOnce('.done-note')),
       fromAway() && !phoneMe?.phone && h('p.small', h('strong', 'View only. '), 'You are looking from another device: you can look round and walk in, but nothing here changes anything.'),
+      morning.home(), // a morning briefing, when it isn't said out loud: the night, the plan, "Approve the day?" (morning.js)
       pausedCard(),
       officeBanner(), // office hours: what waits for the sitting, and Open a sitting now
       firstRun && (flow ? setupCard() : welcomeCard()),
@@ -2490,6 +2588,7 @@ function viewOverview() {
         reads && h('div.control-row', { style: 'margin-bottom: 8px' }, btn(reads.label, () => controlDone(allowReads(reads.ids), (said) => said), '.primary')),
         h('ul.list', agentsRest.map(waitingItem))),
       night.home(), // the night shift: how last night went, until you've seen it (night.js)
+      week.home(), // the week on one page, on Sundays, until you've put it away (week.js)
       showMe.needsCard(), // Show me: "3 things to look at" (show-me.js)
       dayCycle.home(), // the daily cycle: today's plan, or in the evening its close (day-page.js)
       door.box(), door.cards(), // one front door: "What needs doing?", and the ready tasks
@@ -2532,6 +2631,7 @@ function viewActivity() {
       healthCard(),
       waitMeter(all) && h('section.panel-card', waitMeter(all)),
       routinesCard(),
+      week.activity(), // the week on one page: each floor's week, and where the allowance went (week.js)
       weekCard(),
       replayCard(),
       hasStory() && h('section.panel-card',
@@ -4285,6 +4385,7 @@ async function boot() {
   beside.start(); // the agents' screens, where they can be read (beside-page.js)
   dayCycle.start(); // the daily cycle: the made-up day, and its alerts (day-page.js)
   night.start(); // the night shift: the made-up night, and the morning's alert (night.js)
+  morning.start(); // a morning briefing out loud, once a day as the plan is ready (morning.js)
   setupAnswering();
   showAnswering();
   showCounts();

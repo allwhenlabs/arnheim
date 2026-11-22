@@ -353,7 +353,8 @@ week?"** or **"Who changed reader/bookmark.js?"**, and they answer from the mome
 **This week**, in Activity, is the weekly report: each floor's conversations, the instructions you
 gave, the files they changed, how many finished or stopped, how long they waited on you, and what they
 spent. **Copy the report** copies it as plain text, for a message or a document. Ask **"How was the
-week?"** to hear it summed up.
+week?"** to hear it summed up. With the week on one page on (step 32), it sits under that page as **The
+week's conversations**, and the receptionist answers from the page.
 
 **How long things wait on you**: each line under "Waiting on you" says how long it has waited, and a
 meter fills as the longest an agent has been held up grows, amber past five minutes and red past
@@ -688,7 +689,7 @@ change needs that page's own token.
   change one file (step 10), and the five parts of working beside them (step 24): looking over their
   shoulder, replies straight away, questions coming to you, reviewing together, and hold on and carry
   on; and the leads answering what you've decided (step 26) and office hours (step 27), with their
-  own group. The hooks read them at each event, so a new setting holds from the agent's
+  own group; Show me (step 28); and learning from your corrections (step 33). The hooks read them at each event, so a new setting holds from the agent's
   next step. Off keeps what was there: the memory, the standing allows and the budgets wait until
   their switch is on again.
 - **While Arnheim runs:** the receptionist and your assistant thinking with Claude (`--brain`),
@@ -696,8 +697,9 @@ change needs that page's own token.
   (`--no-git` turns it off, step 3), looking for a newer Arnheim (below), the daily cycle (step 29),
   with its two times under its switch, and the night shift (step 30), with its quiet hours and share
   under its switch.
-- **On this page:** the Your plan card (step 18), carrying on at a limit (step 21), and, on this device,
-  desktop alerts (step 4) and the talking switches, which are each browser's own.
+- **On this page:** the Your plan card (step 18), carrying on at a limit (step 21), the morning briefing
+  (step 31), the week on one page (step 32), and, on this device, desktop alerts (step 4) and the
+  talking switches, which are each browser's own.
 
 **Look for a newer Arnheim** is on unless you switch it off. When Arnheim's folder is a git checkout
 of github.com/allwhenlabs/arnheim, `serve.py` asks GitHub as it starts and once a day whether `main`
@@ -1020,6 +1022,7 @@ for a turn that ended with a question, as the words it carries on with. Each one
 under **Answered for you**, and in the sitting, with **Undo**. Undo tells the agent "The person changed
 this", with what you write or "don't take that earlier decision as the answer", before its next step (after
 it for Codex, which takes messages there), and that decision is never used for that kind of question again.
+Then it asks once whether the leads should stop answering that kind of question for you (step 33).
 Settings lists **What the leads answer from**: your remembered answers and the questions you always answer
 yourself, each with **Remove**.
 
@@ -1160,7 +1163,8 @@ when the last is no longer at work. With the front door, an item goes in as a re
 floor, with the plan's title, and is started there once, so it carries Done when and Proven by and
 the plan follows its agent; if the front door queues it, the item says why it waits. With the front
 door switched off, it starts as an agent started from the building, told it is one item on today's
-approved plan, with the floor's check as for any agent started there. Nothing starts while every agent is paused, or on a floor past its budget today: the
+approved plan, with the floor's check as for any agent started there, and never while another agent
+started from the building (yours too) is at work on that floor. Nothing starts while every agent is paused, or on a floor past its budget today: the
 item says why it waits, and starts once that changes. An item that has started can't be dropped: stop
 its agent instead.
 
@@ -1271,7 +1275,11 @@ The night shift keeps a restore point of the floor's files just before it starts
 16), so there is a way back even where Arnheim's hooks aren't set up; with no restore point, nothing
 starts. It counts as proven only when its floor's check passes after its last change (step 5), which
 Arnheim knows only where its hooks see the agent's steps: an agent whose steps it never saw is reported
-as not proven, never as having changed nothing. When a reading shows the night's cap reached, or the
+as not proven, never as having changed nothing. The hooks count only an agent's edit tools as changing
+files, and Codex often changes them with its shell instead, so when a run ends git compares the floor's
+files with that restore point: when the hook saw no edit but files differ, the report says how many
+differ from how they were before the run started (git can't say who changed them) and calls it not
+proven, with Undo, and only one that git also saw change nothing is "Changed nothing". When a reading shows the night's cap reached, or the
 week started again so what would have gone unused is gone, or nothing says how close the limit is (for
 Claude Code, two probes in a row brought no reading; for Codex, none has come for 15 minutes), it is
 stopped at its next step (the brake;
@@ -1305,6 +1313,166 @@ ready task, and `night_undo` takes `{id}` for one of its runs.
 The made-up company has a made-up night (`sample/night.json`) that says so. Undo, Show me and the
 Tonight ticks there change only the page: nothing runs.
 
+## 31. A morning briefing out loud
+
+The first time you open the building each day, once today's plan is made (step 29) and before the
+evening close, the receptionist sums up the morning in a few sentences: what the night shift (step 30)
+finished overnight and what of it is proven, then today's plan floor by floor, and then she asks
+**"Approve the day?"**. It is a switch in Settings (step 20), **A morning briefing**, on unless you
+switch it off. With the daily cycle off and the night shift on, she says how the night went, once its
+report is in and until you have seen it.
+
+**Out loud, or as a card.** She says it in Talk only while this device's voice is on (Settings,
+Talking, **Speak out loud**) and the browser lets the page make sound without a tap first. Most
+browsers wait for one tap on a page before it may sound, so on a page just opened you usually get the
+card: the same words at the top of Needs you, with **Approve the day**, **Not now**, a box to change
+the plan in words, and, while the voice is on, **Say it out loud**, which puts you with her in Talk to
+hear it. If the page was open and touched already when the plan arrived, she says it as you come back
+to it. Her voice takes a few seconds to wake the first time: she says hello at once and the rest as
+soon as she can be heard (after half a minute, the words show anyway).
+
+**Your answer**, said or typed to her:
+
+- "yes" (or "approve the day", "go ahead", "sounds good") approves the whole day, as **Approve the
+  day** on the plan does, and its first items start;
+- "change" and what to change ("change: drop the second one on Lantern", "add: tidy the README on
+  Tidepool", "do the third one first on Kitefield") changes the plan as the plan's own box does, and
+  she asks again; "change" alone, and she asks what;
+- "not now" (or "later", "no") leaves the plan as it is, waiting on Needs you;
+- anything else ends the question and is answered as usual. Naming a floor ("approve Lantern's plan")
+  approves just that floor, as always. A bare "okay", "fine" or "sure" is anything else: it is as often
+  said to something else, so it never approves the day.
+
+Opening office hours' sitting (step 27) ends the question too: a "yes" in the sitting is the sitting's,
+never the day's. Today's plan stays on Needs you until you answer it there.
+
+**Once a day on each device.** The day it was given is kept in the browser (`localStorage`), so a
+reload, another tab or the walk later that day doesn't say it again, and tomorrow it comes again. A
+private window that keeps nothing gives it once while the page is open. Nothing is kept on the server.
+A phone paired to control agents ([phone.md](phone.md)) gets its own briefing, through control, and
+since the switches are only on this computer's page, it is always on there. Words you type into its change box go to the daily cycle's `day_change` (step 29),
+which checks them for secrets before anything is kept.
+
+The made-up company has a made-up morning (its own day and night) that says so: approving or
+changing it changes only the page.
+
+## 32. The week on one page
+
+On Sundays, Needs you has **This week**, and Activity has it any time. For each floor: what finished
+and was proven, what was undone, and what waits for you now. Then where the week's allowance went:
+the daily plans (step 29), the night shift (step 30), work Show me sent back with Not quite (step 28),
+and your own conversations, each as a share of what was used. It is a switch in Settings (step 20),
+**The week on one page**, on unless you switch it off, and it needs control (step 4), because what the
+plans and the night shift did is read through it. **Got it** puts Sunday's away until next week.
+
+**What it reads.** Only what Arnheim keeps already; reading it starts nothing and writes nothing. The
+week is today and the six days before it.
+
+- **Finished**: a conversation that changed files and finished, an item of the plan that finished, and
+  a night run that finished, each once. A conversation that only answered you isn't counted.
+- **Proven**: its floor's check passed after its last change (step 5). The hook now keeps each check's
+  result in the day's history (`data/feeds/history/`, under `proofs`), because the feed forgets a
+  conversation once it leaves. The daily cycle's close (step 29) adds the proven work it saw. Work no
+  check ran on says "Not checked", never proven.
+- **Undone**: a night run you undid, and every time you put a floor's files back from the building
+  (step 16; each Undo keeps a restore point of how things were first, and that is what is counted).
+- **Waits for you**: a Show me card to look at, today's plan waiting for your approval or held up,
+  a ready task waiting for Start (step 25), an agent's question, and the work list's tasks that need you.
+
+**Where the allowance went.** As shares of the new tokens Arnheim counted, the same measure as a
+floor's budget (step 7) and the day's close: the week's total from the day files' spending, what each
+item of the plan spent, what each night run spent, and what work sent back with Not quite spent from
+the moment you sent it to the end of the work that followed (the hook now notes each conversation's
+tokens at each moment, so this can be counted). The rest is your own conversations. Show me's pictures
+are taken on this computer and use none of your allowance. Beside the shares, your plan's weekly limit
+as Claude Code and Codex last reported it (step 18). Plan limits are a percentage, not tokens, so the
+two are never mixed into one number.
+
+**When it doesn't know, it says so.** A day with no history at all says "No readings Tuesday, so your
+own conversations then aren't counted": what the plan's items and the night's runs spent is in their own
+files, so it still is. Work sent back before the hook counted tokens per moment is said to be in your
+own conversations. A plan item's and a night run's spending is taken once, as the item or the run ends:
+work Show me sent back that ended by then is in that share alone, never counted twice (an item Show me
+holds for your look ends only after that work), and sent-back work that ended after that is counted as Show me's.
+A title that names a password, token or key is never shown: it says the title names a secret instead.
+
+**Out loud and on a phone.** Ask the receptionist or your assistant "how did the week go?", "where did
+the allowance go?" or "what did this week cost?": they answer from it, and with it switched off, from
+the weekly report (step 8) as before. A paired phone that may control agents ([phone.md](phone.md))
+has it through control. `python3 connect/week.py` says the week in the terminal; `--json` gives what
+the page gets.
+
+**Control's name.** For a page of your own, or a phone: `week` reads it (`{on, id, from, to, sunday,
+days: [{date, name, read}], missing, floors: [{project, label, finished, proven, failed, undone, waits,
+line, items: {finished: [{title, how, proof}], undone: [{title, how}], waits: [{title, why}]}}],
+allowance: {known, tokens, parts: [{name, label, tokens, share}], sent_back, sent_counted, limits,
+words}, words}`; `{on: false}` while it is switched off).
+
+The made-up company has a made-up week (`sample/week.json`, under `page`) that says so.
+
+## 33. The building learns from your corrections
+
+A correction you make once shouldn't have to be made again. The switch is **Learn from your
+corrections** (step 20), on unless you switch it off.
+
+**After an Undo.** When you Undo an answer a floor's lead gave for you (step 26), under Answered for
+you on Needs you or in the sitting (step 27), the building asks once, in the same place: "Should the
+leads stop answering this kind of question for you?"
+
+- **Yes:** that kind of question always comes to you, as if you had ticked Always ask me this. It is
+  listed in Settings under **What the leads answer from**, with the words it came from (You undid
+  "pnpm", answered from your decision on 18 Nov, on 22 Nov: "Use yarn on this one"), and **Remove**.
+- **No:** it says nothing more, and it never asks again about that decision.
+- In the sitting you can say "yes" or "no" too.
+
+**Two Undos of the same decision.** The second time you undo an answer that came from the same
+decision (for another kind of question, since the first Undo already keeps it from that kind), the
+leads set that decision aside without asking: they won't answer anything from it again. The page says
+so where you undid it, with **Undo** to put it back, and Settings lists it as **Set aside**, with **Put
+back**. Putting it back leaves the kinds of question you undid with you.
+
+**After Not quite.** When you say Not quite on a Show me card (step 28), the card asks once: "Should
+Show me ask you before calling this kind of change done?" A kind of change is the card's title on that
+floor: another title that shares at least three words that carry meaning with it, leaving out the words
+every change has (change, add, fix, update, make, page). So "Make the home page heading colour darker"
+is the same kind as "Change the heading colour on the home page", and "Add a search box to the home
+page" is not. When the card's title has fewer than three such words, another title needs all of them,
+and at least two, so a one-word title holds only its own: "Make the login form wider" is the same kind
+as "Fix the login form", and "Fix the search form" is not.
+
+- **Yes:** work of that kind that the building starts on that floor (a ready task from the front door,
+  step 25, including one the night shift starts, step 30, or an item of the day's plan, step 29) isn't
+  counted done when its agent finishes: its ready task stays open, the floor's next queued task waits
+  ("Work on Lantern waits for you to look at it on Show me"), so does the plan's next item, and its Show
+  me card says "You asked Show me to ask you first about changes like this". The night shift's report
+  still says how its run went and whether its check passed. When you
+  say **Looks good** it is done, and the floor moves on. Not quite sends the agent back to work, as
+  always, and its next finish waits for you again. It is listed in Settings under What the leads answer
+  from as "Show me asks me first", with Remove. It never holds anything for good: Remove, switching Show
+  me off, or a card that never comes (15 minutes) lets the work count as done. An agent you started
+  yourself, outside the building, has nothing the building counts as done, so it only gets its card, as
+  before.
+- **No:** nothing more, and it never asks again about that kind of change on that floor.
+
+**Never from a secret.** Nothing is asked, kept or set aside when the question, the answer, the
+decision or your words have a password, token or key in them, as the front door finds them (step 25),
+even when the switch was off at the Undo and is on later. Undo still works, as before.
+
+**Off.** Nothing is asked, and nothing is set aside. What you said Yes to before still holds until you
+Remove it.
+
+**What is kept.** In `data/control/decisions.json`, for this computer only (step 26): a Yes in
+`always_ask` (with `from`, and `show: true` for Show me), a decision set aside in `not_for` (with
+`all: true`), and a No in `declined`. Yours to edit.
+
+**Control's names.** For a page of your own, or a phone: `learn_yes` and `learn_no` take `{id}` for an
+answer you undid, or `{show}` with a Show me card's key; `learn_undo` takes `{id}` to put back a
+decision set aside. `answered_undo` and `show_again` give back `learn` (`{ask}`, or `{set_aside, said}`),
+and `state` has it on each answer under `answered` and each card under `shows`, `decisions.set_aside`,
+and `learn`, whether the switch is on.
+
+The made-up company asks too, after an Undo or a Not quite there, and your answer changes only the page.
+
 ## What is kept, and where
 
 `connect/setup.py` keeps a copy of each file before it changes it: `data/backups/company.before-arnheim-<when>.json`
@@ -1327,7 +1495,8 @@ far each floor was let go past its budget today. On a floor with a review line, 
 keeps what the line made of each conversation's work. Routines keep `data/feeds/routines.json`: each
 routine, when Arnheim first saw it, and its last run, with a command's last lines or an agent's last
 words. Pings keep `data/feeds/pings.json`: when the last was sent, what each of the last fourteen said, and whether it arrived. The replay's moments are kept a file a day in
-`data/feeds/history/`, for a week, with what each floor's agents spent that day. Restore points are
+`data/feeds/history/`, for a week, with what each floor's agents spent that day, what each conversation
+had spent at each moment, and what each floor's check made of each conversation's work (step 32). Restore points are
 listed in `data/feeds/restore.json`, and their files kept by git in each project's own repository,
 under `refs/arnheim/restore/`.
 
@@ -1357,7 +1526,8 @@ computer only. Ready tasks are kept in `data/control/intake/` (step 25), 7 days 
 started, finished or dropped, and never served as files.
 
 The chain of command (step 26) keeps `data/control/decisions.json`, for this computer only: your remembered
-answers, the questions you always answer yourself, and the decisions undone for a kind of question. Yours to
+answers, the questions you always answer yourself, and the decisions undone for a kind of question (or set
+aside, step 33), and the corrections you said No to learning from. Yours to
 edit. (It was `data/decisions.json` before; it moves itself the first time it is read.) Remember my answer
 never keeps an answer whose question or words have a password, token or key in them, or that is about secrets,
 money, deleting, pushing, publishing or sending: it says so, and nothing is sent until you untick it. What the leads

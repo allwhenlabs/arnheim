@@ -99,6 +99,10 @@ def mark(project, keys, proof):
         for c in talks:
             if c.get("id") in keys and c.get("project") == project:
                 c["proof"] = dict(proof)
+                try:
+                    claude_code.note_proof(c, project, proof)  # kept for the week on one page (connect/week.py)
+                except Exception as error:  # the week's trouble never costs the proof
+                    claude_code.note(error)
         return talks, [t for t in feed.get("tasks") or [] if isinstance(t, dict)]
     claude_code.edit_feed(edit)
 

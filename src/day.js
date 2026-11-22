@@ -77,11 +77,21 @@ export function sayPlan(day, floor = null) {
     const list = items.map((i, n) => `${n + 1}. ${i.title}${i.state === 'proposed' || i.state === 'approved' ? '' : ` (${lower(itemWord(i))})`}.`).join(' ');
     return `Here's ${f.label}'s plan for today: ${list}${f.note ? ` ${f.note}` : ''} ${f.approved ? "It's approved." : 'Approve it, or tell me what to change.'}${made}`;
   }
-  const { items, floors } = planCount(day);
-  if (!items) return `Today's plan is empty: no floor has anything to do.${made}`;
-  const lines = (day.plan || []).filter((f) => live(f).length).map((f) => `${f.label}: ${live(f).map((i) => i.title).join('; then ')}.`);
+  const { head, floors } = planLines(day);
+  if (!floors.length) return `${head}${made}`;
   const next = day.approved ? "It's approved, and the work goes one thing at a time on each floor." : 'Say "approve the day", or tell a floor\'s lead what to change.';
-  return `Today's plan: ${plural(items, 'thing', 'things')} on ${plural(floors, 'floor', 'floors')}. ${lines.join(' ')} ${next}${made}`;
+  return `${[head, ...floors].join(' ')} ${next}${made}`;
+}
+
+// The whole company's plan in words, without what to do about it: { head, floors }, a line for each floor with
+// something to do. sayPlan adds what to do; the morning briefing (morning.js) asks it its own way.
+export function planLines(day) {
+  const { items, floors } = planCount(day);
+  if (!items) return { head: "Today's plan is empty: no floor has anything to do.", floors: [] };
+  return {
+    head: `Today's plan: ${plural(items, 'thing', 'things')} on ${plural(floors, 'floor', 'floors')}.`,
+    floors: (day.plan || []).filter((f) => live(f).length).map((f) => `${f.label}: ${live(f).map((i) => i.title).join('; then ')}.`),
+  };
 }
 
 // The close said out loud: its summing up, then what was proven, what is stuck and why, what needs you tomorrow, and

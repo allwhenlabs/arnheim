@@ -13,7 +13,8 @@
 //   here()    who to start with on the screen showing now (a floor's lead on its floor), or null
 //   place     the element the Talk button goes in, before `before`
 //   extra()   optional: more for the switches panel (an element), such as pairing a phone
-// Gives { open(who?), close(), hide(on), refresh(), dispose(), get isOpen, voice }.
+// Gives { open(who?, opts?), close(), hide(on), refresh(), dispose(), get isOpen, voice }: open gives false when Talk is
+// switched off or hidden, so nothing opened.
 
 import { createVoice, voiceWanted } from './voice.js';
 import { FEATURES } from './features.js';
@@ -161,8 +162,9 @@ export function createTalkDock({ talk, features, people, here, place, before = n
 
   /* ---------- open and close ---------- */
 
-  function open(who = null) {
-    if (hidden || !features.get('talk')) return;
+  // opts, for someone named: as voice.js's talkTo takes them ({ greet: 'again' } greets even someone already talked to).
+  function open(who = null, opts = undefined) {
+    if (hidden || !features.get('talk')) return false;
     isOpen = true;
     dock.hidden = false;
     opener.setAttribute('aria-expanded', 'true');
@@ -170,9 +172,10 @@ export function createTalkDock({ talk, features, people, here, place, before = n
     let start = who;
     try { start ||= here?.() || null; } catch { start = null; }
     start ||= list[0]?.who || null;
-    if (start) setWho(start);
+    if (start) setWho(start, who && start === who ? opts : undefined);
     if (!voiceWanted()) hint.textContent = 'This device keeps the voice off, so type to talk.';
     (dock.querySelector('.aw-ask input') || pick).focus({ preventScroll: true });
+    return true;
   }
 
   function close() {

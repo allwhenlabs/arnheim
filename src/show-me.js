@@ -25,6 +25,7 @@
 
 import { icon } from './icons.js';
 import { proofMood, proofOf } from './proof.js';
+import { learnAsk } from './sitting.js'; // the building learns from your corrections: the question after Not quite
 
 const CSS = new URL('./show-me.css', import.meta.url).href;
 const SVG = 'http://www.w3.org/2000/svg';
@@ -79,6 +80,13 @@ export function heardShow(text) {
   if (m) return m[1].trim() ? { act: 'again', words: m[1].trim().replace(/^(?:please\s+)?/i, '') } : { act: 'ask' };
   return null;
 }
+
+// Asked once after Not quite (connect/deputy.py, show_learning): Yes means work of this kind that the building starts on
+// this floor isn't counted done until you say Looks good.
+export const SHOW_ASK = 'Should Show me ask you before calling this kind of change done?';
+
+// The cards still asking that, after Not quite: answered here once, even when nothing else waits for you.
+export const askingOf = (rows) => (Array.isArray(rows) ? rows : []).filter((s) => s && s.state === 'again' && s.learn?.ask);
 
 export function stateLine(s) {
   if (s?.state === 'approved') return 'You said it looks good.';
@@ -282,7 +290,7 @@ export function createShowMe(env) {
     const said = String(words || '').trim();
     if (!said) return Promise.reject(new Error('Say what should change first.'));
     if (s.sample) {
-      sampleSaid.set(s.key, { state: 'again', words: said });
+      sampleSaid.set(s.key, { state: 'again', words: said, learn: { ask: SHOW_ASK } });
       return Promise.resolve('Sent back with what to change. The company is made up, so no agent hears it.');
     }
     return control.showAgain(s.key, said).then(
@@ -291,6 +299,18 @@ export function createShowMe(env) {
   }
 
   const act = (promise) => { open.clear(); env.done(promise, (said) => said); };
+
+  // Yes or No to SHOW_ASK. No says nothing more.
+  function learn(s, yes) {
+    if (s.sample) {
+      sampleSaid.set(s.key, { ...(sampleSaid.get(s.key) || {}), learn: null });
+      return Promise.resolve(yes ? 'Done, in this tab only: the company is made up, so nothing is kept.' : '');
+    }
+    return (yes ? control.learnYes : control.learnNo)({ show: s.key }).then((r) => (yes ? r?.reply || 'Done.' : ''),
+      (error) => { throw new Error(failed(error)); });
+  }
+  const learnPart = (s) => (s.state === 'again' && s.learn?.ask
+    ? learnAsk(s.learn.ask, { yes: () => act(learn(s, true)), no: () => act(learn(s, false)) }) : null);
 
   function againForm(s) {
     const send = (event) => {
@@ -365,7 +385,8 @@ export function createShowMe(env) {
           open.has(s.key) ? againForm(s) : null,
           h('p.small.muted.sm-swipe-hint', 'Swipe right for Looks good, left for Not quite.'),
         ]
-        : h('p.small.sm-decided', stateLine(s)),
+        : [h('p.small.sm-decided', stateLine(s)), learnPart(s)],
+      s.held && s.state === 'waiting' ? h('p.small.sm-held', s.held) : null,
       s.sample ? h('p.small.muted', 'Made up, like the rest of this company: these pictures are drawn, and no agent did this work.') : null);
     return swipeable(card, s);
   }
@@ -373,12 +394,14 @@ export function createShowMe(env) {
   // Needs you: "3 things to look at", the first (or the one tapped) in full and the rest as rows.
   function needsCard() {
     const rows = waiting();
-    if (!rows.length) return null;
+    const asking = askingOf(list());
+    if (!rows.length && !asking.length) return null;
     const first = rows.find((s) => s.key === chosen) || rows[0];
     const rest = rows.filter((s) => s !== first);
     return h('section.panel-card.sm-card', { 'aria-label': 'Show me' },
-      h('div.sect-head', icon('monitor', 18), h('h3.sect-title', `Show me: ${lookWords(rows.length)}`)),
-      block(first),
+      h('div.sect-head', icon('monitor', 18), h('h3.sect-title', rows.length ? `Show me: ${lookWords(rows.length)}` : 'Show me')),
+      asking.map((s) => h('div.sm-asking', h('p.small', h('b', s.title), h('span.muted', ` You said Not quite: "${s.words || 'change it'}"`)), learnPart(s))),
+      first ? block(first) : null,
       rest.length ? h('ul.list.sm-rest', rest.map((s) => h('li',
         h('button.sm-row', { type: 'button', onclick: () => { chosen = s.key; open.clear(); redraw(); } },
           h('b', s.title), h('span.small.muted', ` ${[env.label?.(s.project) || s.project, s.at ? env.ago?.(s.at) : null].filter(Boolean).join(' · ')}`))))) : null);

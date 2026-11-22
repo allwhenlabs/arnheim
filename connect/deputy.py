@@ -23,6 +23,16 @@ Permissions are never answered here: only Always allow's exact commands run with
 Each answer it gives is kept in data/control/answered/ for Needs you's "Answered for you", with Undo, which tells the
 agent you changed it and marks that decision as not for that kind of question again.
 
+Learning from your corrections (switch "learn", on unless you switch it off). After an Undo, the building asks once, in
+the same place: "Should the leads stop answering this kind of question for you?" Yes keeps that kind of question in
+always_ask, with the words it came from; No says nothing more, and it never asks again about that decision (kept in
+declined). The second time an answer from the same decision is undone, the decision is set aside without asking (a
+not_for mark for every question) and the page says so, with Undo. Show me's Not quite asks the same of a kind of
+change: "Should Show me ask you before calling this kind of change done?" Yes keeps it in always_ask, marked "show":
+work of that kind that the building starts on that floor isn't counted done (its ready task stays open and the floor's
+next one waits) until you say Looks good. Nothing is learned from words with a password, token or key in them
+(connect/intake.py's has_secret).
+
 Office hours. With the switch on, and while nobody is using the building outside the times you chose (13:00 and
 18:00 unless you choose others, each open for half an hour, or a sitting you opened): an agent's question tool is
 answered at once that you are away until the next one, and it is kept for the sitting; a turn that ends with a
@@ -114,6 +124,27 @@ def norm(text):
 def same_kind(a, b):
     """Two questions of the same kind: the same words, or at least THRESHOLD words that carry meaning in common."""
     return bool(norm(a)) and (norm(a) == norm(b) or len(words(a) & words(b)) >= THRESHOLD)
+
+
+# Show me's kind of change: words every change's title has, left out before the titles are compared
+CHANGE_SKIP = frozenset(stem(w) for w in (
+    "change", "changes", "changed", "changing", "add", "adds", "added", "adding", "fix", "fixes", "fixed", "fixing",
+    "update", "updates", "updated", "updating", "make", "makes", "making", "page", "pages"))
+CHANGE_THRESHOLD = 3
+
+
+def same_change(a, b):
+    """Two Show me titles of the same kind of change, `a` the rule's: the same words, or at least CHANGE_THRESHOLD words
+    that carry meaning in common, leaving out the words every change has (change, add, fix, update, make, page). Stricter
+    than a kind of question: "Change the heading colour on the home page" and "Add a search box to the home page" share
+    only "home". A rule with fewer such words needs them all, and never fewer than two: "Fix the login form" holds
+    "Make the login form wider"."""
+    if not norm(a):
+        return False
+    if norm(a) == norm(b):
+        return True
+    rule = words(a) - CHANGE_SKIP
+    return len(rule & (words(b) - CHANGE_SKIP)) >= max(2, min(CHANGE_THRESHOLD, len(rule)))
 
 
 # What is never answered for you, whatever was decided: secrets, money, deleting, pushing, publishing, sending.
@@ -216,6 +247,10 @@ def day_of(at):
 # In data/control/, which serve.py keeps to this computer: never to a paired phone or a view-only link, as your words in
 # an answer might be anything. Kept in data/decisions.json before; moved here the first time it is read.
 OLD_DECISIONS = "decisions.json"
+# What decisions.json keeps: your remembered answers, what you always answer yourself (and, marked "show", the kinds of
+# change Show me asks you about first), the decisions undone for a kind of question (or set aside for all of them),
+# and the corrections you said No to learning from.
+LISTS = ("decisions", "always_ask", "not_for", "declined")
 
 
 def decisions_path(data):
@@ -239,7 +274,7 @@ def _moved_in(data):
             os.replace(old, new)
         else:
             was, now = _read(old) or {}, _read(new) or {}
-            for name in ("decisions", "always_ask", "not_for"):
+            for name in LISTS:
                 rows = now.get(name) if isinstance(now.get(name), list) else []
                 have = {r.get("id") for r in rows if isinstance(r, dict)}
                 before = was.get(name) if isinstance(was.get(name), list) else []
@@ -264,7 +299,7 @@ def read_decisions(data):
 def _decisions_now(data):
     doc = _read(decisions_path(data)) or {}
     out = {}
-    for name in ("decisions", "always_ask", "not_for"):
+    for name in LISTS:
         rows = doc.get(name)
         out[name] = [r for r in rows if isinstance(r, dict) and r.get("id")] if isinstance(rows, list) else []
     return out
@@ -277,7 +312,8 @@ def _change_decisions(data, change):
         out = change(doc)
         _write(decisions_path(data), {
             "about": "What the floors' leads answer from for you (docs/connect.md, \"A chain of command\"): your answers with Remember my "
-                     "answer ticked, what you asked to be asked about always, and decisions undone for a kind of question. Yours to edit.",
+                     "answer ticked, what you asked to be asked about always, decisions undone for a kind of question or set aside, "
+                     "and the corrections you said No to learning from. Yours to edit.",
             **doc})
         return out
 
@@ -340,21 +376,32 @@ def remember_answer(data, project, question, answer, options=None, header=None, 
         if len(kept) >= DECISIONS_MOST:
             raise ValueError(f"The leads keep {DECISIONS_MOST} decisions at most. Remove one in Settings first.")
         doc["decisions"] = kept + [row]
-        doc["always_ask"] = [r for r in doc["always_ask"] if not (r.get("project") in (None, project) and same_kind(r.get("question"), question))]
+        doc["always_ask"] = [r for r in doc["always_ask"] if r.get("show") or not (r.get("project") in (None, project) and same_kind(r.get("question"), question))]
         return row
     return _change_decisions(data, change)
 
 
-def ask_always(data, project, question):
-    """Marks a kind of question as one the leads never answer for you."""
+def ask_always(data, project, question, came_from=None, show=False):
+    """Marks a kind of question as one the leads never answer for you. `came_from`: the words it was learned from (an
+    Undo, or Show me's Not quite), kept beside it. `show`: a kind of change Show me asks you about before it is counted
+    done, which the leads' answers leave alone."""
     question = one_line(question)
     if not question:
         raise ValueError("Say which question.")
+    came_from = one_line(came_from, 600) or None
+    if came_from and has_secret(came_from, question):
+        raise ValueError(REMEMBER_SECRET)
     row = {"id": new_id("a"), "project": project, "question": question, "at": round(time.time(), 1)}
+    if came_from:
+        row["from"] = came_from
+    if show:
+        row["show"] = True
 
     def change(doc):
-        doc["always_ask"] = [r for r in doc["always_ask"] if not (r.get("project") == project and norm(r.get("question")) == norm(question))] + [row]
-        doc["decisions"] = [r for r in doc["decisions"] if not (r.get("project") == project and norm(r.get("question")) == norm(question))]
+        doc["always_ask"] = [r for r in doc["always_ask"]
+                             if not (bool(r.get("show")) == bool(show) and r.get("project") == project and norm(r.get("question")) == norm(question))] + [row]
+        if not show:
+            doc["decisions"] = [r for r in doc["decisions"] if not (r.get("project") == project and norm(r.get("question")) == norm(question))]
         return row
     return _change_decisions(data, change)
 
@@ -392,14 +439,17 @@ def decision_views(data):
     """The decisions the leads answer from, and what you always want asked, as Settings lists them."""
     doc = read_decisions(data)
     return {"decisions": [{k: r.get(k) for k in ("id", "project", "question", "answer", "at")} for r in doc["decisions"]][::-1],
-            "always_ask": [{k: r.get(k) for k in ("id", "project", "question", "at")} for r in doc["always_ask"]][::-1]}
+            "always_ask": [{**{k: r.get(k) for k in ("id", "project", "question", "at", "from")}, "show": bool(r.get("show"))}
+                           for r in doc["always_ask"]][::-1],
+            "set_aside": [{k: r.get(k) for k in ("id", "decision", "text", "at")} for r in doc["not_for"] if r.get("all")][::-1]}
 
 
 # ---------- is it settled? ----------
 
 def _excluded(doc, decision_id, question, project):
-    return any(n.get("decision") == decision_id and n.get("project") in (None, project) and same_kind(n.get("question"), question)
-               for n in doc["not_for"])
+    """Undone for this kind of question, or set aside for every question (undone twice)."""
+    return any(n.get("decision") == decision_id and n.get("project") in (None, project)
+               and (n.get("all") or same_kind(n.get("question"), question)) for n in doc["not_for"])
 
 
 def candidates(data, question, project, doc=None, mem=None):
@@ -466,7 +516,8 @@ def settle(data, kind, project, questions, judge=None):
     if never_asked(questions):  # anything that touches secrets, money, deleting, pushing, publishing or sending: always you
         return None
     doc = read_decisions(data)
-    if any(a.get("project") in (None, project) and same_kind(a.get("question"), q.get("question")) for a in doc["always_ask"] for q in questions):
+    if any(not a.get("show") and a.get("project") in (None, project) and same_kind(a.get("question"), q.get("question"))
+           for a in doc["always_ask"] for q in questions):
         return None
     mem = memory_rows(data)
     answers = []
@@ -605,32 +656,43 @@ def answered_row(data, aid):
     return _read(os.path.join(answered_dir(data), aid + ".json"))
 
 
-def answered_view(row):
-    """One answer as the page shows it, under Answered for you."""
+def answered_view(row, learn=None):
+    """One answer as the page shows it, under Answered for you. `learn`: learning's question or set-aside, if any."""
     answers = row.get("answers") or []
     first = answers[0] if answers else {}
     return {"id": row.get("id"), "key": row.get("key"), "title": row.get("title"), "project": row.get("project"), "agent": row.get("agent"),
             "question": "; ".join(a.get("question") or "" for a in answers), "answer": "; ".join(a.get("answer") or "" for a in answers),
             "from": said_from(first.get("from") or {}), "from_id": (first.get("from") or {}).get("id"), "how": first.get("how"),
-            "at": row.get("at"), "undone": bool(row.get("undone")), "seen": bool(row.get("seen"))}
+            "at": row.get("at"), "undone": bool(row.get("undone")), "seen": bool(row.get("seen")), "learn": learn}
 
 
 UNDONE = "don't take that earlier decision as the answer"
 
 
 def undo(data, aid, words=None):
-    """Undo: the answer's decisions are not for that kind of question again. Gives (the row, the message for the agent)."""
+    """Undo: the answer's decisions are not for that kind of question again. Gives (the row, the message for the agent).
+    With the learn switch on, the second Undo of an answer from the same decision sets that decision aside for every
+    question (set_aside), unless a password, token or key is in what it would learn from."""
     row = answered_row(data, aid)
     if not row:
         raise ValueError("That answer isn't kept any more.")
     if row.get("undone"):
         raise ValueError("That was undone already.")
     said = one_line(words, 1500) if str(words or "").strip() else UNDONE
+    learn = learn_on(data)
+    # whatever the switch: learning switched on later still never asks about it (no_learning)
+    secret = has_secret(*_learn_texts(row, None if said == UNDONE else said))
+    aside = None
     for a in row.get("answers") or []:
         f = a.get("from") or {}
         if f.get("id"):
-            not_for(data, f["id"], a.get("question"), row.get("project"))
+            got = _undone(data, f, a.get("question"), row.get("project"), twice=learn and not secret and aside is None)
+            aside = aside or got
     row.update(undone=True, undone_at=round(time.time(), 2), words=None if said == UNDONE else said, seen=True)
+    if secret:
+        row["no_learning"] = True  # never learned from: nothing is asked about it either
+    if aside:
+        row["set_aside"] = aside["id"]
     _write(os.path.join(answered_dir(data), aid + ".json"), row)
     asked = "; ".join(f'"{one_line(a.get("question"), 160)}"' for a in row.get("answers") or [])
     gave = "; ".join(f'"{one_line(a.get("answer"), 160)}"' for a in row.get("answers") or [])
@@ -639,6 +701,30 @@ def undo(data, aid, words=None):
     if said == UNDONE:
         message += " Ask them again if you still need to know, or carry on without it."
     return row, message
+
+
+def _learn_texts(row, words=None):
+    """What learning from an undone answer would keep or ask about: your words, and each question, answer and decision."""
+    texts = [words if words is not None else row.get("words")]
+    for a in row.get("answers") or []:
+        texts += [a.get("question"), a.get("answer"), (a.get("from") or {}).get("text")]
+    return texts
+
+
+def _undone(data, frm, question, project, twice=False):
+    """An undo's mark for one decision and this kind of question; and with `twice`, when an answer from the same
+    decision was undone before, the decision set aside for every question. Gives the set-aside mark, or None."""
+    row = {"id": new_id("n"), "decision": frm["id"], "question": one_line(question), "project": project, "at": round(time.time(), 1)}
+
+    def change(doc):
+        before = [n for n in doc["not_for"] if n.get("decision") == frm["id"] and not n.get("all")]
+        aside = None
+        if twice and before and not any(n.get("decision") == frm["id"] and n.get("all") for n in doc["not_for"]):
+            aside = {"id": new_id("n"), "decision": frm["id"], "all": True, "question": "", "project": None,
+                     "text": one_line(frm.get("text"), 300), "at": round(time.time(), 1)}
+        doc["not_for"] = (doc["not_for"] + [row] + ([aside] if aside else []))[-DECISIONS_MOST:]
+        return aside
+    return _change_decisions(data, change)
 
 
 def seen(data, ids):
@@ -653,6 +739,181 @@ def seen(data, ids):
                     _write(path, row)
                     done += 1
     return done
+
+
+# ---------- learning from your corrections (switch "learn"; docs/connect.md, "The building learns from your corrections") ----------
+
+LEARN_ASK = "Should the leads stop answering this kind of question for you?"
+SHOW_ASK = "Should Show me ask you before calling this kind of change done?"
+SET_ASIDE = ("That's the second time an answer from this decision was undone, so the leads have set it aside: they won't "
+             "answer from it again.")
+LEARN_KEPT = ANSWERED_KEPT  # a correction from the last two days is asked about, never an older one
+_door = None
+_secret_seen = {}
+
+
+def learn_on(data):
+    return switches.on("learn", data)
+
+
+def has_secret(*texts):
+    """Whether any of these words has a password, token or key in it: connect/intake.py's has_secret, the front door's own
+    check for words the person typed, loaded when first wanted. A check that can't run counts as yes."""
+    global _door
+    said = [str(t or "") for t in texts if str(t or "").strip()]
+    if not said:
+        return False
+    key = "\x00".join(said)
+    if key in _secret_seen:
+        return _secret_seen[key]
+    try:
+        if _door is None:
+            try:
+                from . import intake as found  # as connect.deputy, from serve.py
+            except ImportError:
+                try:
+                    import intake as found  # beside this file
+                except ImportError:
+                    import importlib.util
+                    spec = importlib.util.spec_from_file_location("arnheim_intake", os.path.join(HERE, "intake.py"))
+                    found = importlib.util.module_from_spec(spec)
+                    spec.loader.exec_module(found)
+            _door = found
+        got = any(_door.has_secret(t) for t in said)
+    except Exception:
+        return True
+    if len(_secret_seen) > 500:
+        _secret_seen.clear()
+    _secret_seen[key] = got
+    return got
+
+
+def _declined(doc, project, question, decision=None, show=False):
+    """You said No to learning from this before: about this decision, or (Show me) this kind of change on this floor."""
+    for r in doc["declined"]:
+        if show and r.get("show") and r.get("project") == project and same_change(r.get("question"), question):
+            return True
+        if not show and not r.get("show") and decision and r.get("decision") == decision:
+            return True
+    return False
+
+
+def _kept_already(doc, project, question, show=False):
+    alike = same_change if show else same_kind
+    return any(bool(a.get("show")) == bool(show) and a.get("project") in (None, project) and alike(a.get("question"), question)
+               for a in doc["always_ask"])
+
+
+def learning(data, row, doc=None, now=None):
+    """What Answered for you says about an answer you undid: {"ask": LEARN_ASK} once, while it may still be learned from;
+    {"set_aside": id, "said": SET_ASIDE} when that Undo set its decision aside (until you put it back); else None."""
+    if not isinstance(row, dict) or not row.get("undone"):
+        return None
+    doc = doc if doc is not None else read_decisions(data)
+    if row.get("set_aside"):
+        kept = any(n.get("id") == row["set_aside"] and n.get("all") for n in doc["not_for"])
+        return {"set_aside": row["set_aside"], "said": SET_ASIDE} if kept else None
+    now = now or time.time()
+    if not learn_on(data) or row.get("learned") or row.get("no_learning") or now - float(row.get("undone_at") or 0) > LEARN_KEPT:
+        return None
+    if has_secret(*_learn_texts(row)):
+        return None  # never from a secret, whenever it was undone
+    first = (row.get("answers") or [{}])[0]
+    if _declined(doc, row.get("project"), first.get("question"), decision=(first.get("from") or {}).get("id")):
+        return None
+    if _kept_already(doc, row.get("project"), first.get("question")):
+        return None
+    return {"ask": LEARN_ASK}
+
+
+def learn_from_undo(data, aid, yes):
+    """Your Yes or No to LEARN_ASK. Yes: that kind of question always comes to you, kept with the words it came from;
+    No: nothing more, and never asked again about that decision. Gives the always_ask row for Yes, else None."""
+    row = answered_row(data, aid)
+    if not row or not row.get("undone"):
+        raise ValueError("That answer isn't kept any more.")
+    if not (learning(data, row) or {}).get("ask"):
+        raise ValueError("There's nothing to ask about that one any more.")
+    first = (row.get("answers") or [{}])[0]
+    question, frm = first.get("question"), first.get("from") or {}
+    kept = None
+    if yes:
+        words = f'You undid "{one_line(first.get("answer"), 120)}", answered from {said_from(frm)}, on {day_of(row.get("undone_at"))}'
+        if row.get("words"):
+            words += f': "{one_line(row["words"], 300)}"'
+        kept = ask_always(data, row.get("project"), question, came_from=words)
+    else:
+        decline(data, row.get("project"), question, decision=frm.get("id"))
+    row["learned"] = "yes" if yes else "no"
+    _write(os.path.join(answered_dir(data), aid + ".json"), row)
+    return kept
+
+
+def decline(data, project, question, decision=None, show=False):
+    """No to learning: never asked again about this decision, or (Show me) this kind of change on this floor. Never keeps
+    a question with a password, token or key in it: gives None and keeps nothing."""
+    if has_secret(question):
+        return None
+    row = {"id": new_id("q"), "project": project, "question": one_line(question), "at": round(time.time(), 1)}
+    if decision:
+        row["decision"] = decision
+    if show:
+        row["show"] = True
+
+    def change(doc):
+        doc["declined"] = (doc["declined"] + [row])[-DECISIONS_MOST:]
+        return row
+    return _change_decisions(data, change)
+
+
+def put_back(data, aid):
+    """Undo of a set-aside: the decision is answered from again (its marks for the kinds of question undone stay)."""
+    row = answered_row(data, aid)
+    aside = (row or {}).get("set_aside")
+    if not aside or not forget(data, aside):
+        raise ValueError("That decision isn't set aside any more.")
+    return row
+
+
+def show_learning(data, show, doc=None, now=None):
+    """What a Show me card you said Not quite to asks: {"ask": SHOW_ASK} once, while it may be learned from, else None."""
+    if not isinstance(show, dict) or show.get("state") != "again" or not learn_on(data):
+        return None
+    now = now or time.time()
+    title, project = show.get("title"), show.get("project")
+    if not title or not project or now - float(show.get("decided_at") or 0) > LEARN_KEPT:
+        return None
+    doc = doc if doc is not None else read_decisions(data)
+    if _declined(doc, project, title, show=True) or _kept_already(doc, project, title, show=True):
+        return None
+    if has_secret(title, show.get("words")):
+        return None
+    return {"ask": SHOW_ASK}
+
+
+def learn_from_show(data, show, yes):
+    """Your Yes or No to SHOW_ASK, for a card you said Not quite to. Yes: Show me asks you about that kind of change on
+    that floor before it is counted done (looks_first), kept with your words; No: never asked again about it."""
+    if not (show_learning(data, show) or {}).get("ask"):
+        raise ValueError("There's nothing to ask about that one any more.")
+    title, project = show.get("title"), show.get("project")
+    if not yes:
+        decline(data, project, title, show=True)
+        return None
+    words = f'You said Not quite to "{one_line(title, 120)}" on {day_of(show.get("decided_at"))}'
+    if show.get("words"):
+        words += f': "{one_line(show["words"], 300)}"'
+    return ask_always(data, project, title, came_from=words, show=True)
+
+
+def looks_first(data, project, title, doc=None):
+    """The kind of change on this floor that Show me asks you about before it is counted done, matching this work's
+    title: its always_ask row, or None."""
+    if not project or not str(title or "").strip():
+        return None
+    doc = doc if doc is not None else read_decisions(data)
+    return next((a for a in reversed(doc["always_ask"]) if a.get("show") and a.get("project") in (None, project)
+                 and same_change(a.get("question"), title)), None)
 
 
 # ---------- office hours ----------

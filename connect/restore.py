@@ -217,10 +217,49 @@ def snapshot(repo, scope, message):
     """The files of scope that git doesn't ignore, secrets left out, as a commit on top of HEAD: (commit, how many
     files of scope differ from HEAD), or None. Made through an index of Arnheim's own for that scope, so the real
     one is untouched and, after the first time, only changed files are read again. Raises TooSlow."""
+    head = git(repo, "rev-parse", "-q", "--verify", "HEAD^{commit}")
+    tree = files_tree(repo, scope)
+    if not tree:
+        return None
+    commit = git(repo, "commit-tree", tree, *(["-p", head] if head else []), "-m", message)
+    if not commit or not COMMIT.match(commit):
+        return None
+    where = [] if scope == "." else ["--", scope]
+    changed = (git(repo, "diff", "--name-only", "-z", head, tree, "--", scope_spec(scope), *NOT_SECRETS, data=True) if head
+               else git(repo, "ls-tree", "-r", "--name-only", "-z", "--full-tree", tree, *where, data=True))
+    return commit, len([p for p in (changed or b"").split(b"\0") if p])
+
+
+def changed_since(point, data=DATA):
+    """How many files of a restore point's scope differ now from what it holds (changed, made or deleted since, with
+    secret-looking files left out, as a restore point leaves them out), or None when that can't be told: not one of
+    ours, its repository gone, git missing, or too slow. The night shift asks it when a run ends, so a run that changed files with
+    its own commands (a shell's printf or sed, which the hook doesn't read as edits) never reads as one that changed
+    nothing (connect/night.py)."""
+    commit = str((point or {}).get("commit") or "")
+    scope = (point or {}).get("scope") or "."
+    repo = found_repo(point, data) if COMMIT.match(commit) and isinstance(scope, str) else None
+    if not repo:
+        return None
+    before = _until[0]
+    _until[0] = time.monotonic() + TOTAL if before is None else before
+    try:
+        tree = files_tree(repo, scope)
+        out = git(repo, "diff", "--name-only", "-z", commit, tree, "--", scope_spec(scope), *NOT_SECRETS, data=True) if tree else None
+    except TooSlow:
+        return None
+    finally:
+        _until[0] = before
+    return None if out is None else len([p for p in out.split(b"\0") if p])
+
+
+def files_tree(repo, scope):
+    """The files of scope that git doesn't ignore, secrets left out, as a git tree, or None: written through Arnheim's
+    own index for that scope, so the real one is untouched and, after the first time, only changed files are read
+    again. Raises TooSlow."""
     mine = own_dir(repo, scope)
     if not mine:
         return None
-    head = git(repo, "rev-parse", "-q", "--verify", "HEAD^{commit}")
     os.makedirs(mine, exist_ok=True)
     index = os.path.join(mine, "index")
     env = {"GIT_INDEX_FILE": index}
@@ -246,15 +285,7 @@ def snapshot(repo, scope, message):
             if os.path.exists(index + ".lock"):  # git was stopped mid-way: it leaves its lock
                 os.remove(index + ".lock")
             raise
-    if not tree:
-        return None
-    commit = git(repo, "commit-tree", tree, *(["-p", head] if head else []), "-m", message)
-    if not commit or not COMMIT.match(commit):
-        return None
-    where = [] if scope == "." else ["--", scope]
-    changed = (git(repo, "diff", "--name-only", "-z", head, tree, "--", scope_spec(scope), *NOT_SECRETS, data=True) if head
-               else git(repo, "ls-tree", "-r", "--name-only", "-z", "--full-tree", tree, *where, data=True))
-    return commit, len([p for p in (changed or b"").split(b"\0") if p])
+    return tree or None
 
 
 def slow_mark(repo, scope):

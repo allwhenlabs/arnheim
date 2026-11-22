@@ -74,6 +74,12 @@ SWITCHES = (
      "When an agent finishes work on a floor that says how to show it (show_url or show in data/company.json), the "
      "building takes pictures of it, from before and after, beside its check's result, for you to say Looks good or "
      "Not quite. They stay on this computer. Off: nothing is taken, and no card shows.", True),
+    # The building learns from your corrections (docs/connect.md; connect/deputy.py): connect/control.py honours it.
+    ("learn", "agents", "Learn from your corrections",
+     "When you Undo an answer a lead gave for you, or say Not quite on a Show me card, the building asks once whether to "
+     "keep that kind of thing with you from now on. A decision whose answers you undo twice is set aside, and it says so, "
+     "with Undo. Never from words with a password, token or key in them. Off: nothing is asked or set aside, and what "
+     "you agreed to before still holds.", True),
     ("brain", "running", "Receptionist and assistant think with Claude",
      "They answer through your own Claude Code, on your own plan. Off: they answer from the building's facts alone.", False),
     ("routines", "running", "Routines",
@@ -93,6 +99,12 @@ SWITCHES = (
     ("carry_on", "page", "Carry on at a limit",
      "When Claude Code or Codex is about to reach your plan's limit, or has, Needs you offers to carry the conversation on in "
      "the other one, with what it was doing.", True),
+    # A morning briefing out loud (src/morning.js; docs/connect.md, "A morning briefing out loud"): the page honours it.
+    ("morning", "page", "A morning briefing",
+     "The first time you open the building each day, once today's plan is made, the receptionist says what the night shift "
+     "finished and what is proven, then the plan floor by floor, and asks \"Approve the day?\". Out loud while this device's "
+     "voice is on and the browser lets it speak; otherwise the same words are a card at the top of Needs you. Once a day on "
+     "each device. Needs the daily cycle or the night shift.", True),
     # The daily cycle (connect/day.py; docs/connect.md, "The daily cycle")
     ("daily_cycle", "running", "The daily cycle",
      "A plan for the day at 09:00, each floor's lead proposing its part, for you to approve with one tap; approved items "
@@ -104,6 +116,11 @@ SWITCHES = (
      "otherwise go unused before it starts again: ready tasks you ticked Tonight, and the day's approved plan. Each run keeps a "
      "restore point, must pass its check to count as proven, and stops before the limit. The report is on Needs you in the "
      "morning. Needs answering agents from the building.", False),
+    # The week on one page (connect/week.py; docs/connect.md, "The week on one page")
+    ("week", "page", "The week on one page",
+     "On Sundays on Needs you, and any time in Activity: each floor's finished and proven work, what was undone and what "
+     "waits for you, and where the week's allowance went (the daily plans, the night shift, Show me and your own "
+     "conversations). It only reads what Arnheim keeps. Needs answering agents from the building.", True),
 )
 NAMES = tuple(s[0] for s in SWITCHES)
 DEFAULTS = {s[0]: s[4] for s in SWITCHES}

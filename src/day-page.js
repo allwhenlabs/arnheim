@@ -240,6 +240,19 @@ export function createDay(env) {
 
   return {
     start,
+    // Today's day as this page has it (the made-up one, or control's), or null; and approving it or changing it in
+    // words, as the plan card's buttons do, for the morning briefing (morning.js): what to say, or a promise of it.
+    now: () => current(),
+    approve(floors = null) {
+      const got = approve(floors);
+      env.changed();
+      return got;
+    },
+    change(words, floor = null) {
+      const got = change(floor, words);
+      env.changed();
+      return got;
+    },
     // Needs you: the plan while the day is on, the close once it is made in the evening.
     home() {
       ensure();

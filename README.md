@@ -297,6 +297,20 @@ phone, swipe right or left. The pictures are taken by a Chrome, Chromium or Edge
 computer, with no window, and stay on it. In the sample, three made-up cards show how it looks. How
 it works: [docs/connect.md](docs/connect.md), "Show me".
 
+### The building learns from your corrections
+
+When you **Undo** an answer a lead gave for you, the building asks once, right there: "Should the leads
+stop answering this kind of question for you?" Yes, and that kind of question always comes to you,
+listed in Settings under **What the leads answer from** with the words it came from and **Remove**. No,
+and it says nothing more and never asks about that decision again. Undo two answers from the same
+decision and the leads set it aside without asking, and say so, with **Undo**. **Not quite** on a Show
+me card asks "Should Show me ask you before calling this kind of change done?": yes, and work of that
+kind the building starts on that floor (a ready task, the day's plan, the night shift) waits for your
+**Looks good** before it counts as done, and the floor's next task waits with it. It never learns from
+words with a password, token or key in them. The switch is **Learn from your corrections**, on unless
+you switch it off. How it works: [docs/connect.md](docs/connect.md), "The building learns from your
+corrections".
+
 ## The daily cycle
 
 Switch on **The daily cycle** in Settings, and each morning at 09:00 every floor's lead proposes the
@@ -330,6 +344,26 @@ a restore point, has to pass its check to count as proven, and stops before the 
 for another night. With no forecast of your limits, it runs nothing and says why. In the morning, Needs
 you says "4 things finished overnight, 3 proven, 1 not", each with its proof and Undo. In the sample the
 night is made up, and says so. How it works: [docs/connect.md](docs/connect.md), "The night shift".
+
+### A morning briefing out loud
+
+The first time you open the building each day, once the plan is made, the receptionist sums up the
+morning: what the night shift finished and what of it is proven, today's plan floor by floor, and then
+"Approve the day?". Say "yes" to approve it, "change" and what to change ("change: drop the second one
+on Lantern"), or "not now" to leave it. She says it out loud while your voice is on and the browser lets
+the page speak; otherwise the same words are a card at the top of Needs you, with the same answers as
+buttons. Once a day on each device, and a switch in Settings. How it works:
+[docs/connect.md](docs/connect.md), "A morning briefing out loud".
+
+### The week on one page
+
+On Sundays, and any time from Activity, **This week** shows each floor's week: what finished and was
+proven, what was undone, and what waits for you now. Under it, where the week's allowance went: the
+daily plans, the night shift, work Show me sent back, and your own conversations, as shares of what
+Arnheim counted, beside your plan's weekly limit as Claude Code and Codex report it. It only reads what
+Arnheim keeps, and says plainly when it doesn't know ("No readings Tuesday"). Ask the receptionist "how
+did the week go?" to hear it. It is on unless you switch it off, and needs control. In the sample the
+week is made up, and says so. How it works: [docs/connect.md](docs/connect.md), "The week on one page".
 
 ## Make it yours
 

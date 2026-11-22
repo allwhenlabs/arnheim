@@ -125,6 +125,14 @@ except ImportError:
         import night as night_shift
     except ImportError:
         night_shift = _beside("night")
+# The week on one page (connect/week.py; docs/connect.md, "The week on one page"): it only reads.
+try:
+    from . import week as week_page
+except ImportError:
+    try:
+        import week as week_page
+    except ImportError:
+        week_page = _beside("week")
 try:
     from . import usage  # your plan's limits, as an agent started here reports them (connect/usage.py)
 except ImportError:
@@ -150,6 +158,8 @@ PROVE = os.path.join(HERE, "prove.py")
 ROUTINES = os.path.join(HERE, "routines.py")
 ROUTINE = re.compile(r"^rt-[a-z0-9-]{1,60}$")  # a routine, as connect/routines.py names it
 MEMORY_MOST = 100  # decisions kept at most
+LOOK_WAIT = 15 * 60  # seconds work that waits for your look waits for its Show me card to be made, at most
+LOOK_HELD = "You asked Show me to ask you first about changes like this, so it isn't counted done until you say Looks good."
 MEMORY_TEXT = 300  # characters in one
 PARTS = ("live", "replies", "questions", "review_together", "hold")  # working beside your agents: a switch each
 QUESTIONS_KEPT = 12 * 3600  # seconds a question is kept
@@ -962,6 +972,12 @@ class Control:
                 return answer(200, self.decision_forget(given.get("id")))
             if name == "office":
                 return answer(200, self.office(given))
+            # The building learns from your corrections (connect/deputy.py; docs/connect.md, "The building learns from your
+            # corrections"): Yes or No to what it asked after an Undo or a Not quite, and Undo of a decision set aside
+            if name in ("learn_yes", "learn_no"):
+                return answer(200, self.learn_said(given, name == "learn_yes"))
+            if name == "learn_undo":
+                return answer(200, self.learn_undo(given.get("id")))
             # Show me (connect/show.py; docs/connect.md, "Show me")
             if name == "shows":
                 return answer(200, {"shows": self.shows()})
@@ -983,6 +999,12 @@ class Control:
                 try:
                     return answer(200, night_shift.handle(self, name, given))
                 except night_shift.Refused as why:
+                    raise Refused(str(why))
+            # The week on one page (connect/week.py): week (read)
+            if name in week_page.NAMES:
+                try:
+                    return answer(200, week_page.handle(self, name, given))
+                except week_page.Refused as why:
                     raise Refused(str(why))
         except Refused as why:
             return answer(400, {"error": str(why)})
@@ -1299,12 +1321,21 @@ class Control:
         and what waited for them. Nothing of a part that is switched off."""
         chain, office = switches.on("chain", self.data), switches.on("office_hours", self.data)
         try:
-            answered = [deputy.answered_view(r) for r in deputy.answered_rows(self.data)[:deputy.ANSWERED_SHOWN]] if chain else []
+            doc = deputy.read_decisions(self.data)
+            answered = [deputy.answered_view(r, self.learned_view(r, doc)) for r in deputy.answered_rows(self.data)[:deputy.ANSWERED_SHOWN]] if chain else []
             parked = [deputy.parked_view(r) for r in deputy.parked_rows(self.data) if not r.get("seen")] if office else []
             return {"chain": chain, "answered": answered, "decisions": deputy.decision_views(self.data), "office": deputy.office_view(self.data),
-                    "parked": parked}
+                    "parked": parked, "learn": switches.on("learn", self.data)}
         except Exception:  # what can't be read never costs the rest of state
-            return {"chain": chain, "answered": [], "decisions": {"decisions": [], "always_ask": []}, "office": {"on": office}, "parked": []}
+            return {"chain": chain, "answered": [], "decisions": {"decisions": [], "always_ask": [], "set_aside": []}, "office": {"on": office},
+                    "parked": [], "learn": False}
+
+    def learned_view(self, row, doc=None):
+        """What Answered for you asks or says about an answer you undid (deputy.learning), never at the cost of the rest."""
+        try:
+            return deputy.learning(self.data, row, doc)
+        except Exception:
+            return None
 
     def answer_and_learn(self, given):
         """reply_question, and with {"remember": true} your answer is kept, so the floor's lead answers the same question with
@@ -1385,11 +1416,44 @@ class Control:
             row, message = deputy.undo(self.data, given.get("id"), given.get("words"))
         except ValueError as why:
             raise Refused(str(why))
+        learn = self.learned_view(row)  # asked once, here: should the leads stop answering this kind of question? (or set aside)
         try:
             sent = self.say(row["key"], message, via="answer", taken_words="I've got the change to my question, and I'm on it.")
         except Refused as why:  # it has left: the decision is still kept from that kind of question
-            return {"ok": True, "sent": None, "note": f"{why} The decision won't be used for that kind of question again."}
-        return {"ok": True, **sent}
+            return {"ok": True, "sent": None, "note": f"{why} The decision won't be used for that kind of question again.", "learn": learn}
+        return {"ok": True, **sent, "learn": learn}
+
+    def learn_said(self, given, yes):
+        """Your Yes or No to what the building asked after a correction: {"id"} for an answer you undid ("Should the leads
+        stop answering this kind of question for you?"), or {"show"} for a Show me card you said Not quite to ("Should
+        Show me ask you before calling this kind of change done?"). No says nothing more: an empty reply."""
+        self.part("learn")
+        try:
+            if given.get("show") is not None:
+                self.part("show_me")
+                row = show.record(self.data, given.get("show"))
+                if not row or row.get("phase") != "ready":
+                    raise Refused("That Show me card isn't kept any more.")
+                kept = deputy.learn_from_show(self.data, row, yes)
+                label = next((f["label"] for f in self.floors() if f["project"] == row.get("project")), row.get("project"))
+                reply = (f'Done. Show me will ask you first about changes like "{one_line(row.get("title"), 90)}" on {label}: work like it '
+                         "that the building starts isn't counted done until you say Looks good. It's in Settings, under What the "
+                         "leads answer from, with Remove.") if yes else ""
+            else:
+                kept = deputy.learn_from_undo(self.data, given.get("id"), yes)
+                reply = ("Done. The leads won't answer that kind of question for you again: it comes to you. It's in Settings, "
+                         "under What the leads answer from, with Remove.") if yes else ""
+        except ValueError as why:
+            raise Refused(str(why))
+        return {"ok": True, "learned": bool(yes), "reply": reply, "id": (kept or {}).get("id")}
+
+    def learn_undo(self, aid):
+        """Undo of a decision the leads set aside after two Undos: they may answer from it again."""
+        try:
+            deputy.put_back(self.data, aid)
+        except ValueError as why:
+            raise Refused(str(why))
+        return {"ok": True, "reply": "Put back. The leads may answer from that decision again, though not the kinds of question you undid."}
 
     def decision_forget(self, did):
         if not deputy.forget(self.data, did):
@@ -1530,16 +1594,9 @@ class Control:
             proc.wait()
             proc.stdout.close()
             log.close()
-        with self.lock:
-            run["state"] = "stopped" if run.get("stopping") else "done" if proc.returncode == 0 else "failed"
-            run.update(said=one_line(said, 1200), at=time.time(), pid=None)
-            if answering:
-                run["answered"] = answering
-            if self.procs.get(run["key"]) is proc:
-                del self.procs[run["key"]]
-            self.save(run)
+        held = self.ended(run, proc, said, answering)
         self.answered(run, answering, said)
-        self.ready_done(run)
+        self.ready_done(run, held)
         self.show_finished(run, began)
 
     def limits_heard(self, info):
@@ -1549,6 +1606,27 @@ class Control:
             usage.keep("Claude Code", usage.from_claude_event(info), self.data)
         except Exception:
             pass
+
+    def ended(self, run, proc, said, answering):
+        """An agent started here has ended its turn: how it ended is kept, and, in the same update, whether its finished
+        work waits for your look on Show me (look_rule), so nothing that reads the run between the two counts it done.
+        Gives whether it waits."""
+        try:
+            rule = self.look_rule(run) if proc.returncode == 0 else None  # read before the lock: it reads files
+        except Exception:  # Show me's trouble never costs the agent's own ending
+            rule = None
+        with self.lock:
+            run["state"] = "stopped" if run.get("stopping") else "done" if proc.returncode == 0 else "failed"
+            run.update(said=one_line(said, 1200), at=time.time(), pid=None)
+            if answering:
+                run["answered"] = answering
+            if self.procs.get(run["key"]) is proc:
+                del self.procs[run["key"]]
+            held = bool(rule) and run["state"] == "done"
+            if held:
+                run["look"] = {"rule": rule["id"], "since": time.time()}
+            self.save(run)
+        return held
 
     def answered(self, run, answering, said):
         """An agent started here has finished its turn: its last words answer what you sent it, if its hook didn't
@@ -1574,12 +1652,56 @@ class Control:
         except intake.Refusal as why:
             raise Refused(str(why))
 
-    def ready_done(self, run):
-        """An agent started here finished its turn: its ready task is finished, and the next queued on its floor starts."""
+    def ready_done(self, run, held=None):
+        """An agent started here finished its turn: its ready task is finished, and the next queued on its floor starts.
+        Unless Show me asks you first about this kind of change (deputy.looks_first): then it waits for your Looks good.
+        `held` is that, as its ending decided it (ended); None asks now."""
         try:
+            if self.look_first(run) if held is None else held:
+                return
             self.intake.finished(run)
         except Exception:  # the queue's trouble never costs the agent's own ending
             pass
+
+    def look_rule(self, run):
+        """The Show me rule that asks you first about this run's kind of change, or None: Show me and its learning on,
+        the floor shows its work, and you asked Show me to ask you first about changes like this one."""
+        if not switches.on("show_me", self.data) or not show.show_for(run.get("project"), self.data):
+            return None
+        return deputy.looks_first(self.data, run.get("project"), run.get("title"))
+
+    def look_first(self, run):
+        """Whether an agent started here that finished its work waits for you to look at it before it is counted done
+        (look_rule). Marks the run so (look), for awaiting_look."""
+        if run.get("state") != "done":
+            return False
+        rule = self.look_rule(run)
+        if not rule:
+            return False
+        with self.lock:
+            run["look"] = {"rule": rule["id"], "since": time.time()}
+            self.save(run)
+        return True
+
+    def awaiting_look(self, run):
+        """Whether work an agent started here finished still waits for your look on Show me before it is counted done
+        (its ready task, and the floor's next; the daily plan's item). A run, or its key. Never for good: not once you
+        said Looks good or Not quite, the rule was removed, Show me was switched off, or no card came within LOOK_WAIT."""
+        if isinstance(run, str):
+            with self.lock:
+                run = self.runs.get(run)
+        look = run.get("look") if isinstance(run, dict) else None
+        if not isinstance(look, dict) or run.get("state") != "done" or not switches.on("show_me", self.data):
+            return False
+        if not any(a.get("id") == look.get("rule") for a in deputy.read_decisions(self.data)["always_ask"]):
+            return False
+        since = float(look.get("since") or 0)
+        # its cards: one waiting for you, or one you answered since it finished (one answered before is an earlier turn's)
+        cards = [r for r in show.listing(self.data) if r.get("conv") == run.get("key")
+                 and (r.get("state") == "waiting" or float(r.get("decided_at") or 0) >= since)]
+        if any(r.get("state") == "waiting" for r in cards):
+            return True
+        return not cards and time.time() - since < LOOK_WAIT  # its card is still being made
 
     # ---------- Show me (connect/show.py; docs/connect.md, "Show me") ----------
 
@@ -1594,7 +1716,19 @@ class Control:
         """Every Show me card waiting to be looked at, and the last ones looked at, each with its check's result."""
         self.part("show_me")
         feed = read(os.path.join(self.data, "feeds", "claude-code.json")) or {}
-        return show.listing(self.data, feed.get("conversations") or [])
+        rows = show.listing(self.data, feed.get("conversations") or [])
+        try:  # the building learns from your corrections: what a card asks after Not quite, and work that waits for your look
+            doc = deputy.read_decisions(self.data)
+            with self.lock:
+                held = {k for k, run in self.runs.items() if run.get("look")}
+            for row in rows:
+                if row.get("state") == "again":
+                    row["learn"] = deputy.show_learning(self.data, row, doc)
+                elif row.get("state") == "waiting" and row.get("conv") in held and self.awaiting_look(row["conv"]):
+                    row["held"] = LOOK_HELD
+        except Exception:
+            pass
+        return rows
 
     def show_row(self, key):
         self.part("show_me")
@@ -1613,6 +1747,7 @@ class Control:
             run = self.runs.get(row.get("conv"))
             if run:
                 run["reviewed"] = done["decided_at"]
+                run.pop("look", None)  # you looked: it is counted done now
                 self.save(run)
         try:  # one front door: the ready task this agent was started for is looked at, and finished (connect/intake.py)
             self.intake.reviewed(row.get("conv"), done["decided_at"])
@@ -1629,8 +1764,12 @@ class Control:
             raise Refused("That's too long: keep it under 1500 characters.")
         sent = self.say(row.get("conv"), show.again_words(words), via="show",
                         taken_words="I've got what you'd like changed, and I'm on it.")
-        show.decide(self.data, key, "again", words)
-        return {"ok": True, "key": key, "state": "again", **sent}
+        decided = show.decide(self.data, key, "again", words)
+        try:  # asked once, in the same place: should Show me ask you before calling this kind of change done?
+            learn = deputy.show_learning(self.data, decided) if decided else None
+        except Exception:
+            learn = None
+        return {"ok": True, "key": key, "state": "again", **sent, "learn": learn}
 
     def show_image(self, key, n):
         """One picture of a Show me card, as base64: for a phone, or a page whose server keeps the data elsewhere."""
@@ -1703,16 +1842,9 @@ class Control:
             proc.wait()
             proc.stdout.close()
             log.close()
-        with self.lock:
-            run["state"] = "stopped" if run.get("stopping") else "done" if proc.returncode == 0 else "failed"
-            run.update(said=one_line(said, 1200), at=time.time(), pid=None)
-            if answering:
-                run["answered"] = answering
-            if self.procs.get(run["key"]) is proc:
-                del self.procs[run["key"]]
-            self.save(run)
+        held = self.ended(run, proc, said, answering)
         self.answered(run, answering, said)
-        self.ready_done(run)
+        self.ready_done(run, held)
         self.show_finished(run, began)
 
     def rekey(self, run, thread):

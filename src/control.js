@@ -117,7 +117,13 @@ export function createControl({ base = BASE, headers = () => ({}), every = 3000,
     answered: () => (Array.isArray(state.answered) ? state.answered : []),
     undoAnswer: (id, words) => after(call('answered_undo', { id, ...(words ? { words } : {}) })),
     forgetDecision: (id) => after(call('decision_forget', { id })),
-    decisions: () => state.decisions || { decisions: [], always_ask: [] },
+    decisions: () => state.decisions || { decisions: [], always_ask: [], set_aside: [] },
+    // The building learns from your corrections (connect/deputy.py): Yes or No to what it asked after an Undo ({ id }) or
+    // Show me's Not quite ({ show: key }), and Undo of a decision set aside after two Undos.
+    learnOn: () => state.learn === true,
+    learnYes: (ref) => after(call('learn_yes', ref)),
+    learnNo: (ref) => after(call('learn_no', ref)),
+    learnUndo: (id) => after(call('learn_undo', { id })),
     chainOn: () => state.chain === true,
     office: () => state.office || { on: false },
     parked: () => (Array.isArray(state.parked) ? state.parked : []),
@@ -164,6 +170,8 @@ export function createControl({ base = BASE, headers = () => ({}), every = 3000,
     setNight: (fields) => after(call('night_set', fields || {})),
     tickTonight: (id, on = true) => after(call('night_tick', { id, tonight: !!on })),
     undoNight: (id) => after(call('night_undo', { id })),
+    // The week on one page (connect/week.py; docs/connect.md, "The week on one page"): it only reads.
+    week: () => call('week', {}),
     refresh: poll,
   };
 }

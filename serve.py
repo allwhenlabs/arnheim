@@ -76,6 +76,7 @@ from connect import always, switches
 from connect import secret_scan
 from connect import day as day_cycle  # the daily cycle: a plan in the morning, a close in the evening
 from connect import night as night_shift  # the night shift: approved work, overnight, on allowance that would go unused
+from connect import week as week_page  # the week on one page: each floor's week, and where the allowance went
 from connect import setup as connect_setup
 from connect import agent_setup  # setting your agents up well, from the page (/setup/well, /setup/agents)
 from connect.brain import Brain
@@ -120,6 +121,7 @@ NEVER_AWAY = NEVER_AWAY + ("/data/day/",)
 NEVER_AWAY = NEVER_AWAY + ("/data/decisions.json",)
 HERE_ONLY_FOLDERS = HERE_ONLY_FOLDERS + ("day",)
 READS += night_shift.READS  # the night shift's read, "night" (connect/night.py)
+READS += week_page.READS  # the week on one page's read, "week" (connect/week.py): it writes nothing, so it keeps no folder
 NOT_SHARED = ("/data/notes.json",)  # the founder's notes: never through a view-only link
 NEVER_SERVED = ("/data/remote/",)  # the paired phones and their log: never to anyone, this computer included
 # One front door's ready tasks (connect/intake.py): read only through /control/, never as files, this computer included.
