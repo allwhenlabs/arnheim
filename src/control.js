@@ -112,6 +112,16 @@ export function createControl({ base = BASE, headers = () => ({}), every = 3000,
     live: (key) => call('live', { key }),
     changes: (key) => call('changes', { key }),
     replyQuestion: (id, given) => after(call('reply_question', { id, ...given })),
+    // A chain of command and office hours (connect/deputy.py; docs/connect.md, steps 26 and 27): what the leads answered
+    // for you, with Undo; the decisions they answer from; office hours, and what waited for them.
+    answered: () => (Array.isArray(state.answered) ? state.answered : []),
+    undoAnswer: (id, words) => after(call('answered_undo', { id, ...(words ? { words } : {}) })),
+    forgetDecision: (id) => after(call('decision_forget', { id })),
+    decisions: () => state.decisions || { decisions: [], always_ask: [] },
+    chainOn: () => state.chain === true,
+    office: () => state.office || { on: false },
+    parked: () => (Array.isArray(state.parked) ? state.parked : []),
+    setOffice: (fields) => after(call('office', fields || {})),
     comment: (given) => call('comment', given),
     walkThrough: (key) => call('walk_through', { key }),
     hold: (key) => after(call('hold', { key })),
@@ -123,6 +133,29 @@ export function createControl({ base = BASE, headers = () => ({}), every = 3000,
     pauseAll: () => after(call('pause', {})),
     resumeAll: () => after(call('resume', {})),
     forget: (id) => after(call('forget', { id })),
+    // One front door (connect/intake.py): the ready and queued tasks, and making, starting, dropping and changing one.
+    ready: () => (Array.isArray(state.ready) ? state.ready : []),
+    intake: (text, floor = null, via = 'talk') => after(call('intake', { text, floor, via })),
+    startReady: (id) => after(call('ready_start', { id })),
+    dropReady: (id) => after(call('ready_drop', { id })),
+    changeReady: (id, fields = {}) => after(call('ready_change', { id, ...fields })),
+    // Show me (connect/show.py; docs/connect.md, "Show me"): the cards with pictures of finished work, Looks good, Not
+    // quite with what to change, and one picture as base64 (for a phone, or a page whose server keeps the data elsewhere).
+    shows: () => (Array.isArray(state.shows) ? state.shows : []),
+    loadShows: () => call('shows', {}),
+    showOk: (key) => after(call('show_ok', { key })),
+    showAgain: (key, words) => after(call('show_again', { key, words })),
+    showImage: (key, n) => call('show_image', { key, n }),
+    // The daily cycle (connect/day.py; docs/connect.md, "The daily cycle"): today's plan and close as the last read had
+    // them (null while it is switched off), reading them afresh, making the plan, approving it (all, or the floors
+    // named), changing it in words, making the close, and setting the two times.
+    dayNow: () => state.day || null,
+    day: () => call('day', {}),
+    planDay: () => after(call('day_plan', {})),
+    approveDay: (floors) => after(call('day_approve', Array.isArray(floors) && floors.length ? { floors } : {})),
+    changeDay: (floor, words) => after(call('day_change', { floor: floor || null, words })),
+    closeDay: () => after(call('day_close', {})),
+    dayTimes: (plan, close) => after(call('day_times', { plan, close })),
     refresh: poll,
   };
 }

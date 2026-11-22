@@ -92,6 +92,20 @@ export function createAlerts({ win = globalThis, storage = null } = {}) {
         return false;
       }
     },
+    // Any other alert, { title, body, tag }: office hours' (sitting.js). Gives whether it showed.
+    notify(a, open) {
+      if (!wanted || alertsState(win) !== 'granted' || !a) return false;
+      try {
+        const shown = new win.Notification(a.title, { body: a.body, tag: a.tag });
+        shown.onclick = () => {
+          try { win.focus?.(); } catch { /* the browser brings it forward itself */ }
+          try { open?.(); } finally { shown.close?.(); }
+        };
+        return true;
+      } catch {
+        return false;
+      }
+    },
     said: (why) => SAID[why] || '',
   };
 }

@@ -83,6 +83,39 @@ except ImportError:
         live = _beside("live")
         switches = _beside("switches")
 
+try:
+    from . import intake  # one front door: work in your words becomes a ready task (connect/intake.py)
+except ImportError:
+    try:
+        import intake
+    except ImportError:
+        intake = _beside("intake")
+
+try:
+    from . import deputy  # the chain of command and office hours (docs/connect.md, steps 26 and 27)
+except ImportError:
+    try:
+        import deputy
+    except ImportError:
+        deputy = _beside("deputy")
+
+try:
+    from . import show  # Show me: pictures of an agent's finished work (connect/show.py)
+except ImportError:
+    try:
+        import show
+    except ImportError:
+        show = _beside("show")
+
+# The daily cycle (connect/day.py; docs/connect.md, "The daily cycle"): a plan in the morning, a close in the evening.
+try:
+    from . import day as day_cycle
+except ImportError:
+    try:
+        import day as day_cycle
+    except ImportError:
+        day_cycle = _beside("day")
+
 HERE = os.path.dirname(os.path.realpath(__file__))
 DATA = os.environ.get("ARNHEIM_DATA") or os.path.join(os.path.dirname(HERE), "data")
 JSON = "application/json; charset=utf-8"
@@ -253,7 +286,7 @@ def folders_of(project, data=DATA):
 
 def question_view(row):
     """A question as the page gets it (docs: the contract for the page)."""
-    return {k: row.get(k) for k in ("id", "key", "kind", "text", "questions", "said", "at", "until", "state", "project", "agent", "title")}
+    return {k: row.get(k) for k in ("id", "key", "kind", "text", "questions", "said", "at", "until", "state", "project", "agent", "title", "urgent")}
 
 
 def hold_view(row):
@@ -814,6 +847,8 @@ class Control:
         self.going_back = threading.Lock()  # one restore at a time, apart from the lock every request takes
         self.runs = {}
         self.procs = {}
+        self.brain = None  # serve.py's Brain while it is on: a floor's lead writes ready tasks with it (connect/intake.py)
+        self.intake = intake.Intake(self, check_for)  # one front door: ready tasks, and their queue
         self.load()
 
     # ---------- requests ----------
@@ -886,7 +921,7 @@ class Control:
             if name == "changes":
                 return answer(200, self.changes(given.get("key")))
             if name == "reply_question":
-                return answer(200, self.reply_question(given))
+                return answer(200, self.answer_and_learn(given))
             if name == "comment":
                 return answer(200, self.comment(given))
             if name == "walk_through":
@@ -895,16 +930,45 @@ class Control:
                 return answer(200, self.hold(given.get("key")))
             if name == "go_on":
                 return answer(200, self.go_on(given.get("key")))
+            # One front door (connect/intake.py; docs/connect.md, "One front door"): ready tasks
+            if name in ("intake", "ready_start", "ready_drop", "ready_change"):
+                return answer(200, self.ready(name, given))
+            # A chain of command and office hours (connect/deputy.py; docs/connect.md, steps 26 and 27)
+            if name == "answered_undo":
+                return answer(200, self.answered_undo(given))
+            if name == "decision_forget":
+                return answer(200, self.decision_forget(given.get("id")))
+            if name == "office":
+                return answer(200, self.office(given))
+            # Show me (connect/show.py; docs/connect.md, "Show me")
+            if name == "shows":
+                return answer(200, {"shows": self.shows()})
+            if name == "show_ok":
+                return answer(200, self.show_ok(given.get("key")))
+            if name == "show_again":
+                return answer(200, self.show_again(given.get("key"), given.get("words")))
+            if name == "show_image":
+                return answer(200, self.show_image(given.get("key"), given.get("n")))
+
+            # The daily cycle (connect/day.py): day (read), day_plan, day_approve, day_change, day_close, day_times
+            if name in day_cycle.NAMES:
+                try:
+                    return answer(200, day_cycle.handle(self, name, given))
+                except day_cycle.Refused as why:
+                    raise Refused(str(why))
         except Refused as why:
             return answer(400, {"error": str(why)})
         return answer(404, {"error": "No such request."})
 
     def state(self):
+        self.intake.tick()  # one front door: the queue moves on, and what finished is marked so
         with self.lock:
             runs = sorted(self.runs.values(), key=lambda run: run.get("at") or 0, reverse=True)
             runs = [{k: run.get(k) for k in ("key", "project", "title", "state", "said", "answered", "at")} for run in runs[:KEEP_RUNS]]
         return {
             "on": True,
+            "ready": self.intake.views(), "door": self.intake.switched(),  # one front door: ready and queued tasks (connect/intake.py)
+            **self.chain_state(),  # a chain of command and office hours: answered, office, parked, decisions
             "agents": carry_on.installed(self.claude, self.codex),  # which agents a conversation can carry on in
             "carried": sorted(carry_on.carried(self.data)),
             "wait": wait_seconds(),
@@ -915,6 +979,8 @@ class Control:
             "paused": self.box.paused(),
             "allowed": self.box.allowances(budget.local_day()),
             **self.beside(),
+            "shows": self.shows_now(),  # Show me (connect/show.py)
+            **day_cycle.state_part(self),  # "day": today's plan and close (connect/day.py), or None while it is off
         }
 
     def beside(self):
@@ -1125,7 +1191,8 @@ class Control:
             pass
         return {"ok": True, "was": was, "reply": "Okay, carrying on." if was == "held" else "Okay, I'll carry on: I hadn't stopped yet."}
 
-    def start(self, project, text):
+    def start(self, project, text, more=None):
+        """Starts an agent on a floor's project with your words. `more`: a ready task's title and id (connect/intake.py)."""
         text = self.words(text)
         floor = next((f for f in self.floors() if f["project"] == project), None)
         if not floor:
@@ -1133,6 +1200,7 @@ class Control:
         sid = str(uuid.uuid4())
         key = "cc-" + sid.replace("-", "")[:12]
         run = {"key": key, "sid": sid, "project": floor["project"], "folder": floor["folder"], "title": one_line(text[:1].upper() + text[1:], 70), "said": "", "at": time.time()}
+        run.update({k: v for k, v in (more or {}).items() if k in ("title", "ready") and isinstance(v, str)})
         with self.lock:
             self.spawn(run, ["--session-id", sid], self.brief(text, floor))
         return {"key": key, "project": floor["project"]}
@@ -1191,6 +1259,129 @@ class Control:
         with self.lock:
             times = self.box.allow_more(project, budget.local_day())
         return {"ok": True, "project": project, "times": times + 1}
+
+    # ---------- a chain of command and office hours (connect/deputy.py; docs/connect.md, steps 26 and 27) ----------
+
+    def chain_state(self):
+        """What state adds: what the leads answered for you (with Undo), the decisions they answer from, office hours,
+        and what waited for them. Nothing of a part that is switched off."""
+        chain, office = switches.on("chain", self.data), switches.on("office_hours", self.data)
+        try:
+            answered = [deputy.answered_view(r) for r in deputy.answered_rows(self.data)[:deputy.ANSWERED_SHOWN]] if chain else []
+            parked = [deputy.parked_view(r) for r in deputy.parked_rows(self.data) if not r.get("seen")] if office else []
+            return {"chain": chain, "answered": answered, "decisions": deputy.decision_views(self.data), "office": deputy.office_view(self.data),
+                    "parked": parked}
+        except Exception:  # what can't be read never costs the rest of state
+            return {"chain": chain, "answered": [], "decisions": {"decisions": [], "always_ask": []}, "office": {"on": office}, "parked": []}
+
+    def answer_and_learn(self, given):
+        """reply_question, and with {"remember": true} your answer is kept, so the floor's lead answers the same question with
+        it next time; with {"always_ask": true} that kind of question always comes to you. A question put aside for office
+        hours is answered as a message, as one answered late is."""
+        parked = deputy.parked_row(self.data, given.get("id"))
+        if parked and parked.get("kind") == "question":
+            return self.reply_parked(parked, given)
+        row = self.box.question_row(given.get("id"))
+        self.may_learn(row, given)
+        out = self.reply_question(given)
+        return {**out, **self.learn(row, given)} if row else out
+
+    @staticmethod
+    def may_learn(row, given):
+        """Remember my answer is refused before anything is sent, in plain words, when the question or your answer has a
+        password, token or key in it, or is about something the leads never answer for you (deputy.unrememberable)."""
+        if given.get("remember") is not True or not row:
+            return
+        texts = [row.get("text")]
+        for q in row.get("questions") or []:
+            if isinstance(q, dict):
+                texts += [q.get("question"), q.get("header")] + [f'{o.get("label") or ""} {o.get("description") or ""}'
+                                                                 for o in q.get("options") or [] if isinstance(o, dict)]
+        answers = given.get("answers")
+        if isinstance(answers, dict):
+            texts += [", ".join(map(str, a)) if isinstance(a, list) else a for a in answers.values()]
+        else:
+            texts.append(given.get("text"))
+        why = deputy.unrememberable(*texts)
+        if why:
+            raise Refused(f"I didn't send it. {why} Untick Remember my answer and send it again.")
+
+    def learn(self, row, given):
+        """Keeps what you chose with your answer: Remember my answer, or Always ask me."""
+        if given.get("always_ask") is not True and given.get("remember") is not True:
+            return {}
+        project = row.get("project")
+        try:
+            if given.get("always_ask") is True:
+                deputy.ask_always(self.data, project, row.get("text"))
+                return {"always_ask": True}
+            answers = given.get("answers") if isinstance(given.get("answers"), dict) else None
+            if row.get("kind") == "choices":
+                for q in row.get("questions") or []:
+                    picked = answers.get(q.get("question")) if answers else given.get("text")
+                    picked = ", ".join(picked) if isinstance(picked, list) else picked
+                    deputy.remember_answer(self.data, project, q.get("question"), picked,
+                                           [o.get("label") for o in q.get("options") or [] if isinstance(o, dict)], q.get("header"))
+            else:
+                deputy.remember_answer(self.data, project, row.get("text"), given.get("text"), kind="words")
+            return {"remembered": True}
+        except ValueError as why:  # answered all the same; only the remembering didn't happen
+            return {"remembered": False, "note": str(why)}
+
+    def reply_parked(self, row, given):
+        """Your answer to a question put aside while you were away: it reaches the agent as a message."""
+        self.part("questions")
+        if row.get("state") not in ("parked", "moved on"):
+            raise Refused("That question was answered already.")
+        self.may_learn(row, given)
+        answers = given.get("answers")
+        if isinstance(answers, dict) and answers:
+            said = answered_words({"answers": {str(q): ", ".join(a) if isinstance(a, list) else str(a) for q, a in answers.items()}})
+        else:
+            said = self.words(given.get("text"))
+        asked = one_line(row.get("text"), 200)
+        out = self.say(row["key"], f'About your question ("{asked}"), which you put aside while the person was away: {one_line(said, 1500)}',
+                       via="answer", taken_words="I've got your answer to the question I put aside, and I'm on it.")
+        deputy.change_parked(self.data, row["id"], state="answered", seen=True)
+        return {"ok": True, **out, **self.learn({"kind": "choices" if row.get("questions") else "words", "questions": row.get("questions"),
+                                                  "text": row.get("text"), "project": row.get("project")}, given)}
+
+    def answered_undo(self, given):
+        """Undo an answer a lead gave for you: the agent is told you changed it (before its next step), and that decision is
+        not used for that kind of question again."""
+        try:
+            row, message = deputy.undo(self.data, given.get("id"), given.get("words"))
+        except ValueError as why:
+            raise Refused(str(why))
+        try:
+            sent = self.say(row["key"], message, via="answer", taken_words="I've got the change to my question, and I'm on it.")
+        except Refused as why:  # it has left: the decision is still kept from that kind of question
+            return {"ok": True, "sent": None, "note": f"{why} The decision won't be used for that kind of question again."}
+        return {"ok": True, **sent}
+
+    def decision_forget(self, did):
+        if not deputy.forget(self.data, did):
+            raise Refused("That decision isn't kept any more.")
+        return {"ok": True}
+
+    def office(self, given):
+        """Office hours: {"on"} the switch, {"times"} up to four a day, {"open": true} a sitting now (false ends it),
+        {"seen": [ids]} glanced at in a sitting. Gives them as state does."""
+        if "on" in given:
+            if not isinstance(given["on"], bool):
+                raise Refused("Office hours are on or off.")
+            switches.save("office_hours", given["on"], self.data)
+        if "times" in given:
+            try:
+                deputy.save_times(self.data, given["times"])
+            except ValueError as why:
+                raise Refused(str(why))
+        if given.get("open") is True:
+            deputy.open_sitting(self.data)
+        elif given.get("open") is False:
+            deputy.close_sitting(self.data)
+        seen = deputy.seen(self.data, given.get("seen")) if "seen" in given else 0
+        return {"ok": True, "seen": seen, "office": deputy.office_view(self.data)}
 
     # ---------- restore points ----------
 
@@ -1281,6 +1472,7 @@ class Control:
 
     def follow(self, run, proc, log, answering):
         """Reads what the agent says as it goes, and keeps its last words."""
+        began = time.time()  # Show me: when this turn began (show_finished)
         said = ""
         try:
             for raw in proc.stdout:
@@ -1311,6 +1503,8 @@ class Control:
                 del self.procs[run["key"]]
             self.save(run)
         self.answered(run, answering, said)
+        self.ready_done(run)
+        self.show_finished(run, began)
 
     def answered(self, run, answering, said):
         """An agent started here has finished its turn: its last words answer what you sent it, if its hook didn't
@@ -1320,6 +1514,97 @@ class Control:
                 self.lv.answered(run["key"], said)
             except Exception:
                 pass
+
+    # ---------- one front door (connect/intake.py) ----------
+
+    def ready(self, name, given):
+        """Ready tasks: "intake" makes one from your words, "ready_start", "ready_drop" and "ready_change" act on one."""
+        try:
+            if name == "intake":
+                return self.intake.take(given)
+            if name == "ready_start":
+                return self.intake.start(given.get("id"))
+            if name == "ready_drop":
+                return self.intake.drop(given.get("id"))
+            return self.intake.change(given.get("id"), given)
+        except intake.Refusal as why:
+            raise Refused(str(why))
+
+    def ready_done(self, run):
+        """An agent started here finished its turn: its ready task is finished, and the next queued on its floor starts."""
+        try:
+            self.intake.finished(run)
+        except Exception:  # the queue's trouble never costs the agent's own ending
+            pass
+
+    # ---------- Show me (connect/show.py; docs/connect.md, "Show me") ----------
+
+    def shows_now(self):
+        """The Show me cards, for state: none while its switch is off, and never at the cost of the rest."""
+        try:
+            return self.shows() if switches.on("show_me", self.data) else []
+        except Exception:
+            return []
+
+    def shows(self):
+        """Every Show me card waiting to be looked at, and the last ones looked at, each with its check's result."""
+        self.part("show_me")
+        feed = read(os.path.join(self.data, "feeds", "claude-code.json")) or {}
+        return show.listing(self.data, feed.get("conversations") or [])
+
+    def show_row(self, key):
+        self.part("show_me")
+        row = show.record(self.data, key)
+        if not row or row.get("phase") != "ready":
+            raise Refused("That Show me card isn't kept any more.")
+        return row
+
+    def show_ok(self, key):
+        """Looks good: the work is approved, and marked reviewed. An agent started here keeps when."""
+        row = self.show_row(key)
+        done = show.decide(self.data, key, "approved")
+        if not done:
+            raise Refused("That Show me card isn't kept any more.")
+        with self.lock:
+            run = self.runs.get(row.get("conv"))
+            if run:
+                run["reviewed"] = done["decided_at"]
+                self.save(run)
+        try:  # one front door: the ready task this agent was started for is looked at, and finished (connect/intake.py)
+            self.intake.reviewed(row.get("conv"), done["decided_at"])
+        except Exception:
+            pass
+        return {"ok": True, "key": key, "state": "approved", "reply": "Thanks. It's marked as looked at and good."}
+
+    def show_again(self, key, words):
+        """Not quite: what to change reaches the agent as any message from the building does (say): an agent started here
+        that has finished carries on with it now, any other at its next step, or the next time you send it something."""
+        row = self.show_row(key)
+        words = self.words(words)
+        if len(words) > 1500:
+            raise Refused("That's too long: keep it under 1500 characters.")
+        sent = self.say(row.get("conv"), show.again_words(words), via="show",
+                        taken_words="I've got what you'd like changed, and I'm on it.")
+        show.decide(self.data, key, "again", words)
+        return {"ok": True, "key": key, "state": "again", **sent}
+
+    def show_image(self, key, n):
+        """One picture of a Show me card, as base64: for a phone, or a page whose server keeps the data elsewhere."""
+        self.show_row(key)
+        got = show.image(self.data, key, n)
+        if not got:
+            raise Refused("That picture isn't kept any more.")
+        return got
+
+    def show_finished(self, run, since):
+        """An agent started here has finished: Show me takes its pictures if its hooks didn't see it (connect/show.py)."""
+        try:
+            if run.get("state") == "done":
+                proc = show.run_finished(self.data, dict(run), since)
+                if proc is not None:
+                    threading.Thread(target=proc.wait, daemon=True).start()  # so it leaves nothing behind when it ends
+        except Exception:  # its pictures' trouble never costs the run
+            pass
 
     # ---------- carrying on in Codex at a limit (connect/carry_on.py) ----------
 
@@ -1355,6 +1640,7 @@ class Control:
 
     def follow_codex(self, run, proc, log, answering):
         """Reads Codex's events as it goes: its thread's id, which names the conversation, and its last words."""
+        began = time.time()  # Show me: when this turn began (show_finished)
         said = ""
         try:
             for raw in proc.stdout:
@@ -1381,6 +1667,8 @@ class Control:
                 del self.procs[run["key"]]
             self.save(run)
         self.answered(run, answering, said)
+        self.ready_done(run)
+        self.show_finished(run, began)
 
     def rekey(self, run, thread):
         """Codex names its thread once it starts: the run takes the key its hooks give that conversation, so the building

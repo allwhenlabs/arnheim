@@ -19,6 +19,7 @@
      prime(floor),             // optional: Claude reads the floor's facts as you walk up
      features,                 // features.js: leads and answers can be switched off
      madeUp(), notConnected(), // why nothing real can be done here, when it can't
+     door,                     // optional: front-door.js, so work said to a lead becomes a ready task on their floor
    });
 
    leads.lead(floorId), leads.who(floor), leads.floorOf(who), leads.greet(floor, who), leads.says(floor, text,
@@ -54,12 +55,12 @@ export function createLeadDesk(env) {
   const floorsWith = () => env.floors().filter(hasLead);
   const whoOf = (floor) => ({ ...leadOf(floor), sub: `${floor.label}'s lead` });
   const floorOf = (who) => (isLeadHref(who?.href) && leadsOn() ? floorsWith().find((f) => leadOf(f).href === who.href) || null : null);
-  const mem = new Map(); // floor id -> what waits for your word: one of { voice, start, send, which, stop }
+  const mem = new Map(); // floor id -> what waits for your word: one of { voice, start, send, which, stop, door }
   const memOf = (id) => { if (!mem.has(id)) mem.set(id, {}); return mem.get(id); };
   // Only the last question waits for your word: a new one ends any before it, so a "yes", "no" or "cancel"
   // always answers the question just asked, never an older one still waiting.
   const waitFor = (m, what, value) => {
-    for (const k of ['voice', 'start', 'send', 'which', 'stop']) m[k] = null;
+    for (const k of ['voice', 'start', 'send', 'which', 'stop', 'door']) m[k] = null;
     m[what] = value;
   };
 
@@ -187,6 +188,10 @@ export function createLeadDesk(env) {
       if (v.show) env.show(v.show);
       return v.act ? env.answer(v.act) : v.reply;
     }
+    if (m.door) { // one front door: "Start it?" or "Which floor?", asked last (front-door.js)
+      const d = env.door?.answer(m.door, said);
+      if (d) { if (d.pending) waitFor(m, 'door', d.pending); else m.door = null; return d.reply; }
+    }
     if (m.start) {
       const s = deskStart(env.control, said, m.start);
       if (s && s.reply != null) { m.start = s.pending; return s.reply; }
@@ -219,6 +224,9 @@ export function createLeadDesk(env) {
     if (asked?.kind === 'who') return leadWho(floor.label, env.agents(floor));
     if (asked?.kind === 'update') return leadUpdate(env.view(floor));
     if (WAITING.test(said)) return sayWaiting(items, env.label);
+    // one front door: work said to a lead becomes a ready task, on this floor unless the words name another
+    const work = leadsOn() ? env.door?.take(said, { floor: floor.project, via: 'talk' }) : null;
+    if (work) { if (work.pending) waitFor(m, 'door', work.pending); else m.door = null; return work.reply; }
     const handed = handedOut(said, on() ? env.control.projects() : []);
     if (handed && handed.job.trim().length > 2) {
       if (!on()) return env.madeUp() ? `This company is made up, so I can't start a real agent. With your own company connected, I'd start one on ${floor.label} with your words as its brief.` : env.notConnected();
@@ -312,6 +320,8 @@ export function createLeadDesk(env) {
   // request, so a tap can answer it too.
   function controls(floor) {
     const m = memOf(floor.id);
+    const ready = m.door ? env.door?.controls(m.door, () => { m.door = null; }) : null; // one front door: Start, Not now
+    if (ready) return ready;
     if (m.start?.project && on()) {
       return deskControls(m.start, () => {
         const s = deskStart(env.control, 'start it', m.start);

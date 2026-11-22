@@ -115,6 +115,13 @@
     { "id": "rp-b2d93f6e0a17", "ago": 840, "project": "Lantern", "key": "cl1", "title": "Why the bookmark jumps", "why": "before: rm -rf build/cache", "by": "agent", "files": 2 }
   ],
   "every": 6,
+  "ready": [
+    { "id": "rd-5a3e1c0001", "project": "Tidepool", "label": "Tidepool", "title": "The sign in page feels slow on a phone", "state": "ready", "key": null, "via": "talk",
+      "done_when": "The sign in page opens in under two seconds on a phone, and the tests pass.", "proven_by": "The tests: npm test",
+      "agent": "Claude Code", "estimate": { "minutes": 25, "tokens": 380000, "from": 4 } },
+    { "id": "rd-5a3e1c0002", "project": "Lantern", "label": "Lantern", "title": "Add a dark theme to the reading screen", "state": "ready", "key": null, "via": "box",
+      "done_when": "What you asked for is done, and you have looked at it.", "proven_by": "You look at it", "agent": "Codex", "estimate": null }
+  ],
   "asks": [
     { "id": "sample-ask-tests", "key": "cl1", "tool": "Bash", "what": "Bash: npm test -- reader", "ago": 240 },
     { "id": "sample-ask-read", "key": "ck1", "tool": "Read", "what": "Read: ../field-tests/run-3.csv", "ago": 95 }

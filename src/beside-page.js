@@ -664,13 +664,13 @@ export function createBeside(env) {
   }
 
   // A question on Needs you and its conversation's page: how long it waits, its choices as buttons, and a box for
-  // your own words.
-  function questionParts(i) {
+  // your own words. `extra.more()` adds to each answer (Remember my answer, from the chain of command: sitting.js).
+  function questionParts(i, extra = {}) {
     const q = i.q;
     if (!q) return [];
     const out = [h('p.small.bs-qwait.waiting-do', q.state === 'waiting' ? { 'data-bs-q': q.until } : {}, questionWait(q))];
     const list = Array.isArray(q.questions) ? q.questions.filter((x) => x && x.question) : [];
-    const send = (given) => env.done(whole(answer(q, given)), (said) => said || 'Answered.');
+    const send = (given) => env.done(whole(answer(q, { ...given, ...(extra.more?.() || {}) })), (said) => said || 'Answered.');
     if (q.kind === 'choices' && list.length === 1 && !list[0].multiSelect) {
       const one = list[0];
       out.push(h('div.control-row.waiting-do.bs-options', { role: 'group', 'aria-label': one.question },

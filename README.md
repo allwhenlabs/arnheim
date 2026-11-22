@@ -263,6 +263,62 @@ and a paired phone sees them only with control on. In the sample, Lantern's "Why
 shows a made-up screen, and says so. How it works:
 [docs/connect.md](docs/connect.md), "Work beside your agents".
 
+**One front door.** Say what needs doing to anyone in the building, or type it in the **What needs doing?**
+box on Needs you or in a floor's Work room: "the login feels slow on Tidepool". It becomes a ready task on
+that floor, with a short title, **Done when** and **Proven by** (the floor's check, or you look at it), and
+an estimate only once that floor has finished enough work to give one. Say "start it" or tap **Start**. One
+agent from the building works on a floor at a time, and the rest queue. A switch starts them by themselves,
+never one that mentions a password or can't be taken back. In the sample, two made-up ready tasks show the
+cards. How it works: [docs/connect.md](docs/connect.md), "One front door".
+
+## A chain of command, and office hours
+
+A question you have settled before doesn't come back to you. When an agent asks something you have
+already decided (an answer you ticked **Remember my answer** for, or a decision in the company's
+memory that names one of its options), its floor's lead answers for you and says from which decision:
+"Answered from your decision on 18 Nov: use pnpm". Needs you lists each one under **Answered for
+you**, with **Undo**, which tells the agent you changed it. Nothing about secrets, money, deleting,
+pushing, publishing or sending is ever answered for you, nor a question no decision answers.
+
+With **Office hours** on, agents stop interrupting you all day. Choose up to four times (13:00 and
+18:00 to start with). Between them, while you are away from the building, an agent's question hears
+when you're back and it carries on with work that doesn't depend on it; urgent things still reach
+you at once. At each office hour a desktop alert says how much waits, and **the sitting** takes you
+through it one thing at a time, by tap, key or voice ("next", "allow", "the first one"). Both are
+switches in Settings. How it works: [docs/connect.md](docs/connect.md), steps 26 and 27.
+
+### Show me
+
+Finished work comes with something to look at. Give a floor a page to show (its dev server's address)
+or a command that makes pictures, and when an agent finishes work there, Needs you shows the page
+before and after, side by side, at a desktop width and a phone width, with whether its check passed.
+Press **Looks good**, or **Not quite** and say what to change, and the agent gets your words. On a
+phone, swipe right or left. The pictures are taken by a Chrome, Chromium or Edge already on your
+computer, with no window, and stay on it. In the sample, three made-up cards show how it looks. How
+it works: [docs/connect.md](docs/connect.md), "Show me".
+
+## The daily cycle
+
+Switch on **The daily cycle** in Settings, and each morning at 09:00 every floor's lead proposes the
+day for their floor: what was left unfinished, work whose check failed, open tasks, and a next step
+toward each goal, fitted to what is left of your plan's limits and each floor's budget. With no
+reading of your limits it says so, and it never makes up a cost. **Approve the day** with one tap, or
+a floor at a time, or change it in words: "drop the second one on Tidepool", "add: tidy the README on
+Lantern". Approved work starts in order, one thing at a time on each floor, never while everyone is
+paused or a floor is over budget. At 18:00 the close says what was proven, what is stuck and why, what
+needs you tomorrow, and what today cost. Ask the receptionist "what's the plan?" or "how did today
+go?", or a floor's lead "approve the day". The times are yours to set. In the sample the day is made
+up, and says so. How it works: [docs/connect.md](docs/connect.md), "The daily cycle".
+
+**What has been tried so far.** One front door, the chain of command, office hours, Show me and the
+daily cycle have each been tried on a Mac with real Claude Code agents (the chain with Codex too),
+and their tests pass. Four things should work but haven't been tried for real yet: swiping a Show
+me card with a finger on a real phone (only a computer acting as one has swiped one); the
+brain (`--brain`) judging whether one of your decisions answers a question, and writing a ready
+task's title, Done when and Proven by, through the real Claude Code; office hours' desktop alert, and
+an urgent thing reaching you at once, on a real page; and `serve.py` making the plan at 09:00 and the
+close at 18:00 by its own clock (so far they were made when asked for, or when the page next looked).
+
 ## Make it yours
 
 `python3 connect/setup.py` makes your company for you, a floor for each of your projects ("Connect

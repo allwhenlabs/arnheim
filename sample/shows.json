@@ -1,0 +1,101 @@
+{
+  "about": "Made up, like the rest of Fernhollow: Show me cards for the sample (src/show-me.js, docs/connect.md \"Show me\"). The pictures are drawn by the page from these shapes, not taken of anything. A time at or below 0 is seconds before the page opened.",
+  "shows": [
+    {
+      "key": "cc-sample1-1",
+      "conv": "cl3",
+      "title": "Pictures for the app store",
+      "project": "Lantern",
+      "at": -540,
+      "state": "waiting",
+      "how": "browser",
+      "said": "I made the five app store pictures from the new screens, with night reading first.",
+      "changed": { "files": 3, "added": 48, "removed": 21, "names": ["store/pictures.js", "store/captions.json", "store/frame.css"] },
+      "proof": { "changed": -600, "proof": { "state": "failed", "check": "The picture sizes check", "at": -560, "tail": "tablet-1.png: 2048 x 2732, should be 2064 x 2752\n1 of 5 pictures is the wrong size." } },
+      "pictures": [
+        { "n": 0, "phase": "before", "view": "desktop", "width": 1280, "height": 800, "draw": { "w": 1280, "h": 800, "bg": "#f4efe6", "parts": [
+          ["rect", 0, 0, 1280, 86, "#2d3a4a"], ["text", 56, 56, 34, "#ffffff", "Lantern", 700],
+          ["text", 80, 180, 44, "#2d3a4a", "Read anywhere.", 700], ["text", 80, 232, 26, "#5b6676", "Your place is kept on every device."],
+          ["rect", 120, 290, 240, 440, "#ffffff", 26], ["rect", 136, 320, 208, 380, "#d9d3c7", 8],
+          ["rect", 420, 290, 240, 440, "#ffffff", 26], ["rect", 436, 320, 208, 380, "#d9d3c7", 8],
+          ["rect", 720, 290, 240, 440, "#ffffff", 26], ["rect", 736, 320, 208, 380, "#d9d3c7", 8],
+          ["text", 150, 760, 20, "#8a8f98", "Old screens, from last year"] ] } },
+        { "n": 1, "phase": "before", "view": "phone", "width": 390, "height": 844, "draw": { "w": 390, "h": 844, "bg": "#f4efe6", "parts": [
+          ["rect", 0, 0, 390, 70, "#2d3a4a"], ["text", 24, 46, 26, "#ffffff", "Lantern", 700],
+          ["text", 24, 130, 30, "#2d3a4a", "Read anywhere.", 700],
+          ["rect", 70, 170, 250, 460, "#ffffff", 26], ["rect", 86, 200, 218, 400, "#d9d3c7", 8],
+          ["text", 24, 690, 18, "#8a8f98", "Old screens, from last year"] ] } },
+        { "n": 2, "phase": "after", "view": "desktop", "width": 1280, "height": 800, "draw": { "w": 1280, "h": 800, "bg": "#f4efe6", "parts": [
+          ["rect", 0, 0, 1280, 86, "#2d3a4a"], ["text", 56, 56, 34, "#ffffff", "Lantern", 700],
+          ["text", 80, 180, 44, "#2d3a4a", "Read anywhere, even at night.", 700], ["text", 80, 232, 26, "#5b6676", "Night reading, streaks, and a bookmark that stays put."],
+          ["rect", 120, 290, 240, 440, "#ffffff", 26], ["rect", 136, 320, 208, 380, "#1f2633", 8], ["rect", 156, 360, 168, 14, "#e8c879", 4], ["rect", 156, 390, 140, 10, "#9aa3b2", 4], ["rect", 156, 410, 150, 10, "#9aa3b2", 4],
+          ["rect", 420, 290, 240, 440, "#ffffff", 26], ["rect", 436, 320, 208, 380, "#fbf6ea", 8], ["circle", 540, 470, 60, "#e8a33d"], ["text", 506, 482, 34, "#ffffff", "12", 700],
+          ["rect", 720, 290, 240, 440, "#ffffff", 26], ["rect", 736, 320, 208, 380, "#fbf6ea", 8], ["rect", 900, 320, 22, 70, "#c2453b", 2],
+          ["text", 150, 760, 20, "#2d3a4a", "Night reading"], ["text", 470, 760, 20, "#2d3a4a", "Streaks"], ["text", 770, 760, 20, "#2d3a4a", "Bookmarks"] ] } },
+        { "n": 3, "phase": "after", "view": "phone", "width": 390, "height": 844, "draw": { "w": 390, "h": 844, "bg": "#f4efe6", "parts": [
+          ["rect", 0, 0, 390, 70, "#2d3a4a"], ["text", 24, 46, 26, "#ffffff", "Lantern", 700],
+          ["text", 24, 130, 26, "#2d3a4a", "Read anywhere, even at night.", 700],
+          ["rect", 70, 170, 250, 460, "#ffffff", 26], ["rect", 86, 200, 218, 400, "#1f2633", 8], ["rect", 106, 240, 178, 14, "#e8c879", 4], ["rect", 106, 270, 150, 10, "#9aa3b2", 4], ["rect", 106, 290, 160, 10, "#9aa3b2", 4],
+          ["text", 24, 690, 20, "#2d3a4a", "Night reading"] ] } }
+      ]
+    },
+    {
+      "key": "cc-sample2-1",
+      "conv": "ck2",
+      "title": "Template wish list",
+      "project": "Kitefield",
+      "at": -1500,
+      "state": "waiting",
+      "how": "browser",
+      "said": "I added a wish list to the templates page, so people can ask for the next kite.",
+      "changed": { "files": 2, "added": 64, "removed": 3, "names": ["site/templates.html", "site/wishes.js"] },
+      "proof": { "changed": -1560, "proof": null },
+      "pictures": [
+        { "n": 0, "phase": "before", "view": "desktop", "width": 1280, "height": 800, "draw": { "w": 1280, "h": 800, "bg": "#eef5fb", "parts": [
+          ["rect", 0, 0, 1280, 80, "#1c5d8f"], ["text", 52, 52, 32, "#ffffff", "Kitefield templates", 700],
+          ["rect", 80, 140, 250, 250, "#ffffff", 16], ["line", "205,170 300,265 205,360 110,265 205,170", "#d1495b", 6],
+          ["rect", 370, 140, 250, 250, "#ffffff", 16], ["line", "495,170 590,265 495,360 400,265 495,170", "#edae49", 6],
+          ["rect", 660, 140, 250, 250, "#ffffff", 16], ["line", "785,170 880,265 785,360 690,265 785,170", "#00798c", 6],
+          ["rect", 950, 140, 250, 250, "#ffffff", 16], ["line", "1075,170 1170,265 1075,360 980,265 1075,170", "#30638e", 6],
+          ["text", 80, 450, 24, "#4a5a6a", "Four templates. Print one, cut it out, fly it."] ] } },
+        { "n": 1, "phase": "after", "view": "desktop", "width": 1280, "height": 800, "draw": { "w": 1280, "h": 800, "bg": "#eef5fb", "parts": [
+          ["rect", 0, 0, 1280, 80, "#1c5d8f"], ["text", 52, 52, 32, "#ffffff", "Kitefield templates", 700],
+          ["rect", 80, 140, 250, 250, "#ffffff", 16], ["line", "205,170 300,265 205,360 110,265 205,170", "#d1495b", 6],
+          ["rect", 370, 140, 250, 250, "#ffffff", 16], ["line", "495,170 590,265 495,360 400,265 495,170", "#edae49", 6],
+          ["rect", 660, 140, 250, 250, "#ffffff", 16], ["line", "785,170 880,265 785,360 690,265 785,170", "#00798c", 6],
+          ["rect", 950, 140, 250, 250, "#ffffff", 16], ["line", "1075,170 1170,265 1075,360 980,265 1075,170", "#30638e", 6],
+          ["rect", 80, 440, 1120, 300, "#ffffff", 16], ["text", 112, 494, 30, "#1c5d8f", "Wish list", 700],
+          ["text", 112, 540, 22, "#4a5a6a", "Which kite should we draw next? Add yours, or vote for one."],
+          ["rect", 112, 570, 760, 52, "#eef5fb", 10], ["text", 132, 604, 22, "#8a99a8", "A box kite for light wind"],
+          ["rect", 892, 570, 160, 52, "#1c5d8f", 10], ["text", 928, 604, 22, "#ffffff", "Add it", 700],
+          ["text", 112, 680, 20, "#4a5a6a", "Delta kite with a long tail, 14 votes"], ["text", 112, 712, 20, "#4a5a6a", "Sled kite for children, 9 votes"] ] } },
+        { "n": 2, "phase": "before", "view": "phone", "width": 390, "height": 844, "draw": { "w": 390, "h": 844, "bg": "#eef5fb", "parts": [
+          ["rect", 0, 0, 390, 70, "#1c5d8f"], ["text", 20, 46, 24, "#ffffff", "Kitefield templates", 700],
+          ["rect", 20, 100, 350, 230, "#ffffff", 16], ["line", "195,120 290,215 195,310 100,215 195,120", "#d1495b", 6],
+          ["rect", 20, 350, 350, 230, "#ffffff", 16], ["line", "195,370 290,465 195,560 100,465 195,370", "#edae49", 6] ] } },
+        { "n": 3, "phase": "after", "view": "phone", "width": 390, "height": 844, "draw": { "w": 390, "h": 844, "bg": "#eef5fb", "parts": [
+          ["rect", 0, 0, 390, 70, "#1c5d8f"], ["text", 20, 46, 24, "#ffffff", "Kitefield templates", 700],
+          ["rect", 20, 100, 350, 230, "#ffffff", 16], ["line", "195,120 290,215 195,310 100,215 195,120", "#d1495b", 6],
+          ["rect", 20, 350, 350, 300, "#ffffff", 16], ["text", 40, 396, 26, "#1c5d8f", "Wish list", 700],
+          ["text", 40, 432, 17, "#4a5a6a", "Which kite should we draw next?"],
+          ["rect", 40, 456, 310, 48, "#eef5fb", 10], ["text", 56, 487, 18, "#8a99a8", "A box kite for light wind"],
+          ["rect", 40, 516, 120, 44, "#1c5d8f", 10], ["text", 66, 545, 18, "#ffffff", "Add it", 700],
+          ["text", 40, 600, 16, "#4a5a6a", "Delta kite, long tail, 14 votes"] ] } }
+      ]
+    },
+    {
+      "key": "cc-sample3-1",
+      "conv": "cs2",
+      "title": "Sorting the subscriptions",
+      "project": "Studio",
+      "at": -3300,
+      "state": "waiting",
+      "how": "command",
+      "said": "I sorted the studio's subscriptions into keep and cancel. Three can go.",
+      "changed": { "files": 1, "added": 12, "removed": 2, "names": ["accounts/subscriptions.csv"] },
+      "proof": { "changed": -3400, "proof": { "state": "passed", "check": "The spending check", "at": -3350 } },
+      "output": { "after": "Subscriptions, sorted (made up)\nKeep    Design tool        12.00 a month\nKeep    File storage        6.00 a month\nCancel  Stock photos       19.00 a month   not used since June\nCancel  Old domain          1.50 a month   site moved in spring\nCancel  Second chat app     8.00 a month   the team uses one\nThree can go: 28.50 a month saved." },
+      "pictures": []
+    }
+  ]
+}

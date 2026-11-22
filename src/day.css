@@ -1,0 +1,38 @@
+/* The daily cycle (day-page.js): today's plan with each floor's part, the evening close, and its times in Settings. The
+   page's own colours (demo.css), light and dark. On a phone everything stacks, and long titles wrap rather than
+   scroll sideways. */
+
+.day-card .day-allowance { margin: 0 0 10px; }
+.day-floor { padding: 10px 0 4px; border-top: 1px solid var(--line); min-width: 0; }
+.day-floor:first-of-type { border-top: 0; }
+.day-floor-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }
+.day-floor-head h4 { margin: 0; font-size: 15px; font-weight: 650; }
+.day-floor-head .state, .day-floor-head .day-floor-go { margin-left: auto; }
+.day-floor-go { font-size: 13px; padding: 4px 10px; min-height: 30px; }
+.day-note { margin: 6px 0 0; color: var(--amber-text); }
+.day-items { margin: 8px 0 4px; padding: 0; list-style: none; counter-reset: day-item; display: grid; gap: 8px; }
+.day-item { display: flex; align-items: flex-start; gap: 8px; min-width: 0; counter-increment: day-item; }
+.day-item::before { content: counter(day-item) "."; flex: none; min-width: 16px; color: var(--muted); font-size: 13px; line-height: 1.5; }
+.day-item-main { flex: 1 1 auto; display: flex; flex-direction: column; gap: 1px; min-width: 0; overflow-wrap: anywhere; }
+.day-chip { flex: none; margin: 1px 0 0; white-space: nowrap; }
+.day-item-title { font-weight: 600; overflow-wrap: anywhere; }
+.day-waiting { color: var(--amber-text); }
+.day-card .state.k-ok { background: var(--ok-bg); color: var(--ok); }
+.day-card .state.k-quiet { background: var(--surface-2); color: var(--muted); }
+.day-do { margin: 12px 0 0; }
+.day-change { margin: 10px 0 0; }
+.day-change input { min-width: 0; }
+.day-sub { margin: 14px 0 6px; font-size: 12px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.day-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.day-list li { display: flex; flex-direction: column; gap: 1px; min-width: 0; overflow-wrap: anywhere; }
+.day-times { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 6px 0 2px; }
+.day-times label { display: inline-flex; align-items: center; gap: 6px; }
+.day-times input { padding: 5px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; }
+
+@media (max-width: 520px) {
+  .day-item { flex-wrap: wrap; }
+  .day-item-main { flex-basis: calc(100% - 24px); }
+  .day-chip { margin-left: 24px; }
+  .day-floor-head .state, .day-floor-head .day-floor-go { margin-left: 0; }
+  .day-do .btn { flex: 1 1 auto; }
+}

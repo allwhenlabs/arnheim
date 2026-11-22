@@ -85,6 +85,8 @@ import handover  # noqa: E402  (beside this file: finished work, handed to the n
 import switches  # noqa: E402  (beside this file: each feature on or off, data/serve.json)
 import carry_on  # noqa: E402  (beside this file: carrying a conversation on in the other agent at a limit)
 import live  # noqa: E402  (beside this file: each conversation's screen, for this computer and paired phones)
+import deputy  # noqa: E402  (beside this file: the chain of command and office hours)
+import show  # noqa: E402  (beside this file: Show me, pictures of finished work)
 
 DATA = os.environ.get("ARNHEIM_DATA") or os.path.join(os.path.dirname(HERE), "data")
 FEED = os.path.join(DATA, "feeds", "claude-code.json")
@@ -239,8 +241,8 @@ def change(event, feed, project, now, extra=None):
         talk["compacted"] = int(talk.get("compacted") or 0) + 1
     elif name == "UserPromptSubmit":
         said = "" if HANDED.match(str(event.get("prompt") or "")) else line(event.get("prompt"), 100)
-        if talk["title"] == NEW and said:
-            talk["title"] = line(event.get("prompt"), 70)
+        if talk["title"] == NEW and said:  # its first paragraph: your words, before a brief the building added (Done when, ...)
+            talk["title"] = line(re.split(r"\n[ \t]*\n", str(event.get("prompt") or "").strip(), maxsplit=1)[0], 70)
         talk.update(working=True, check=False, says={"now": f'I\'m working on what you asked: "{said}".' if said else "I'm working on it."},
                     asked=said, asked_at=now)
         talk.pop("review", None)  # a new piece of work: the review line starts afresh
@@ -945,10 +947,13 @@ def ask_question(event, box):
     if not project or not shown or len(shown) != len(given.get("questions") or []):
         return None
     key = key_of(event)
+    decided, urgent = chain_of_command(event, box, project, "choices", shown, given)  # settled already, or you are away
+    if decided:
+        return decided
     watched = box.watched()
     until = time.time() + control.wait_seconds() if watched else None
     qid = box.question(key, "choices", shown[0]["question"], shown, until,
-                       {"project": project, "agent": event.get(AGENT) or "Claude Code", "title": seat_title(event)})
+                       {"project": project, "agent": event.get(AGENT) or "Claude Code", "title": seat_title(event), "urgent": urgent})
     if switches.on("live", DATA):
         live.Live(DATA).moment(key, "asking" if watched else "waiting", "ask", f"Asking you: {shown[0]['question']}", project,
                                asking={"id": qid, "kind": "choices", "text": shown[0]["question"]})
@@ -1012,10 +1017,14 @@ def stop_question(event, box):
         return None
     question, context = found
     key = key_of(event)
+    decided, urgent = chain_of_command(event, box, project, "words", [{"question": live.clean(question, 300)}])
+    if decided:
+        return decided
     watched = box.watched()
     until = time.time() + control.wait_seconds() if watched else None
     qid = box.question(key, "words", live.clean(question, 300), None, until,
-                       {"project": project, "agent": event.get(AGENT) or "Claude Code", "title": seat_title(event), "said": live.clean(context, 600)})
+                       {"project": project, "agent": event.get(AGENT) or "Claude Code", "title": seat_title(event), "said": live.clean(context, 600),
+                        "urgent": urgent})
     if switches.on("live", DATA):
         live.Live(DATA).moment(key, "asking" if watched else "finished", "ask" if watched else None, f"Asking you: {question}", project,
                                asking={"id": qid, "kind": "words", "text": live.clean(question, 300)})
@@ -1089,6 +1098,71 @@ def hold_here(event, box):
     return "context", words
 
 
+# ---------- a chain of command and office hours (connect/deputy.py; docs/connect.md, steps 26 and 27) ----------
+
+def chain_of_command(event, box, project, kind, shown, given=None):
+    """The one place where an agent asking you something is weighed before it waits for you: its question tool (kind
+    "choices", `given` its input) or a turn that ends with a question ("words"). A permission it asks for is weighed in
+    respond: only Always allow's exact commands go without you, and office hours list the rest (office_permission).
+
+    First the floor's lead answers what you have settled already, and says from which decision (connect/deputy.py).
+    Then, outside office hours with nobody in the building, the question tool hears that you are away until the next
+    one, and the question waits for the sitting. Gives (what Claude Code hears back, or None; why it is urgent, or
+    None: then it reaches you at once, and the page alerts you)."""
+    key, agent, now = key_of(event), event.get(AGENT) or "Claude Code", time.time()
+    try:
+        if switches.on("chain", DATA):
+            settled = deputy.settle(DATA, kind, project, shown, judge=deputy.brain_judge if deputy.brain_on(DATA) else None)
+            if settled:
+                deputy.log_answered(DATA, key, project, seat_title(event), agent, kind, settled)
+                told = deputy.to_agent(settled)
+                if switches.on("live", DATA):
+                    live.Live(DATA).moment(key, "working", "thinking", "Answered from your decisions, and carrying on", project, agent, asking=None)
+                if kind == "choices":
+                    original = [q["question"] for q in given["questions"]]
+                    answers = {original[i]: deputy.answer_with_note(a) for i, a in enumerate(settled["answers"])}
+                    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
+                                                   "updatedInput": {**given, "answers": answers}, "additionalContext": told}}, None
+                edit_talk(event, lambda t: t.update(working=True, check=False, says={"now": "My lead answered from what you decided before, so I'm carrying on."}))
+                return {"decision": "block", "reason": told}, None
+        if not switches.on("office_hours", DATA) or box.watched() or deputy.office_open(DATA, now):
+            return None, None  # in office hours, or someone is in the building: as it always was
+        question = shown[0]["question"]
+        urgent = None
+        if deputy.asked_before(DATA, key, question) or any(
+                row.get("key") == key and deputy.same_kind(row.get("text"), question) for row in box.question_rows()):
+            urgent = "It asked the same thing a second time."
+        elif deputy.near_limit(DATA, agent, now):
+            urgent = "It is close to its plan's limit."
+        elif deputy.never_asked(shown):  # secrets, money, deleting, pushing, publishing, sending: never "you're away"
+            urgent = deputy.NEVER_URGENT
+        if urgent or kind != "choices":
+            return None, urgent  # a turn that ends with a question waits as a card, as it always did
+        deputy.park(DATA, "question", key, project, seat_title(event), agent, question, questions=shown)
+        words = deputy.away_words(DATA, now)
+        if switches.on("live", DATA):
+            live.Live(DATA).moment(key, "working", "thinking", f"Put my question aside until {deputy.until_words(DATA, now)} (office hours)",
+                                   project, agent, asking=None)
+        answers = {q["question"]: words for q in given["questions"]}
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "allow",
+                                       "updatedInput": {**given, "answers": answers}}}, None
+    except Exception as error:  # the chain's trouble never costs the question: it comes to you as it always did
+        note(error)
+        return None, None
+
+
+def office_permission(event, box, project, tool, what, command):
+    """Office hours: a permission asked for while you are away asks in the agent's own window, as it always did, and is
+    listed for the sitting. One that reaches something private, deletes or sends things, or comes from an agent close to
+    its plan's limit, is marked urgent: the page alerts you at once."""
+    if not project or not switches.on("office_hours", DATA) or box.watched() or deputy.office_open(DATA):
+        return None
+    agent = event.get(AGENT) or "Claude Code"
+    urgent = deputy.high_risk(tool, what, command, restore.risky) or (
+        "It is close to its plan's limit." if deputy.near_limit(DATA, agent) else None)
+    return deputy.park(DATA, "permission", key_of(event), project, seat_title(event), agent, what, tool=tool, what=what, urgent=urgent)
+
+
 def before_step(event):
     """PreToolUse: the step under way is on its screen already (watch). Then a question it asks you
     (AskUserQuestion), a hold from the building, and a restore point before it changes files."""
@@ -1137,6 +1211,11 @@ def before_step(event):
         restore_point(event)
     except Exception as error:  # a restore point's trouble never holds Claude up
         note(error)
+    # Show me (connect/show.py): the pictures from before, as its first change of a turn starts
+    try:
+        show_before(event)
+    except Exception as error:  # a picture's trouble never holds Claude up
+        note(error)
     return out
 
 
@@ -1163,6 +1242,11 @@ def respond(event):
                 box.end_hold(key, "moved on")  # a new message, or the end: a hold from before it (say, after Esc) ends
         except Exception as error:
             note(error)
+    if name in ("PostToolUse", "UserPromptSubmit", "Stop", "SessionEnd"):
+        try:  # it went on: what it asked in its own window while you were away was answered there (connect/deputy.py)
+            deputy.moved_on(DATA, key)
+        except Exception as error:
+            note(error)
     if name == "PermissionRequest":
         tool = str(event.get("tool_name") or "a tool")
         what = control.describe(tool, event.get("tool_input"))
@@ -1182,6 +1266,10 @@ def respond(event):
                 note(error)
             return {"hookSpecificOutput": {"hookEventName": name, "decision": {"behavior": "allow"}}}
         keep(event, {"asking": what})
+        try:  # office hours: listed for the sitting, and urgent ones alert you (connect/deputy.py)
+            office_permission(event, box, project, tool, what, command)
+        except Exception as error:
+            note(error)
         try:
             more = {"project": project, "before": standing.times(DATA, project, tool, command),
                     "standable": always and standing.can_stand(tool, command), "command": command}
@@ -1258,6 +1346,8 @@ def respond(event):
                 return asked
         if name == "Stop":
             prove(event)
+        if name == "Stop" and not stop:
+            show_after(event)  # Show me (connect/show.py): the pictures from after, in the background
         howtos = finished = None
         if name == "SessionStart":
             try:
@@ -1277,6 +1367,45 @@ def respond(event):
     verdict = keep(event, {"heard": heard, **told})
     words = "\n\n".join(w for w in (control.message(rows), memo[0] if memo else None, verdict.get("warn")) if w)
     return {"hookSpecificOutput": {"hookEventName": name, "additionalContext": words}}
+
+
+# ---------- Show me (connect/show.py; docs/connect.md, "Show me") ----------
+
+def show_before(event):
+    """As an agent starts its first change after your message, on a floor that says how to show its work: the pictures
+    from before, taken now, within a short time limit (connect/show.py, before_seconds), so they show the work as it
+    was. Once a turn: the agent waits a moment for them at that one step."""
+    if event.get("tool_name") not in CHANGES or not switches.on("show_me", DATA):
+        return
+    project = floor_of(event)
+    given = show.show_for(project, DATA) if project else None
+    if not given:
+        return
+    talk = next((c for c in read_feed().get("conversations") or [] if isinstance(c, dict) and c.get("id") == key_of(event)), None) or {}
+    turn = show.turn_started(talk)
+    if turn is None or talk.get("show_before") == turn:
+        return  # no message known to start a turn, or taken already in this one
+    edit_talk(event, lambda t: t.update(show_before=turn))
+    show.before(DATA, key_of(event), project, turn, given)
+
+
+def show_after(event):
+    """As a turn finishes its work (Stop, no question waiting): when it changed files and its floor says how to show
+    its work, the pictures from after are taken in the background, beside those from before (connect/show.py)."""
+    if not switches.on("show_me", DATA):
+        return
+    try:
+        talk = next((c for c in read_feed().get("conversations") or [] if isinstance(c, dict) and c.get("id") == key_of(event)), None)
+        project = (talk or {}).get("project")
+        if not talk or not project or not show.show_for(project, DATA):
+            return
+        if asked_in(event.get("last_assistant_message")):
+            return  # it ends by asking you something: not finished yet
+        turn = show.turn_of(talk)
+        if turn is not None:
+            show.after_later(DATA, talk["id"], project, turn)
+    except Exception as error:  # a picture that can't be taken never troubles Claude Code
+        note(error)
 
 
 def main():

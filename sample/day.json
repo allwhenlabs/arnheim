@@ -1,0 +1,66 @@
+{
+  "about": "Fernhollow's day for the daily cycle: a made-up plan and close, like the rest of Fernhollow. The page shows it as if made today at 09:00, and the close at 18:00. Approving it or changing it changes only the page: nothing starts.",
+  "plan_at": "09:00",
+  "close_at": "18:00",
+  "allowance": {
+    "known": true,
+    "tight": false,
+    "words": "Claude Code has 69% of its weekly limit left for the next 4 days: about 17% a day. Codex's 5-hour limit is used up for now, so Codex work waits until it starts again. Each floor proposes up to 3 things."
+  },
+  "plan": [
+    {
+      "floor": "Studio", "label": "Studio", "id": "studio", "lead": "Basil",
+      "items": [
+        {"title": "Write the plan for next year", "why": "An open task on this floor.", "source": "task"}
+      ]
+    },
+    {
+      "floor": "Lantern", "label": "Lantern", "id": "lantern", "lead": "Juno", "later": 1,
+      "items": [
+        {"title": "Get \"Pictures for the app store\" past the picture sizes check", "why": "Its check didn't pass: 1 of 5 pictures is the wrong size.", "cost": "about 300 thousand tokens", "source": "unfinished"},
+        {"title": "Test the app on the spare laptop", "why": "An open task on this floor.", "cost": "about 300 thousand tokens", "source": "task"}
+      ]
+    },
+    {
+      "floor": "Tidepool", "label": "Tidepool", "id": "tidepool", "lead": "Marlo",
+      "items": [
+        {"title": "Find out why sensor 3 sent no readings", "why": "The routine \"Sensor readings\" failed this morning: sensor 3 sent nothing for 6 hours.", "source": "unfinished"},
+        {"title": "Next step toward: A kit anyone can build in an afternoon", "why": "One of this floor's goals.", "source": "goal"}
+      ]
+    },
+    {
+      "floor": "Kitefield", "label": "Kitefield", "id": "kitefield", "lead": "Ines",
+      "items": [
+        {"title": "Add a stunt kite template", "why": "An open task on this floor.", "cost": "about 600 thousand tokens", "source": "task"},
+        {"title": "Next step toward: Share a design with a link", "why": "One of this floor's goals.", "cost": "about 600 thousand tokens", "source": "goal"}
+      ]
+    }
+  ],
+  "close": {
+    "words": "Today: 3 pieces of work proven, 3 stuck, 3 things need you tomorrow. 4 items from the plan finished. 4.4 million new tokens.",
+    "proven": [
+      {"floor": "Studio", "title": "Sorting the subscriptions"},
+      {"floor": "Lantern", "title": "Why the bookmark jumps"},
+      {"floor": "Kitefield", "title": "Add a stunt kite template"}
+    ],
+    "stuck": [
+      {"floor": "Lantern", "title": "Pictures for the app store", "why": "Its check didn't pass: 1 of 5 pictures is the wrong size."},
+      {"floor": "Studio", "title": "Planning next quarter", "why": "It stopped: Studio's agents used today's budget."},
+      {"floor": "Tidepool", "title": "Next step toward: A kit anyone can build in an afternoon", "why": "It waited its turn behind the floor's earlier items."}
+    ],
+    "tomorrow": [
+      {"floor": "Lantern", "title": "Decide on the reading streak badge", "why": "Two designs are ready. Pick one."},
+      {"floor": "Tidepool", "title": "Order a hundred more rain gauges", "why": "The supplier needs a yes by Friday."},
+      {"floor": "Studio", "title": "Renew the Lantern domain", "why": "It runs out at the end of the month."}
+    ],
+    "cost": {
+      "total": 4400000,
+      "floors": [
+        {"floor": "Studio", "tokens": 2100000, "words": "2.1 million tokens"},
+        {"floor": "Kitefield", "tokens": 1400000, "words": "1.4 million tokens"},
+        {"floor": "Lantern", "tokens": 900000, "words": "900 thousand tokens"}
+      ],
+      "words": "4.4 million new tokens today: Studio 2.1 million tokens, Kitefield 1.4 million tokens, Lantern 900 thousand tokens. Claude Code has used 31% of its weekly limit."
+    }
+  }
+}

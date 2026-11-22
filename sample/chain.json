@@ -1,0 +1,23 @@
+{
+  "about": "Made up, like the company: what the floors' leads answered for the sample company, and what waited for its office hours (docs/connect.md, steps 26 and 27). With your own company these come from connect/deputy.py.",
+  "office": {"on": true, "times": ["13:00", "18:00"], "open": false, "until": "13:00", "parked": 2},
+  "answered": [
+    {"id": "sample-answered-1", "key": "cl1", "title": "Why the bookmark jumps", "project": "Lantern", "agent": "Claude Code",
+     "question": "Which package manager should I use for the reader's tests?", "answer": "pnpm",
+     "from": "your decision on 18 Nov: \"Lantern uses pnpm, never npm or yarn.\"", "how": "rule", "at": 0, "undone": false, "seen": false},
+    {"id": "sample-answered-2", "key": "ct2", "title": "Wind sensor drift", "project": "Tidepool", "agent": "Claude Code",
+     "question": "Should readings be shown in metres per second?", "answer": "Yes, metres per second, with knots in brackets",
+     "from": "your answer on 19 Nov: \"Asked 'Should readings be shown in metres per second?': Yes, metres per second, with knots in brackets\"",
+     "how": "same", "at": 0, "undone": false, "seen": false}
+  ],
+  "parked": [
+    {"id": "sample-parked-1", "kind": "question", "key": "cl3", "title": "Pictures for the app store", "project": "Lantern", "agent": "Claude Code",
+     "text": "Which phone should the screenshots show?",
+     "questions": [{"question": "Which phone should the screenshots show?", "header": "Screenshots",
+                    "options": [{"label": "The larger phone", "description": "Shows more of each page"},
+                                {"label": "The smaller phone", "description": "Fits the store's first row"}], "multiSelect": false}],
+     "at": 0, "state": "parked", "seen": false},
+    {"id": "sample-parked-2", "kind": "permission", "key": "ck1", "title": "Tail physics", "project": "Kitefield", "agent": "Codex",
+     "tool": "Bash", "what": "Bash: npm install --save-dev vitest", "text": "Bash: npm install --save-dev vitest", "at": 0, "state": "moved on", "seen": false}
+  ]
+}

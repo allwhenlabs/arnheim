@@ -1,0 +1,55 @@
+/* Show me (show-me.js): finished work's pictures, before and after, side by side, with its check and Looks good or Not
+   quite. The page's own colours (demo.css), light and dark, with fallbacks for a page that has its own. Side by side
+   where there is room; on a phone each pair stays side by side, smaller, and nothing scrolls sideways. */
+
+.sm-card { overflow: hidden; }
+.sm-show { position: relative; touch-action: pan-y; border-radius: 10px; transition: background-color .15s ease, box-shadow .15s ease; }
+.sm-title { margin: 2px 0 2px; font-size: 16px; font-weight: 650; overflow-wrap: anywhere; }
+.sm-where { margin: 0 0 8px; }
+.sm-said { margin: 0 0 10px; overflow-wrap: anywhere; }
+.sm-pairs { display: grid; gap: 12px; margin: 8px 0 10px; }
+.sm-pair { margin: 0; min-width: 0; }
+.sm-pair figcaption { display: flex; align-items: center; gap: 4px; margin: 0 0 6px; }
+.sm-two { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; min-width: 0; }
+.sm-pair.sm-zoom .sm-two { grid-template-columns: 1fr; }
+.sm-shot { position: relative; min-width: 0; }
+.sm-tag { position: absolute; top: 6px; left: 6px; z-index: 1; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 650;
+  background: var(--surface-2, #efeee9); color: var(--muted, #62666f); pointer-events: none; }
+.sm-tag-after { background: var(--ok-bg, #e8f5ee); color: var(--ok, #1d7f55); }
+.sm-tap { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; border-radius: 8px; }
+.sm-tap:focus-visible { outline: 2px solid var(--accent, #2f5bd3); outline-offset: 2px; }
+.sm-img { display: block; width: 100%; height: auto; max-height: 70vh; object-fit: contain; object-position: top;
+  border: 1px solid var(--card-edge, #e5e4de); border-radius: 8px; background: var(--surface-2, #efeee9); }
+.sm-view-phone .sm-img { max-height: 520px; }
+.sm-pair.sm-zoom .sm-img { max-height: none; }
+.sm-loading { min-height: 90px; }
+@media (prefers-reduced-motion: no-preference) { .sm-loading { animation: sm-glow 1.4s ease-in-out infinite; } }
+@keyframes sm-glow { 50% { opacity: .55; } }
+.sm-failed { min-height: 90px; }
+.sm-none { display: flex; align-items: center; justify-content: center; min-height: 90px; padding: 10px; text-align: center; box-sizing: border-box; }
+.sm-fetch { cursor: pointer; color: var(--accent, #2f5bd3); }
+.sm-drawn { background: #fff; }
+.sm-out { margin: 6px 0 8px; }
+.sm-output { margin: 6px 0 0; padding: 10px 12px; max-height: 260px; overflow: auto; border-radius: 9px; background: var(--code-bg, #f3f2ee);
+  color: var(--text, #17191e); font-size: 12.5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sm-why { margin: 6px 0 8px; padding: 8px 10px; border-radius: 9px; background: var(--surface-2, #efeee9); overflow-wrap: anywhere; }
+.sm-proof { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; margin: 4px 0 6px; }
+.sm-changed { margin: 0 0 6px; overflow-wrap: anywhere; }
+.sm-do { margin: 10px 0 4px; }
+.sm-again { margin: 8px 0 4px; flex-wrap: wrap; }
+.sm-again input { flex: 1 1 180px; }
+.sm-decided { margin: 8px 0 0; font-weight: 600; overflow-wrap: anywhere; }
+.sm-approved .sm-decided { color: var(--ok, #1d7f55); }
+.sm-swipe-hint { display: none; margin: 6px 0 0; }
+@media (hover: none) and (pointer: coarse) { .sm-swipe-hint { display: block; } }
+.sm-lean-good { background: var(--ok-bg, #e8f5ee); box-shadow: inset 4px 0 0 var(--ok, #1d7f55); }
+.sm-lean-again { background: var(--amber-bg, #fff3e6); box-shadow: inset -4px 0 0 var(--amber, #d4690b); }
+.sm-rest { margin-top: 12px; }
+.sm-row { display: block; width: 100%; padding: 8px 0; border: 0; background: none; color: var(--text, #17191e); font: inherit; text-align: left;
+  cursor: pointer; overflow-wrap: anywhere; }
+.sm-row:hover b, .sm-row:focus-visible b { color: var(--accent, #2f5bd3); }
+@media (max-width: 520px) {
+  .sm-two { gap: 6px; }
+  .sm-tag { top: 4px; left: 4px; font-size: 10px; }
+  .sm-view-phone .sm-img { max-height: 360px; }
+}

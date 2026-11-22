@@ -52,6 +52,28 @@ SWITCHES = (
     ("hold", "agents", "Hold on and carry on",
      "Hold an agent at its next step to talk it through, then let it carry on. A hold ends when you say carry on, "
      "after 10 minutes, or 2 minutes after nobody is using the building.", True),
+    # One front door (docs/connect.md, "One front door"): connect/intake.py and control honour both.
+    ("front_door", "agents", "One front door",
+     "Anything you say or type that is work becomes a ready task for a floor, with Done when and Proven by, to start with "
+     "one tap. Needs answering agents from the building.", True),
+    ("ready_auto", "agents", "Start ready tasks by themselves",
+     "A new ready task starts without the tap, one at a time on each floor. Never while every agent is paused, past a "
+     "floor's budget, or for one that names a password or can't be taken back.", False),
+    # A chain of command and office hours (docs/connect.md, steps 26 and 27; connect/deputy.py).
+    ("chain", "agents", "Leads answer what you've decided",
+     "When an agent asks something you have settled before, its floor's lead answers it for you and says from which "
+     "decision, and Needs you lists it under Answered for you, with Undo. Never anything to do with secrets, money, "
+     "deleting, pushing, publishing or sending, nor a question no decision answers. Permissions go without you "
+     "only through Always allow.", True),
+    ("office_hours", "agents", "Office hours",
+     "Agents' questions wait for the times you choose, and you answer them in one sitting. While you are away, a question "
+     "is answered with when you're back, so the agent carries on with what doesn't depend on it. Urgent ones still reach "
+     "you at once.", False),
+    # Show me (docs/connect.md, "Show me"): the hooks, connect/show.py and connect/control.py honour it.
+    ("show_me", "agents", "Show me",
+     "When an agent finishes work on a floor that says how to show it (show_url or show in data/company.json), the "
+     "building takes pictures of it, from before and after, beside its check's result, for you to say Looks good or "
+     "Not quite. They stay on this computer. Off: nothing is taken, and no card shows.", True),
     ("brain", "running", "Receptionist and assistant think with Claude",
      "They answer through your own Claude Code, on your own plan. Off: they answer from the building's facts alone.", False),
     ("routines", "running", "Routines",
@@ -71,6 +93,11 @@ SWITCHES = (
     ("carry_on", "page", "Carry on at a limit",
      "When Claude Code or Codex is about to reach your plan's limit, or has, Needs you offers to carry the conversation on in "
      "the other one, with what it was doing.", True),
+    # The daily cycle (connect/day.py; docs/connect.md, "The daily cycle")
+    ("daily_cycle", "running", "The daily cycle",
+     "A plan for the day at 09:00, each floor's lead proposing its part, for you to approve with one tap; approved items "
+     "start one at a time on each floor. A close at 18:00 says what was proven, what is stuck and what today cost. The "
+     "times are yours to set. Needs answering agents from the building.", False),
 )
 NAMES = tuple(s[0] for s in SWITCHES)
 DEFAULTS = {s[0]: s[4] for s in SWITCHES}

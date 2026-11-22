@@ -687,12 +687,14 @@ change needs that page's own token.
   (step 12), the budget brake (step 7), restore points (step 16), the warning when two agents
   change one file (step 10), and the five parts of working beside them (step 24): looking over their
   shoulder, replies straight away, questions coming to you, reviewing together, and hold on and carry
-  on. The hooks read them at each event, so a new setting holds from the agent's
+  on; and the leads answering what you've decided (step 26) and office hours (step 27), with their
+  own group. The hooks read them at each event, so a new setting holds from the agent's
   next step. Off keeps what was there: the memory, the standing allows and the budgets wait until
   their switch is on again.
 - **While Arnheim runs:** the receptionist and your assistant thinking with Claude (`--brain`),
   routines (`--routines`, step 13), pings (`--pings`, step 15), looking in project folders
-  (`--no-git` turns it off, step 3), and looking for a newer Arnheim (below).
+  (`--no-git` turns it off, step 3), looking for a newer Arnheim (below), and the daily cycle (step 29),
+  with its two times under its switch.
 - **On this page:** the Your plan card (step 18), carrying on at a limit (step 21), and, on this device,
   desktop alerts (step 4) and the talking switches, which are each browser's own.
 
@@ -937,6 +939,259 @@ only: never with `--lan`, never through a view-only link, and a paired phone see
 while this computer lets that phone control agents ([phone.md](phone.md)). Questions and holds wait in
 `data/control/` with the rest of control's mail.
 
+## 25. One front door
+
+With control on (step 4), anything you say or type that is work becomes a **ready task** for a floor. Say it
+to the receptionist, a floor's lead or anyone in Talk, type it in the **What needs doing?** box on Needs you
+or in a floor's Work room, or do either from a paired phone: "the login feels slow on Tidepool", "fix the
+footer links", "we need a dark theme on Lantern", "get someone to tidy the tests".
+
+**Which floor.** The one your words name. Else the floor you are on: a lead's own, or the floor page you are
+looking at. Else one your words begin to name ("on tide"). Else the only floor there is. With several and
+none of those, the lead asks which, in one line, and you say its name or tap it.
+
+**What a ready task says.** A short title, from your words. **Done when**: one sentence. **Proven by**: the
+floor's check (step 5), or the test command the project's own files name, as setup finds it (step 23), or
+"You look at it". Its agent: Claude Code, unless the floor says `"agent": "Codex"` in `data/company.json`. And
+an **estimate**, only once three or more pieces of work have finished on that floor: the median time from the
+day's moments (step 8) and the median spend from the feed. With less, there is no estimate, never a guess.
+
+With the brain on ([brain.md](brain.md)), the floor's lead writes the title and Done when from your words. What it writes is
+checked: one line, not too long, nothing that looks like a password or token, and nothing the building
+refuses or can't take back that you didn't say yourself. If either fails, the rule's words are used.
+
+**Start.** The lead reads it back in a sentence or two and asks "Start it?". Say "yes" or "start it", or tap
+**Start** on its card; "no" leaves it ready. Starting hands a new agent your words, Done when and Proven by,
+and asks it to prove the work that way before it says it is done. Each card also has **Change** (the title and
+Done when) and **Drop**.
+
+**One at a time on a floor.** While an agent started from the building is at work on a floor, the next one
+waits there, **queued**, and starts when the last finishes. The card says what it waits for, and Needs you
+says what is next on each floor ("Next on Tidepool: ..."). Nothing starts while every agent is paused or while
+the floor is over today's budget (step 7): it waits, queued, and starts once you resume them or let them go on.
+
+**Start ready tasks by themselves** (a switch in Settings, off unless you switch it on) starts each new ready
+task without the tap, one at a time on each floor. It never starts one by itself that mentions a password or a
+key, or does something that can't be taken back (merge, publish, deploy, push, delete and the like): those
+wait for your Start.
+
+**What it won't take.** Words with a password, token or key in them are refused and never written down: say
+it again without it. Work the building never hands out is refused too: signing in, sending messages or
+posts, buying or paying for you.
+
+**Where it is kept.** Each ready task is a file in `data/control/intake/`, written whole. `serve.py` never serves
+that folder, to anyone, this computer included: the page and a phone read the tasks only through control.
+Ready and queued tasks are kept for 7 days, started, finished and dropped ones for 30. **One front door** is a
+switch in Settings too, on unless you turn it off; with it off, the receptionist hands out work as in step 11.
+## 26. A chain of command
+
+In a well-run company, a question that has been settled before doesn't climb to the top again. When an
+agent asks you something, with Claude's question tool or a turn that ends with a question, its floor's
+lead looks first at what you have already decided. If that clearly answers it, the lead answers for you,
+and says from which decision: "Answered from your decision on 18 Nov: use pnpm". The switch is **Leads
+answer what you've decided** (step 20), on unless you switch it off. It needs control on (step 4) and
+Questions come to you (step 24).
+
+**Clearly** means one of these, and nothing looser:
+
+- **The same question, asked before on the same floor, that you answered with Remember my answer
+  ticked.** The tick sits beside every question's answers, on Needs you and in the sitting (step 27). For
+  a question with options, your answer must still be one of them, or the options must be the same as
+  before. It never keeps a question or an answer with a password, token or key in it, or one about what is
+  never answered for you (below): it says so, before anything is sent.
+- **A decision in the company's memory (step 6) that names exactly one of the question's options**, and not
+  after "never" or "not", and shares at least two words that carry meaning with the question and its
+  options: the same test as "You decided before" on Needs you. "Use pnpm, never npm or yarn" answers
+  "Which package manager?" with pnpm.
+- **With the brain on** (`--brain`, docs/brain.md), the floor's lead may also judge whether one of your
+  decisions really answers it, and must quote it word for word. A quote that isn't one of your decisions,
+  or an answer that isn't one of the options, answers nothing. Without the brain, a turn that ends with an
+  open question is answered only when it is the same question you answered before.
+
+**Never answered for you:** anything about secrets, passwords or keys, money, deleting, pushing or merging,
+publishing or releasing, or sending a message or an email, whatever was decided; a question no decision
+answers; and a kind of question you marked **Always ask me this** (the other tick). Permissions are never
+answered from a decision: only Always allow's exact commands go without you (step 4), as before.
+
+An answer goes back the way your own would: as the question tool's own answers (Claude Code's hooks give
+PreToolUse "allow" with the answers for this), with words beside it saying it came from your decision, or
+for a turn that ended with a question, as the words it carries on with. Each one is listed on Needs you
+under **Answered for you**, and in the sitting, with **Undo**. Undo tells the agent "The person changed
+this", with what you write or "don't take that earlier decision as the answer", before its next step (after
+it for Codex, which takes messages there), and that decision is never used for that kind of question again.
+Settings lists **What the leads answer from**: your remembered answers and the questions you always answer
+yourself, each with **Remove**.
+
+## 27. Office hours
+
+Agents shouldn't interrupt you all day. Switch on **Office hours** (step 20, off unless you switch it on)
+and choose up to four times a day in Settings: 13:00 and 18:00 unless you choose others. Each is open for
+half an hour, and **Open a sitting now** opens one whenever you like.
+
+Outside office hours, while nobody is using the building:
+
+- **Claude's question tool is answered at once** with: "The person is away until 13:00 (office hours). If one
+  option is clearly safe and easy to change later, take it and say which you took; otherwise put this aside,
+  carry on with work that doesn't depend on it, and if there is none, finish your turn saying what you
+  need." The question waits for the sitting. Answering it there reaches the agent as a message.
+- **A turn that ends with a question** waits as a card, as it always did.
+- **A permission request** asks in the agent's own window, as it always did, and is listed for the sitting,
+  with whether it was answered there.
+
+**Urgent things still reach you at once**, with a desktop alert (step 4): a permission that reaches
+something that may be private, or that would delete in bulk, push, publish or deploy; an agent close to
+its plan's limit (step 18), or about to stop at it (step 21); an agent asking the same thing a second
+time; and a question about secrets, money, deleting, pushing, publishing or sending (its question, header or
+any option), which is never told you are away: it waits for you as a card. While you are using the
+building, or in an office hour, nothing waits: everything is as it always was.
+
+At each office hour the page sends a desktop alert, "Office hours: 7 things, about 4 minutes", and Needs
+you says what waits. **The sitting** takes you through it one thing at a time, full screen on a computer
+or a phone, "3 of 7": each question, with its options as buttons and a box for your own words; each
+permission waiting now, with Allow, Deny and Later (the A, D and L keys) and how careful to be; what
+waited while you were away; then what the leads answered for you, to glance at, with Undo; and ready
+tasks, where the building has them. In Talk you can say "next", "skip", "allow", "deny", "the first
+one", or answer in your own words. A spoken "allow" follows the same rule as at the desk: never for
+something that may be private, nor with Answering by voice switched off. Typed or tapped, it goes. It
+ends with a short summary of what you did.
+
+Codex gets all of it but the question tool, which it doesn't have. The times are kept in
+`data/serve.json` as `"office_times"`, beside the switches.
+## 28. Show me
+
+Finished work comes with something to look at, so you can review it by seeing it, not by reading code.
+Tell Arnheim how to show a floor's work in `data/company.json`, with either or both of these:
+
+```json
+{ "id": "lantern", "label": "Lantern", "folder": "~/code/lantern",
+  "show_url": "http://localhost:3000/",
+  "show": { "run": ["npm", "run", "screenshots"], "timeout": 60 } }
+```
+
+- `show_url` is a page of the project to take a picture of: usually its dev server's address, or a page
+  inside the floor's folder, such as `site/index.html`.
+- `show` is a command that writes pictures or prints what it did. It runs in the floor's folder, with no
+  shell and with its time limit (60 seconds unless `timeout` says otherwise). It is handed
+  `ARNHEIM_SHOW_OUT`, a folder to write `.png` or `.jpg` pictures into (six at most, 6 MB each),
+  `ARNHEIM_SHOW_PHASE` (`before` or `after`) and `ARNHEIM_SHOW_URL`. What it prints is kept too, its last
+  30 lines, with anything that looks like a secret hidden.
+
+**What you see.** When an agent's turn finishes work on that floor (it changed files, and it doesn't end
+by asking you something), a **Show me** card comes up on Needs you ("3 things to look at") and on the
+conversation's page. It shows the page as it is now beside the same page from before the work started,
+at a desktop width and a phone width. Tap a picture to see it bigger. Beside them: whether the floor's
+check passed (step 5), the lines changed in short, and what the agent said. Then:
+
+- **Looks good** marks the work as looked at and approved. Work started from a ready task (step 25) marks
+  that task looked at too.
+- **Not quite** opens a box for what to change. It reaches the agent as any message from the building does
+  (step 4): an agent started from the building that has finished carries on with it straight away, and any
+  other reads it at its next step, or the next time you send it something in its own window. In Talk, say
+  "looks good", or "not quite" and what to change.
+- On a phone, swipe right for Looks good and left for Not quite, as well as the buttons. Only a clearly
+  sideways swipe counts, so scrolling up and down never answers anything.
+
+**How the pictures are taken.** With a browser already on this computer, Chrome, Chromium or Edge, without
+a window (`--headless --screenshot`), with a profile of its own that is thrown away afterwards and with
+its own syncing, updates and reports switched off. Arnheim looks for it where each system keeps it: the
+Applications folders on a Mac, Program Files on Windows, and the usual commands on Linux
+(`google-chrome`, `chromium`, `microsoft-edge` and the like). `ARNHEIM_BROWSER` can name another, or
+`none`. Each picture has 30 seconds (`ARNHEIM_SHOW_SECONDS`). With no browser, or no `show_url`, the
+floor's `show` command runs instead; with neither, the card says why there is no picture. If nothing
+answers at the `show_url`, the card says its server may not be running.
+
+The picture from before is taken as the agent starts its first change after your message, so it shows
+the work as it was. The agent waits for it at that one step, at most 20 seconds (`ARNHEIM_SHOW_BEFORE`);
+a picture usually takes a second or two. The picture from after is taken in the background as the turn
+ends, so the agent never waits for it. An agent started from the building whose hooks didn't see it gets
+its card as it finishes.
+
+**Where it is kept.** Everything stays in `data/shows/` on this computer: a small file for each card and
+its pictures. Nothing is sent anywhere. `serve.py` gives that folder to this computer only, never with
+`--lan` or through a view-only link; a paired phone that may control agents gets each picture through
+control, as do pages whose server keeps the data elsewhere (`show_image`). The last 20 cards of each
+conversation are kept, for 30 days, and 200 in all. When a conversation finishes more work, its newest
+card is the one Needs you counts. Show me is a switch (step 20), on by default; it does nothing on a
+floor that doesn't say how to show its work, and with it off nothing is taken and no card shows. The
+made-up company has three made-up cards, with pictures drawn by the page.
+
+## 29. The daily cycle
+
+A plan in the morning and a close in the evening, for the whole company. It is a switch in Settings
+(step 20), **The daily cycle**, off unless you switch it on, and it needs control (step 4) to start
+anything. Under the switch are its two times: 09:00 for the plan and 18:00 for the close unless you set
+others. They are kept in `data/serve.json` beside the switches, as `"day_plan": "09:00"` and
+`"day_close": "18:00"`.
+
+**The plan.** At the plan time, each floor's lead proposes the day for their floor, in this order:
+what was approved yesterday and didn't start, or was stopped before it was done; work whose check
+failed (step 5); the ready tasks at the front door, when your Arnheim has it; the floor's open tasks;
+then a next step toward each of its open goals. Only floors with a folder on this computer are
+planned, since only they can start an agent. A floor proposes up to three things, and one when your
+plan is tight. The plan is fitted to the allowance left today:
+
+- **Your plan's limits** (step 18), as Claude Code and Codex last reported them. The plan says how much
+  of each weekly limit is left, and how much that is a day until it starts again. It is tight when a
+  weekly limit is used up, or would be at this pace before it starts again. A 5-hour limit that is
+  used up is said, and only delays the work. With no readings at all, the plan says so plainly
+  ("No forecast") and isn't fitted to them: it never makes a number up.
+- **A floor's budget** (step 7): once what a piece of work costs there is known (below), a floor
+  proposes only as many things as what is left of its budget today allows. A floor past it says so.
+
+An item says what it may cost only when the floor has finished at least three pieces of work Arnheim
+counted: the middle of what they spent, such as "about 300 thousand tokens". Otherwise it says
+nothing about cost.
+
+**Approving it.** The plan shows on Needs you, just after the first thing an agent is waiting on you for.
+**Approve the day** approves it all with one tap, **Approve** beside a floor approves that floor, and
+the box under it changes it in words:
+
+- "drop the second one on Tidepool", "drop the README one"
+- "add: tidy the README on Lantern", or "add to the plan fix the login on Lantern" (never words with a password,
+  token or key in them: it says so in the front door's words, and writes nothing down)
+- "do the third one first on Kitefield"
+
+With one floor planned, the floor can be left out. **Make it again** makes the plan afresh, keeping
+what you approved, added and dropped.
+
+**Starting the work.** Approved items start in order, one at a time on each floor: the next starts
+when the last is no longer at work. With the front door, an item goes in as a ready task on its
+floor, with the plan's title, and is started there once, so it carries Done when and Proven by and
+the plan follows its agent; if the front door queues it, the item says why it waits. With the front
+door switched off, it starts as an agent started from the building, told it is one item on today's
+approved plan, with the floor's check as for any agent started there. Nothing starts while every agent is paused, or on a floor past its budget today: the
+item says why it waits, and starts once that changes. An item that has started can't be dropped: stop
+its agent instead.
+
+**The close.** At the close time: what was proven today (a check that passed after the work), what is
+stuck and why (a check that failed, a plan item that was stopped or never started, and what it waited
+on), what needs you tomorrow (questions agents asked you, tasks marked as needing you, and items you
+didn't approve), and what today cost, floor by floor, in new tokens (step 7), with how much of each
+weekly limit is used. In the evening it takes the plan's place on Needs you; Activity has both.
+
+**Out loud and on a phone.** Ask the receptionist or your assistant "what's the plan?", "approve the
+day" or "how did today go?", and they answer for the whole company. Ask a floor's lead and they answer
+for their floor: "what's the plan?", "approve the day" (that floor only), "drop the second one", "add:
+tidy the README". "Make the plan" makes it now. A paired phone that may control agents
+([phone.md](phone.md)) has the same cards, through control.
+
+**When it runs.** Nothing runs while Arnheim isn't running. `serve.py` looks every half a minute, and
+the page's own reads look too, so a plan time missed while this computer slept or Arnheim was stopped
+makes the plan when the page next opens. A desktop alert (step 4) comes when the plan is made ("Today's
+plan is ready: 6 things on 3 floors") and when the close is, while the page is in the background.
+`python3 connect/day.py` makes what is due and gives back at once, for a scheduler of your own;
+`--plan` and `--close` make them now, and `--show` says today's plan.
+
+**Control's names.** For a page of your own, or a phone: `day` reads today (`{date, plan_at, close_at,
+made, plan: [{floor, label, lead, approved, items: [{title, why, cost?, state}]}], approved, allowance,
+close}`; `null` in `state` while it is off), `day_plan` makes or refreshes the plan, `day_approve`
+takes `{floors}` or nothing for all, `day_change` takes `{floor, words}`, `day_close` makes the close
+now, and `day_times` takes `{plan, close}`. An item's state is proposed, approved, started, done,
+stopped or failed.
+
+The made-up company has a made-up plan and close (`sample/day.json`) that say so. Approving or
+changing it changes only the page: nothing starts.
+
 ## What is kept, and where
 
 `connect/setup.py` keeps a copy of each file before it changes it: `data/backups/company.before-arnheim-<when>.json`
@@ -966,6 +1221,9 @@ under `refs/arnheim/restore/`.
 The usage forecast keeps `data/feeds/usage.json`: the limits' readings, twelve hours back. Hand-overs
 keep `data/control/handover.json`: a few pieces of finished work for each floor, three days back.
 Carrying on at a limit keeps `data/control/carry-on.json`, which conversations were carried on, six hours back.
+The daily cycle keeps each day's plan and close in `data/day/<date>.json`, two weeks back (step 29), for this
+computer only: never to another computer, a view-only link or a paired phone, which reads today's plan through
+control. Words you add to it that have a password, token or key in them are refused, as the front door refuses them.
 The secrets check keeps what it found in `data/.secrets/found.json` (each secret's kind, file, line and
 hint, never the secret), and each copy for Undo in `data/.secrets/undo/`, for a week. `serve.py` never
 serves that folder.
@@ -977,7 +1235,20 @@ With control on, your messages wait in `data/control/` until Claude takes them, 
 request and its answer are deleted once it is answered, and each agent started from the building
 keeps its last words there. A question an agent asked is kept there for twelve hours, a hold until
 the agent has been told it ended. Each agent's screen is kept in `data/live/` (step 24), for this
-computer only.
+computer only. Ready tasks are kept in `data/control/intake/` (step 25), 7 days while they wait and 30 once
+started, finished or dropped, and never served as files.
+
+The chain of command (step 26) keeps `data/control/decisions.json`, for this computer only: your remembered
+answers, the questions you always answer yourself, and the decisions undone for a kind of question. Yours to
+edit. (It was `data/decisions.json` before; it moves itself the first time it is read.) Remember my answer
+never keeps an answer whose question or words have a password, token or key in them, or that is about secrets,
+money, deleting, pushing, publishing or sending: it says so, and nothing is sent until you untick it. What the leads
+answered for you is kept in `data/control/answered/` for two days. Office hours (step 27) keep what waited
+for the sitting in `data/control/parked/`, for two days, and a sitting opened from the page in
+`data/control/office.json`.
+
+Show me's cards and pictures are kept in `data/shows/` (step 28), the last 20 of each
+conversation for 30 days, for this computer only.
 
 A conversation leaves the building when it ends, or after twelve hours with no word from it. One
 started from the building stays until then, to talk to.

@@ -37,6 +37,10 @@ import { TOUR as TOUR_SEEN, createTour, tourWanted } from './tour.js';
 import { createAlerts, freshAlerts } from './alerts.js';
 import { setVoiceSaved, voiceSaved, voiceWanted } from './voice.js';
 import { createBeside } from './beside-page.js';
+import { createFrontDoor } from './front-door.js'; // one front door: work in your words becomes a ready task
+import { createSitting, dueOffice, officeAlert, parseTimes } from './sitting.js'; // a chain of command and office hours
+import { createShowMe } from './show-me.js'; // Show me: pictures of finished work, Looks good or Not quite
+import { createDay } from './day-page.js'; // the daily cycle: a plan in the morning, a close in the evening
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -121,6 +125,38 @@ const beside = createBeside({
   },
   sampleUrl: () => `${dir}/live.json`,
 });
+// Show me (show-me.js; docs/connect.md, "Show me"): finished work's pictures, before and after, on Needs you and its
+// conversation's page, with Looks good and Not quite. Your own company's through control, the made-up company's drawn.
+const showMe = createShowMe({
+  control,
+  where: () => (!org || !work ? 'none' : madeUp() || dir !== 'data' ? 'sample' : control.on ? 'live' : 'none'),
+  on: () => switchOn('show_me', true),
+  phone: () => fromAway(),
+  label: (p) => floorLabel(p),
+  href: (key) => { const c = convoNow(key); return c ? convoHref(c) : null; },
+  ago: (at) => agoText(at < 1e12 ? at * 1000 : at), // its cards keep seconds, as the server does
+  done: (promise, said) => controlDone(Promise.resolve(promise), said),
+  changed: () => render(),
+  talkTo: (key) => { const c = convoNow(key); if (c && dock) dock.open(agentWho(c)); },
+  sampleUrl: () => `${dir}/shows.json`,
+});
+// The daily cycle (day-page.js; docs/connect.md, "The daily cycle"): today's plan on Needs you and in Activity, the
+// close in the evening, its times under its switch in Settings, its desktop alerts, and what the receptionist and the
+// leads say about it. Your own company's through control, a phone's too; the made-up company's own made-up day.
+const dayCycle = createDay({
+  control,
+  where: () => {
+    if (!org || !work) return 'none';
+    if (madeUp() || dir !== 'data') return 'sample';
+    if (fromAway()) return phoneMe?.phone && phoneMe?.control && control.on ? 'phone' : 'none';
+    return 'here';
+  },
+  switchOn: (name) => { const s = switchBoard?.switches?.find((x) => x.name === name); return s ? !!s.on : null; },
+  alerts,
+  changed: () => render(),
+  go: (href) => goTo(href),
+  sampleUrl: () => `${dir}/day.json`,
+});
 // The agents Talk can put you through to: those at work or asking you something, the one whose page is open, and
 // the one you are talking to.
 const routeConvo = () => (route.item ? work.conversations.find((c) => c.id === route.item && floorOf(c.project)?.id === route.floor) || null : null);
@@ -191,7 +227,10 @@ function agoText(at) {
   const s = Math.max(0, Math.round((Date.now() - at) / 1000));
   if (s < 10) return 'just now';
   if (s < 60) return `${s} seconds ago`;
-  return s < 120 ? 'a minute ago' : `${Math.round(s / 60)} minutes ago`;
+  if (s < 120) return 'a minute ago';
+  if (s < 90 * 60) return `${Math.round(s / 60)} minutes ago`;
+  if (s < 36 * 3600) return `${Math.round(s / 3600)} hours ago`;
+  return `${Math.round(s / 86400)} days ago`;
 }
 
 /* ---------- reading the company ---------- */
@@ -596,10 +635,16 @@ function setupDesk() {
     // A typed question at the desk: Claude's answer as it comes, with the brain on.
     // "Allow all the reads", with control on: done, then said.
     think: (text, a) => {
+      // The daily cycle (day-page.js): "what's the plan?", "approve the day", "how did today go?"
+      const today = dayCycle.heard(text, null);
+      if (today != null) return (async function* day() { yield await today; })();
       const reads = control.on ? allowReadsAsked(text, waitingNow()) : null;
       if (reads) return (async function* allowed() { yield await allowReads(reads); })();
       const decision = rememberAsked(text);
       if (decision) return (async function* remembered() { yield await rememberIt(decision); })();
+      // One front door (front-door.js): work said at the desk becomes a ready task, read back with "Start it?"
+      const doorSaid = doorAnswer(text) ?? doorTake(text);
+      if (doorSaid != null) return (async function* doorReply() { yield await doorSaid; })();
       // Work handed out in words: "get someone to fix the login bug on Lantern", then "start it".
       const start = control.on ? deskStart(control, text, starting) : null;
       if (start && start.reply != null) {
@@ -930,7 +975,13 @@ const talk = {
     return item ? `Hi. I'm on "${item.title}". Ask me how it's going${brain.on ? ', or anything about it' : ''}.` : null;
   },
   answer(who, text, _before, { spoken = false } = {}) {
+    if (sitting.isOpen) { const said = sitting.heard(text, { spoken }); if (said) return said; } // office hours' sitting: "next", "allow", "the first one"
     const lead = leads.floorOf(who);
+    // The daily cycle first (day-page.js): a lead answers for their floor's part, the desk and the assistant for the day
+    if (lead || who.href === DESK || isAide(who)) {
+      const today = dayCycle.heard(text, lead ? { project: lead.project, label: lead.label } : null);
+      if (today != null) return today;
+    }
     if (lead) return leads.says(lead, text, { spoken });
     const stand = standOf(who);
     if (stand) return stand.answer(text);
@@ -939,12 +990,14 @@ const talk = {
       if (round) { deskVoice = null; starting = null; return round; }
     }
     if (who.href === DESK) {
+      const doorSaid = doorAnswer(text); // "Start it?" or "Which floor?", asked last (front-door.js)
+      if (doorSaid != null) return doorSaid;
       const waiting = waitingNow();
       // a permission, answered out loud: read back first, then "allow" or "deny" (leads.js)
       const v = voiceAnswer(text, waiting.filter(canAnswer), deskVoice, { spoken, on: features.get('answers'), label: floorLabel });
       if (v) {
         deskVoice = v.pending;
-        if (v.pending) starting = null; // only the last question waits for your word
+        if (v.pending) { starting = null; doorWait = null; } // only the last question waits for your word
         if (v.show) showWaiting(v.show);
         return v.act ? answerSaid(v.act) : v.reply;
       }
@@ -959,6 +1012,8 @@ const talk = {
       if (ROUTINES_ASKED.test(String(text || ''))) return sayRoutines(routinesNow(), (p) => floorOf(p)?.label || p);
       if (BRIEF_ASKED.test(String(text || ''))) return sayBrief(briefNow(), (p) => floorOf(p)?.label || p);
       if (HEALTH_ASKED.test(String(text || ''))) return sayHealth(org.floors, work);
+      const toDo = doorTake(text); // one front door: work said to the receptionist becomes a ready task
+      if (toDo != null) return toDo;
       const start = deskStart(control, text, starting);
       if (start) {
         starting = start.pending;
@@ -977,6 +1032,11 @@ const talk = {
         ringVoice.set(item.id, v.pending);
         return v.act ? answerSaid(v.act) : v.reply;
       }
+    }
+    if (item && isConvo(item)) {
+      // Show me: "looks good", or "not quite" and what to change, for its finished work waiting to be looked at
+      const shown = showMe.heard(item.id, text);
+      if (shown != null) return shown;
     }
     if (item && isConvo(item)) {
       // hold on, carry on, walk me through it, looks good, "the second change", or the answer to its question
@@ -1041,6 +1101,10 @@ const talk = {
       const q = beside.questionButtons(item.id);
       const all = [...(q?.buttons || []), ...beside.buttons(item.id), ...(base?.buttons || [])];
       return q || all.length ? { note: q?.note || null, buttons: all } : null;
+    }
+    if (who.href === DESK && doorWait) { // one front door: Start or Not now, while "Start it?" waits
+      const doorButtons = door.controls(doorWait, () => { doorWait = null; });
+      if (doorButtons) return doorButtons;
     }
     if (!control.on) return null;
     if (who.href === DESK) {
@@ -1118,7 +1182,48 @@ function places() {
   return out;
 }
 
+/* ---------- one front door (front-door.js; connect/intake.py; docs/connect.md, "One front door") ---------- */
+
+// Work said or typed anywhere becomes a ready task for a floor, read back with "Start it?"; the "What needs doing?" box
+// and the "Ready to start" cards. On with its switch and control (a phone reads the switch from control), and on the
+// made-up company, where nothing real starts.
+const door = createFrontDoor({
+  control,
+  on: () => (madeUp() ? true : control.on && control.state().door?.on !== false),
+  madeUp,
+  floors: () => (control.on && !madeUp()
+    ? control.projects().map((p) => ({ id: p.floor, project: p.project, label: p.label }))
+    : (org?.floors || []).map((f) => ({ id: f.id, project: f.project, label: f.label }))),
+  sample: () => (dir !== 'data' && Array.isArray(work?.ready) ? work.ready : []),
+  phone: () => fromAway(),
+  done: (promise, said) => controlDone(promise, said),
+  changed: () => render(),
+});
+let doorWait = null; // the receptionist's ready task read back ("Start it?") or "Which floor?", waiting for your word
+// The floor you are looking at, when an agent can work there: where work said to the receptionist goes if it names none.
+const doorHere = () => {
+  const p = (org?.floors || []).find((f) => f.id === route.floor)?.project || null;
+  return p && control.projects().some((x) => x.project === p) ? p : null;
+};
+// The receptionist: the answer to "Start it?" or "Which floor?", or null when what you said isn't one.
+function doorAnswer(text) {
+  const a = doorWait ? door.answer(doorWait, text) : null;
+  if (!a) return null;
+  doorWait = a.pending;
+  return a.reply;
+}
+// The receptionist: work said to them, as a ready task read back, or null when it isn't work.
+function doorTake(text) {
+  const t = door.take(text, { floor: doorHere(), via: 'talk' });
+  if (!t) return null;
+  doorWait = t.pending;
+  starting = null; // only the last question waits for your word
+  deskVoice = null;
+  return t.reply;
+}
+
 const leads = createLeadDesk({
+  door, // one front door: work said to a lead becomes a ready task on their floor
   company: () => org?.company,
   floors: () => org.floors,
   label: floorLabel,
@@ -1231,19 +1336,21 @@ const switchOn = (name, otherwise = true) => {
 // The switches in the groups a person thinks in, each one line (the rest of its words on hover or focus).
 const SWITCH_SETS = [
   ['Answering your agents', ['control', 'always']],
-  ['Working beside your agents', ['live', 'replies', 'questions', 'review_together', 'hold']],
+  ['Working beside your agents', ['live', 'replies', 'questions', 'review_together', 'hold', 'show_me']],
   ['Guardrails', ['checks', 'review', 'budget', 'restore', 'clash', 'secrets']],
   ['What every agent is told', ['handovers', 'memory', 'howtos']],
   ['While Arnheim runs', ['brain', 'routines', 'pings', 'git', 'updates']],
   ['On this page', ['forecast', 'carry_on']],
 ];
+SWITCH_SETS.find(([label]) => label === 'While Arnheim runs')?.[1].push('daily_cycle'); // the daily cycle (day-page.js)
 // The words sit outside the label, so tapping them to read them all (a phone has no pointing) never flips the switch.
 const aboutLine = (text) => h('span.small.muted.switch-about', text); // in full: rows that open on a hover move under the pointer
 function switchRow(s) {
   return h('li.switch-row', h('label.switch',
     h('input', { type: 'checkbox', checked: !!s.on, disabled: !!s.set_by, onchange: (event) => flip(s.name, event.currentTarget.checked) }),
     h('span', h('b', s.label), s.set_by && h('span.small', ` Set by ${s.set_by} for this start.`))), aboutLine(s.about),
-  s.name === 'review' && reviewersSaid(org.floors) && aboutLine(reviewersSaid(org.floors))); // who reads on each floor (review.js)
+  s.name === 'review' && reviewersSaid(org.floors) && aboutLine(reviewersSaid(org.floors)), // who reads on each floor (review.js)
+  s.name === 'daily_cycle' && s.on && dayCycle.times()); // the plan's and the close's times (day-page.js)
 }
 // Speaking out loud on this device: the same as the Voice button in Talk, here too, where a person looks for it.
 window.addEventListener('arnheim-voice', () => { if (document.querySelector('#content .switch-list')) render(); });
@@ -1314,7 +1421,7 @@ function checkAlerts() {
   if (!ownCompany()) return;
   const items = waitingNow();
   if (!alertKnown) { alertKnown = new Set(); freshAlerts(items, alertKnown); return; }
-  const fresh = freshAlerts(items, alertKnown);
+  const fresh = freshAlerts(items, alertKnown).filter((i) => !officeQuiet() || i.q?.urgent); // office hours: urgent only
   if (!fresh.length || !alerts.on() || (!document.hidden && document.hasFocus())) return;
   for (const i of fresh) alerts.show(i, floorOf(i.project)?.label || i.project, () => { location.hash = waitingHref(i) || '#/'; });
 }
@@ -1342,6 +1449,215 @@ function alertOffer() {
       btn('No thanks', () => { alertOfferGone = true; keep('arnheim-alerts-offer', 'no'); render(); }, '.quiet')),
     alertsNote && h('p.small.note', { role: 'status' }, alertsNote));
 }
+
+/* ---------- a chain of command and office hours (sitting.js; connect/deputy.py; docs/connect.md, steps 26 and 27) ---------- */
+
+// Their switches, in a group of their own under Switches.
+SWITCH_SETS.push(['Leads and office hours', ['chain', 'office_hours']]);
+// Your own company, with control on: the real thing. The made-up company shows made-up ones (sample/chain.json), and says so.
+const chainHere = () => control.on && dir === 'data' && !madeUp();
+let sampleChain = null;
+let sampleChainAsked = false;
+function sampleChainNow() {
+  if (!madeUp()) return null;
+  if (!sampleChainAsked) {
+    sampleChainAsked = true;
+    fetch(`${dir}/chain.json`, { cache: 'no-store' }).then((r) => (r.ok ? r.json() : null)).then((got) => {
+      if (!got || typeof got !== 'object') return;
+      const rows = [...(got.answered || []), ...(got.parked || [])];
+      for (const [n, r] of rows.entries()) if (r && !r.at) r.at = Date.now() / 1000 - (n + 1) * 1700; // a little while ago
+      sampleChain = got;
+      render();
+    }).catch(() => {});
+  }
+  return sampleChain;
+}
+const answeredNow = () => (chainHere() ? (control.chainOn() ? control.answered() : []) : (sampleChainNow()?.answered || []));
+const officeNow = () => (chainHere() ? control.office() : sampleChainNow()?.office || { on: false });
+// Office hours on, not open, and nobody here: only what is urgent alerts at once.
+const officeQuiet = () => { const o = officeNow(); return !!o.on && !o.open; };
+
+// What the sitting reads, and how it answers: control, or for the made-up company a stand-in that changes nothing.
+const SAMPLE_ACTIONS = {
+  on: true,
+  replyQuestion: () => Promise.resolve({ sample: true }),
+  undoAnswer: (id) => { const a = (sampleChain?.answered || []).find((x) => x.id === id); if (a) a.undone = true; return Promise.resolve({ sample: true, note: 'Undone, in this tab only: the company is made up.' }); },
+  setOffice: () => Promise.resolve({ sample: true }),
+  startReady: () => Promise.resolve({ sample: true, reply: 'This company is made up, so nothing real starts.' }), // its ready tasks (front-door.js)
+};
+const sitting = createSitting({
+  control: () => (chainHere() ? control : SAMPLE_ACTIONS),
+  state: () => (chainHere() ? control.state() : madeUp()
+    ? { asks: (work?.asks || []).filter((a) => !answered.has(a.id)), parked: sampleChainNow()?.parked || [], answered: sampleChainNow()?.answered || [],
+      ready: door.on() ? door.tasks() : [] } : {}), // the made-up company's ready tasks come last in the sitting too
+  beside,
+  item: (kind, id) => waitingNow().find((i) => i.id === (kind === 'permission' ? `ask:${id}` : `q:${id}`)) || null,
+  answerAsk: (i, behavior) => answerAsk(i.ask.id, behavior),
+  label: (p) => (p ? floorLabel(p) : ''),
+  risk: (i) => riskOf(i),
+  leadPick: (i) => leadPick(i),
+  voiceOn: () => features.get('answers'), // Answering by voice: a spoken "allow" follows the same rule as at the desk
+  learn: () => learnTicks(),
+  changed: () => render(),
+});
+function openSitting() {
+  if (!chainHere() && !madeUp()) { controlNote = notConnected(); noteFresh = true; render(); return; }
+  sitting.open();
+}
+
+// Remember my answer, and Always ask me this: two ticks beside a question's answers; ticking one unticks the other.
+function learnTicks() {
+  if (!chainHere() || !control.chainOn()) return [null, () => ({})];
+  const remember = h('input', { type: 'checkbox', name: 'remember' });
+  const always = h('input', { type: 'checkbox', name: 'always_ask' });
+  remember.addEventListener('change', () => { if (remember.checked) always.checked = false; });
+  always.addEventListener('change', () => { if (always.checked) remember.checked = false; });
+  const el = h('div.sit-learn.waiting-do', { role: 'group', 'aria-label': 'For next time' },
+    h('label', remember, 'Remember my answer'), h('label', always, 'Always ask me this'));
+  return [el, () => (remember.checked ? { remember: true } : always.checked ? { always_ask: true } : {})];
+}
+
+// With the brain on, a floor's lead says which they would pick: asked when you press for it (or as the sitting shows
+// the question), once for each question.
+const picks = new Map();
+function leadPick(i) {
+  const floor = floorOf(i.project);
+  if (!brain.on || !floor || !features.get('leads') || !hasLead(floor)) return null;
+  const options = (i.q?.questions?.[0]?.options || []).map((o) => o?.label).filter(Boolean);
+  const asked = `An agent on ${floor.label} asks the person: "${i.what}".${options.length ? ` Its options: ${options.join(', ')}.` : ''} `
+    + 'Which would you pick? Answer in one or two sentences starting "I\'d pick", and say why. Only recommend: pass nothing on to any agent.';
+  return (async () => { let out = ''; for await (const piece of leadThinks(floor, asked)) out += piece; return out.trim(); })();
+}
+function leadPickPart(i) {
+  const floor = floorOf(i.project);
+  if (!brain.on || !floor || !features.get('leads') || !hasLead(floor)) return null;
+  const name = leads.who(floor).name || 'the lead';
+  const got = picks.get(i.id);
+  if (typeof got === 'string') return h('p.small.sit-pick.waiting-do', h('b', `${name}: `), got);
+  return h('div.control-row.waiting-do', btn(got ? `Asking ${name}…` : `What would ${name} pick?`, got ? null : () => {
+    picks.set(i.id, true);
+    render();
+    Promise.resolve(leadPick(i)).then((said) => { picks.set(i.id, said || 'No pick.'); render(); },
+      () => { picks.set(i.id, 'The lead couldn\'t answer just now.'); render(); });
+  }, '.quiet', 'bot'));
+}
+function chainParts(i) {
+  const [ticks, fields] = learnTicks();
+  return [i.q?.urgent && h('p.small.urgent-note.waiting-do', i.q.urgent), leadPickPart(i), ...beside.questionParts(i, { more: fields }), ticks].filter(Boolean);
+}
+
+// Needs you: what the floors' leads answered for you, each with Undo.
+function answeredCard() {
+  const rows = answeredNow();
+  if (!rows.length) return null;
+  const sample = !chainHere();
+  return h('section.panel-card.home-more.answered-card',
+    sectHead('check-check', `Answered for you (${rows.length})`),
+    h('p.small.muted', sample
+      ? 'Questions the leads answered from what was decided before. These are made up.'
+      : 'Questions your floors\' leads answered from what you decided before. Undo tells the agent you changed it, and keeps that decision away from that kind of question.'),
+    h('ul.list', rows.slice(0, 8).map((a) => {
+      const li = row(a.key && a.project && !sample ? convoHref({ id: a.key, project: a.project }) : null, `${a.title || 'An agent'} asked: "${a.question}"`,
+        `${a.undone ? 'Undone. ' : ''}Answered ${a.answer}, from ${a.from}${/[.!?]['"”’]?$/.test(a.from || '') ? '' : '.'} ${a.project ? floorLabel(a.project) : ''}`.trim(), a.undone ? 'quiet' : 'ok');
+      li.classList.add('answered-row');
+      if (!a.undone) li.append(undoForm(a, sample));
+      return li;
+    })));
+}
+function undoForm(a, sample) {
+  const go = (event) => {
+    event.preventDefault();
+    const words = event.currentTarget.elements.instead.value.trim();
+    controlDone((sample ? SAMPLE_ACTIONS : control).undoAnswer(a.id, words || null),
+      (r) => r?.note || 'Undone. It hears that you changed it before its next step, and that decision stays away from that kind of question.');
+  };
+  return h('form.answered-undo.waiting-do', { onsubmit: go },
+    h('input', { name: 'instead', type: 'text', maxlength: 1500, autocomplete: 'off', placeholder: 'What it should do instead (optional)', 'aria-label': `What ${a.title || 'the agent'} should do instead` }),
+    h('button.btn', { type: 'submit' }, 'Undo'));
+}
+
+// Needs you, with office hours on: what waits for the sitting, when the next one is, and Open a sitting now.
+function officeBanner() {
+  const o = officeNow();
+  if (!o.on) return null;
+  const n = sitting.count();
+  const when = o.open ? 'Office hours are open now.' : `Next office hours: ${o.until || (o.times || [])[0] || 'later today'}.`;
+  return h('section.panel-card.office-banner',
+    h('p', h('strong', n ? `${count(n, 'thing waits', 'things wait')} for the sitting. ` : 'Nothing waits for the sitting. '), when,
+      !chainHere() && h('span.muted', ' Made up, like the company.')),
+    btn('Open a sitting now', openSitting, n ? '.primary' : '', 'calendar-days'));
+}
+
+// Settings: office hours' times, and Open a sitting now. Shown while the switch is on.
+function officeCard() {
+  if (!chainHere()) return null;
+  const o = officeNow();
+  if (!o.on) return null;
+  const save = (event) => {
+    event.preventDefault();
+    let times;
+    try { times = parseTimes(event.currentTarget.elements.times.value); } catch (error) { controlNote = error.message; noteFresh = true; render(); return; }
+    controlDone(control.setOffice({ times }), () => `Office hours: ${times.join(', ')}.`);
+  };
+  return h('section.panel-card.office-card',
+    sectHead('calendar-days', 'Office hours'),
+    h('p.small.muted', 'Up to four times a day, each open for half an hour. Outside them, while nobody is using the building, agents\' questions wait for the sitting and they carry on with what doesn\'t depend on them. Urgent things still reach you at once.'),
+    h('form.office-times', { onsubmit: save },
+      h('input', { name: 'times', type: 'text', value: (o.times || ['13:00', '18:00']).join(', '), autocomplete: 'off', 'aria-label': 'Office hours, as times of day such as 13:00, 18:00' }),
+      h('button.btn', { type: 'submit' }, 'Save')),
+    h('div.control-row', btn('Open a sitting now', openSitting, '.primary', 'calendar-days'),
+      h('span.small.muted', o.open ? 'Office hours are open now.' : `Next: ${o.until || 'the next office hour'}.`)),
+    noteOnce());
+}
+
+// Settings: the decisions the leads answer from, each to take out. Shown while Leads answer what you've decided is on.
+function decisionsCard() {
+  if (!chainHere() || !control.chainOn()) return null;
+  const { decisions = [], always_ask: always = [] } = control.decisions();
+  const line = (glyph, title, sub, id, said) => h('li', h('div.row.memory-row', dot(glyph), h('span.row-main', h('span.row-title', title), sub && h('span.row-sub', sub)),
+    btn('Remove', () => controlDone(control.forgetDecision(id), () => said))));
+  return h('section.panel-card.decisions-card',
+    sectHead('check-check', 'What the leads answer from'),
+    h('p.small.muted', 'Your answers with Remember my answer ticked: the same question on the same floor is answered with them. The company\'s memory, above, counts too. And the questions you always answer yourself.'),
+    decisions.length || always.length
+      ? h('ul.list', [
+        ...decisions.map((d) => line('quiet', `"${d.question}": ${d.answer}`, d.project ? floorLabel(d.project) : null, d.id, 'Removed. That question comes to you again.')),
+        ...always.map((a) => line('needs', `Always ask me: "${a.question}"`, a.project ? floorLabel(a.project) : null, a.id, 'Removed. The leads may answer it again from your decisions.')),
+      ])
+      : empty('Nothing yet. Tick Remember my answer when you answer an agent\'s question.'));
+}
+
+// Desktop alerts for office hours: at each office hour "Office hours: 7 things, about 4 minutes", and at once for what
+// is urgent (a risky permission, an agent close to its plan's limit, the same thing asked twice). Your own company only.
+const OFFICE_ALERTED = 'arnheim-office-alerted';
+const officeAlerted = new Set(keptJson(OFFICE_ALERTED) || []);
+let urgentKnown = null;
+function officeAlerts() {
+  if (!chainHere()) return;
+  const o = officeNow();
+  if (!o.on) return;
+  const slot = dueOffice(o.times || [], Date.now() / 1000, officeAlerted);
+  if (slot) {
+    officeAlerted.add(slot);
+    keep(OFFICE_ALERTED, JSON.stringify([...officeAlerted].slice(-20)));
+    const n = sitting.count();
+    if (n) alerts.notify(officeAlert(n, `arnheim-office-${slot}`), () => openSitting());
+    render();
+  }
+  const urgent = [
+    ...control.parked().filter((p) => p.urgent).map((p) => ({ id: `urgent:${p.id}`, kind: p.kind === 'permission' ? 'permission' : 'question',
+      title: p.title, project: p.project, what: p.kind === 'permission' ? `${p.what}. ${p.urgent}` : `${p.text} (${p.urgent})` })),
+    ...(officeQuiet() ? carryOnNow().map((c) => ({ id: `limit:${c.key}`, kind: 'question', title: c.title, project: c.project, what: 'It is reaching its plan\'s limit. Carry it on in the other agent?' })) : []),
+  ];
+  if (!urgentKnown) { urgentKnown = new Set(urgent.map((u) => u.id)); return; } // what was there as the page opened never alerts
+  for (const u of urgent) {
+    if (urgentKnown.has(u.id)) continue;
+    urgentKnown.add(u.id);
+    alerts.show(u, floorOf(u.project)?.label || u.project, () => openSitting());
+  }
+}
+control.watch(() => officeAlerts());
+setInterval(officeAlerts, 30000);
 
 // The talking switches alone, where Talk can always be switched back on.
 function talkingCard() {
@@ -2006,7 +2322,7 @@ function waitingActions(i, { keys = false } = {}) {
       reachable && h('div.control-row', btn('Send it that', () => (i.q ? controlDone(beside.whole(beside.answer(i.q, { text: told })), (said) => said || 'Answered.')
         : controlDone(control.say(i.key, told), () => waitsIn(i.key))), '.primary'))));
   }
-  if (i.q && control.on) out.push(...beside.questionParts(i)); // asked in the building: its choices, how long it waits, your own words
+  if (i.q && control.on) out.push(...chainParts(i)); // asked in the building: its choices, how long it waits, your own words, Remember my answer
   else if ((i.kind === 'question' || i.kind === 'turn') && reachable) {
     const send = (event) => {
       event.preventDefault();
@@ -2112,13 +2428,15 @@ function viewOverview() {
   const moving = talking.length + jobs.length;
   const carrying = carryOnNow(); // conversations to carry on in the other agent at a limit (carry-on.js)
   const secretsOut = secretsNeeding();
-  const needs = waiting.length + carrying.length + secretsOut.length;
+  const looks = showMe.count(); // Show me: finished work waiting for you to look at it (show-me.js)
+  const needs = waiting.length + carrying.length + secretsOut.length + looks;
   const heading = needs ? count(needs, 'thing needs you', 'things need you') : 'Nothing needs you';
   const sub = waiting.length
     ? (oldest > 0 ? `The longest an agent has waited is ${waitFor(oldest)}.` : 'The first is below, with its answer.')
     : carrying.length ? 'An agent is reaching its plan\'s limit: carry its work on in the other one, below.'
       : secretsOut.length ? 'A password or token is saved in an agent\'s settings: take it out, below.'
-        : 'All quiet. Anything that stops for you shows here first.';
+        : looks ? 'Finished work is ready to look at, below.'
+          : 'All quiet. Anything that stops for you shows here first.';
   const reads = control.on ? together(waiting) : null;
   return {
     top: true,
@@ -2127,10 +2445,13 @@ function viewOverview() {
       h('div.home-head', h('h2', { id: 'view-title', tabindex: '-1' }, heading), h('p', sub), noteOnce('.done-note')),
       fromAway() && !phoneMe?.phone && h('p.small', h('strong', 'View only. '), 'You are looking from another device: you can look round and walk in, but nothing here changes anything.'),
       pausedCard(),
+      officeBanner(), // office hours: what waits for the sitting, and Open a sitting now
       firstRun && (flow ? setupCard() : welcomeCard()),
       connectedCard(),
       firstCard(),
       updateCard(),
+      // What stops an agent first (the one in front, a limit, a clash, a saved password, the rest waiting), then
+      // finished work to look at, today's plan, and new work: "What needs doing?" and the ready tasks.
       first && focusCard(first),
       carryOnCard(carrying),
       clashCard(),
@@ -2139,6 +2460,9 @@ function viewOverview() {
         sectHead('bell', `More agents waiting (${agentsRest.length})`),
         reads && h('div.control-row', { style: 'margin-bottom: 8px' }, btn(reads.label, () => controlDone(allowReads(reads.ids), (said) => said), '.primary')),
         h('ul.list', agentsRest.map(waitingItem))),
+      showMe.needsCard(), // Show me: "3 things to look at" (show-me.js)
+      dayCycle.home(), // the daily cycle: today's plan, or in the evening its close (day-page.js)
+      door.box(), door.cards(), // one front door: "What needs doing?", and the ready tasks
       yours.length > 0 && h('section.panel-card.home-more',
         sectHead('list-checks', `Your to-dos (${yours.length})`),
         h('ul.list', yours.map(waitingItem))),
@@ -2150,6 +2474,7 @@ function viewOverview() {
             ...jobs.map((j) => row(`#/${org.basement?.id}/${j.machine}`, j.name, `On the ${machineLabel(j.machine)}`, 'working')),
           ])
           : empty('Nothing is working right now.')),
+      answeredCard(), // a chain of command: what the leads answered for you, with Undo
       briefCard(),
       alertOffer(),
     ],
@@ -2170,6 +2495,7 @@ function viewActivity() {
         const lines = floorLines(f);
         return row(`#/${f.id}`, f.label, lines.map((l) => l.text).join(' · '), lines[0]?.kind || 'quiet');
       }))),
+      dayCycle.activity(), // the daily cycle: today's plan and its close (day-page.js)
       usageCard(),
       spendCard(),
       healthCard(),
@@ -2552,6 +2878,7 @@ function viewCompany() {
       agentsCard(),
       wellCard(),
       memoryCard(),
+      decisionsCard(), officeCard(), // a chain of command and office hours
       alwaysCard(),
       switchesCard(),
       h('section.panel-card.company-card',
@@ -2865,6 +3192,7 @@ function viewRoom(floor, room) {
       title(room.label),
       room.about && h('p', room.about),
       ...roomItems(floor, room, info),
+      kindOf(floor, room) === 'work' && org.floors.includes(floor) ? [door.box({ floor }), door.cards({ floor })] : null, // one front door
       control.on && kindOf(floor, room) === 'conversations' ? startForm(floor) : null,
     ],
   };
@@ -2896,6 +3224,7 @@ function convoPage(c) {
       h('div.verdict', h(`span.pill.k-${verdict}`, verdict === 'ok' ? 'Proven' : verdict === 'failed' ? 'Not proven' : pr?.word || 'Not yet'),
         h('div', pr && h('p', pr.line), rv && h('p.small.muted', rv.line))),
       proofPart(c, pr)),
+    showMe.convoCard(c), // Show me: its finished work's pictures (show-me.js)
     beside.page(c),
     control.on ? convoControls(c, { noAsk: !!asking }) : null,
     !control.on && beside.madeUp() && c.working && features.get('talk') && dock ? h('div.control-row', btn('Talk to it', () => dock.open(agentWho(c)), '', 'mic')) : null,
@@ -3067,7 +3396,7 @@ function refresh() {
 
 // One count everywhere: the top bar's pill, the Needs you tab and the building's filters.
 function showCounts() {
-  const n = waitingNow().length + carryOnNow().length + secretsNeeding().length;
+  const n = waitingNow().length + carryOnNow().length + secretsNeeding().length + showMe.count(); // + Show me's cards
   const moving = work.conversations.filter((c) => c.working).length + work.jobs.filter((j) => j.state === 'running').length;
   const pill = $('needs-pill');
   pill.hidden = n === 0;
@@ -3879,6 +4208,7 @@ async function boot() {
     // the walk has its own keys, from the moment Walk is pressed (it takes a moment to open) until it has closed
     if (building?.walking?.() || walkOn()) return;
     if (tour.isOpen) return; // the first tour has its own keys while it is open: a key meant for it never answers a request
+    if (sitting.isOpen) return; // so has office hours' sitting (sitting.js)
     const typing = event.target.matches?.('input, select, textarea, [contenteditable]');
     const free = !typing && !event.metaKey && !event.ctrlKey && !event.altKey;
     if (event.key === 'Escape') {
@@ -3922,6 +4252,7 @@ async function boot() {
     readSwitches().then((got) => { if (got) render(); });
   }
   beside.start(); // the agents' screens, where they can be read (beside-page.js)
+  dayCycle.start(); // the daily cycle: the made-up day, and its alerts (day-page.js)
   setupAnswering();
   showAnswering();
   showCounts();

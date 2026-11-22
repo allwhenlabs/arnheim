@@ -74,6 +74,7 @@ from urllib.parse import parse_qs, unquote
 
 from connect import always, switches
 from connect import secret_scan
+from connect import day as day_cycle  # the daily cycle: a plan in the morning, a close in the evening
 from connect import setup as connect_setup
 from connect import agent_setup  # setting your agents up well, from the page (/setup/well, /setup/agents)
 from connect.brain import Brain
@@ -105,8 +106,22 @@ NEVER_AWAY = ("/data/control/", "/data/live/")
 HERE_ONLY_FOLDERS = ("control", "live")  # the same, in data/, by what each is on disk
 # Control requests sent as POST that only read (an agent's screen, its changes): counted for a phone, never logged
 READS = ("live", "changes")
+# Show me (connect/show.py): pictures of the projects' own pages, for this computer only (a phone gets one through
+# /control/show_image), and its two reads, counted for a phone, never logged.
+NEVER_AWAY = NEVER_AWAY + ("/data/shows/",)
+HERE_ONLY_FOLDERS = HERE_ONLY_FOLDERS + ("shows",)
+READS = READS + ("shows", "show_image")
+READS += day_cycle.READS  # the daily cycle's read, "day" (connect/day.py)
+# The daily cycle's days (data/day/): your plan in your words, for this computer only, as control's mail is. A paired
+# phone reads today's through /control/day.
+NEVER_AWAY = NEVER_AWAY + ("/data/day/",)
+# Where the leads' decisions were kept before data/control/: moved there on the first read, never served away before it.
+NEVER_AWAY = NEVER_AWAY + ("/data/decisions.json",)
+HERE_ONLY_FOLDERS = HERE_ONLY_FOLDERS + ("day",)
 NOT_SHARED = ("/data/notes.json",)  # the founder's notes: never through a view-only link
 NEVER_SERVED = ("/data/remote/",)  # the paired phones and their log: never to anyone, this computer included
+# One front door's ready tasks (connect/intake.py): read only through /control/, never as files, this computer included.
+NEVER_SERVED += ("/data/control/intake/",)
 # A request that came through a proxy carries one of these. Without --remote it is refused; with it, it is a phone's.
 FORWARDED = ("X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "Forwarded", "X-Real-IP",
              "Tailscale-User-Login", "Tailscale-User-Name", "Tailscale-Headers-Info")
@@ -336,6 +351,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         while folder.startswith(ROOT + os.sep):  # the paired phones' records, to no one
             if same_file(folder, os.path.join(data, "remote")):
                 return True
+            if same_file(folder, os.path.join(data, "control", "intake")):  # one front door's ready tasks, to no one
+                return True
             folder = os.path.dirname(folder)
         if not self.here():
             folder = os.path.dirname(full)
@@ -393,6 +410,7 @@ class Handler(http.server.SimpleHTTPRequestHandler):
         elif not self.here() and not self.server.remote.acted(self.phone(), f"{method} {name}" if method == "POST" and name not in READS else "", 0):
             code, kind, data, extra = 429, "application/json; charset=utf-8", b'{"error": "Too many at once from this phone. Wait a minute."}', {}
         else:
+            control.brain = getattr(self.server, "brain", None)  # one front door: a floor's lead writes ready tasks with it while it is on
             code, kind, data, extra = control.handle(method, name, body, self.headers.get("X-Arnheim-Control", ""))
             if self.server.control is not control:  # switched off while this was answered: nobody is here to answer
                 try:
@@ -1753,6 +1771,9 @@ def main():
     threading.Thread(target=every_minute, args=("routines.py", lambda: board.on("routines")), daemon=True).start()
     threading.Thread(target=every_minute, args=("ping.py", lambda: board.on("pings")), daemon=True).start()
     threading.Thread(target=look_for_newer, args=(server, board), daemon=True).start()  # once a day, while its switch is on
+    # The daily cycle (connect/day.py): every half a minute, today's plan and close when they are due, and approved items
+    # started one at a time on each floor while control is on. It looks at its switch each time.
+    threading.Thread(target=day_cycle.keep_going, args=(lambda: server.control, lambda: os.path.dirname(SAVED)), daemon=True).start()
     # The secrets check: at the start, then with the minute's look in project folders (connect/secret_scan.py).
     threading.Thread(target=every_minute, args=("secret_scan.py", lambda: board.on("secrets") and floors_have_folders()), daemon=True).start()
     if board.on("git") and floors_have_folders():
@@ -1764,6 +1785,10 @@ def main():
     if board.on("pings"):
         print("Pings are on: the morning brief, and decisions that wait on you, go to your phone at the times "
               "\"pings\" in data/company.json gives (docs/connect.md).", flush=True)
+    if board.on("daily_cycle"):  # the daily cycle (connect/day.py)
+        times = day_cycle.times_of(os.path.dirname(SAVED))
+        print(f"The daily cycle is on: today's plan at {times['day_plan']} and its close at {times['day_close']}, while this "
+              "runs (docs/connect.md, \"The daily cycle\").", flush=True)
     if os.path.isfile(os.path.join(ROOT, "data", "company.json")):  # your own company: the made-up one has no Switches
         print("Each feature can be switched on or off in Settings, under Switches.", flush=True)
     print("Ctrl-C stops it.", flush=True)
