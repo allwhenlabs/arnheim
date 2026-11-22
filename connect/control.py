@@ -116,6 +116,28 @@ except ImportError:
     except ImportError:
         day_cycle = _beside("day")
 
+# The night shift (connect/night.py; docs/connect.md, "The night shift"): approved work, overnight, on allowance that would
+# otherwise go unused. It works through the very modules loaded here (loaded by path, each would be a copy of its own).
+try:
+    from . import night as night_shift
+except ImportError:
+    try:
+        import night as night_shift
+    except ImportError:
+        night_shift = _beside("night")
+try:
+    from . import usage  # your plan's limits, as an agent started here reports them (connect/usage.py)
+except ImportError:
+    try:
+        import usage
+    except ImportError:
+        usage = _beside("usage")
+
+for _name, _module in (("day", day_cycle), ("intake", intake), ("deputy", deputy), ("restore", restore), ("switches", switches),
+                      ("usage", usage)):
+    if getattr(night_shift, _name, None) is not _module:
+        setattr(night_shift, _name, _module)
+
 HERE = os.path.dirname(os.path.realpath(__file__))
 DATA = os.environ.get("ARNHEIM_DATA") or os.path.join(os.path.dirname(HERE), "data")
 JSON = "application/json; charset=utf-8"
@@ -956,6 +978,12 @@ class Control:
                     return answer(200, day_cycle.handle(self, name, given))
                 except day_cycle.Refused as why:
                     raise Refused(str(why))
+            # The night shift (connect/night.py): night (read), night_set, night_tick, night_undo
+            if name in night_shift.NAMES:
+                try:
+                    return answer(200, night_shift.handle(self, name, given))
+                except night_shift.Refused as why:
+                    raise Refused(str(why))
         except Refused as why:
             return answer(400, {"error": str(why)})
         return answer(404, {"error": "No such request."})
@@ -981,6 +1009,7 @@ class Control:
             **self.beside(),
             "shows": self.shows_now(),  # Show me (connect/show.py)
             **day_cycle.state_part(self),  # "day": today's plan and close (connect/day.py), or None while it is off
+            **night_shift.state_part(self),  # "night": the night shift (connect/night.py), or None while it is off
         }
 
     def beside(self):
@@ -1045,6 +1074,7 @@ class Control:
                 # An agent started here that has finished: it carries on with what you said.
                 said = noted("resumed", run.get("project"))
                 self.box.stopping(key)  # an old request to stop isn't for this new turn
+                run.pop("night", None)  # your own words to a night run: its git pushes go where they always did
                 self.spawn(run, ["--resume", run["sid"]], text, answering=mid)
                 return {"id": mid, "sent": "resumed", **said}
         if self.box.waiting(key) > 64_000:
@@ -1201,6 +1231,8 @@ class Control:
         key = "cc-" + sid.replace("-", "")[:12]
         run = {"key": key, "sid": sid, "project": floor["project"], "folder": floor["folder"], "title": one_line(text[:1].upper() + text[1:], 70), "said": "", "at": time.time()}
         run.update({k: v for k, v in (more or {}).items() if k in ("title", "ready") and isinstance(v, str)})
+        if (more or {}).get("night") is True:  # the night shift's: its git pushes go nowhere (connect/night.py, no_push_env)
+            run["night"] = True
         with self.lock:
             self.spawn(run, ["--session-id", sid], self.brief(text, floor))
         return {"key": key, "project": floor["project"]}
@@ -1453,9 +1485,11 @@ class Control:
         os.makedirs(self.box.path("runs"), exist_ok=True)
         log = open(self.box.path("runs", run["key"] + ".log"), "ab")  # what Claude Code says went wrong, if anything
         args = self.claude + ["-p", "--output-format", "stream-json", "--verbose"] + extra
+        # A night shift's run starts with git's pushes sent nowhere, whatever runs them (your own words to it drop that: say).
+        env = night_shift.no_push_env() if run.get("night") else None
         try:
             proc = subprocess.Popen(args, cwd=run["folder"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log,
-                                    start_new_session=hasattr(os, "setsid"))
+                                    start_new_session=hasattr(os, "setsid"), env=env)
         except OSError as error:
             log.close()
             raise Refused(f"Claude Code didn't start ({error.strerror or error}). Is its claude command installed? ARNHEIM_CLAUDE can name another.")
@@ -1488,6 +1522,8 @@ class Control:
                     said = words or said
                 elif event.get("type") == "result" and isinstance(event.get("result"), str):
                     said = event["result"] or said
+                elif event.get("type") == "rate_limit_event":  # your plan's limits as it works: the forecast, the night shift
+                    self.limits_heard(event.get("rate_limit_info"))
         except (OSError, ValueError):
             pass
         finally:
@@ -1505,6 +1541,14 @@ class Control:
         self.answered(run, answering, said)
         self.ready_done(run)
         self.show_finished(run, began)
+
+    def limits_heard(self, info):
+        """Claude Code's own word on your plan's limits, from an agent started here, kept as its status line's are
+        (connect/usage.py). Its trouble never costs the agent."""
+        try:
+            usage.keep("Claude Code", usage.from_claude_event(info), self.data)
+        except Exception:
+            pass
 
     def answered(self, run, answering, said):
         """An agent started here has finished its turn: its last words answer what you sent it, if its hook didn't
@@ -1623,7 +1667,8 @@ class Control:
         log = open(self.box.path("runs", run["key"] + ".log"), "ab")  # what Codex says went wrong, if anything
         try:
             proc = subprocess.Popen(carry_on.codex_args(self.codex, resume), cwd=run["folder"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                    stderr=log, start_new_session=hasattr(os, "setsid"))
+                                    stderr=log, start_new_session=hasattr(os, "setsid"),
+                                    env=night_shift.no_push_env(codex=True) if run.get("night") else None)
         except OSError as error:
             log.close()
             raise Refused(f"Codex didn't start ({error.strerror or error}). Is its codex command installed? ARNHEIM_CODEX can name another.")

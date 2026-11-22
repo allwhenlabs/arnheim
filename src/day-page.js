@@ -109,9 +109,20 @@ export function createDay(env) {
     told.close = close || told.close;
   }
 
+  // What of the day shows on the page: when it changes (the plan made at its time by the server, approved or changed from
+  // a phone, an item started or finished, the close), the page is drawn again. The page's own watch (demo.js) follows
+  // only the agents and their questions, so a plan made at 09:00 used to wait for something else to change.
+  let drawn = null;
+
   function start() {
     ensure();
-    control.watch((state) => check(state?.day || null));
+    control.watch((state) => {
+      const day = state?.day || null;
+      const now = JSON.stringify(day);
+      if (drawn !== null && now !== drawn) env.changed();
+      drawn = now;
+      check(day);
+    });
     setInterval(() => {
       if (where() !== 'here' || !control.on || !control.dayNow() || !document.hidden || !env.alerts?.on?.()) return;
       control.day().then((day) => { fresh = day; check(day); }).catch(() => { /* away for now: next time */ });
@@ -189,6 +200,7 @@ export function createDay(env) {
     return h('section.panel-card.day-card', { 'aria-label': "Today's plan" },
       sectHead('sun', "Today's plan"),
       h('p', head),
+      v.night && h('p.small.day-night', v.night), // how last night's night shift went (connect/night.py)
       v.allowance?.words && h('p.small.muted.day-allowance', v.allowance.words),
       v.plan.filter((f) => live(f).length || f.note).map((f) => floorPart(v, f)),
       canAct(v) && items > 0 && !v.approved && h('div.control-row.day-do', btn('Approve the day', () => run(approve(null)), '.primary', null, { disabled: busy }),

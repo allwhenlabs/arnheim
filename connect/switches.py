@@ -98,6 +98,12 @@ SWITCHES = (
      "A plan for the day at 09:00, each floor's lead proposing its part, for you to approve with one tap; approved items "
      "start one at a time on each floor. A close at 18:00 says what was proven, what is stuck and what today cost. The "
      "times are yours to set. Needs answering agents from the building.", False),
+    # The night shift (connect/night.py; docs/connect.md, "The night shift")
+    ("night", "running", "The night shift",
+     "During your quiet hours (23:00 to 07:00 unless you set others), work you approved for it runs on allowance that would "
+     "otherwise go unused before it starts again: ready tasks you ticked Tonight, and the day's approved plan. Each run keeps a "
+     "restore point, must pass its check to count as proven, and stops before the limit. The report is on Needs you in the "
+     "morning. Needs answering agents from the building.", False),
 )
 NAMES = tuple(s[0] for s in SWITCHES)
 DEFAULTS = {s[0]: s[4] for s in SWITCHES}

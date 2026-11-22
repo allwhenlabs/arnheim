@@ -713,6 +713,36 @@ class DayFilesStayHereTest(unittest.TestCase):
             self.server.remote = None
 
 
+REDRAW = """
+import { pathToFileURL } from 'node:url';
+globalThis.setInterval = () => 0; // the page's background read: not in a test
+const { createDay } = await import(pathToFileURL(process.argv[1] + '/src/day-page.js').href);
+let changed = 0;
+let watcher = null;
+const page = createDay({ where: () => 'phone', changed: () => { changed += 1; }, alerts: { on: () => false },
+  control: { on: true, watch: (f) => { watcher = f; }, dayNow: () => null } });
+page.start();
+const at = (made, state) => ({ day: { on: true, date: '2026-11-22', made, approved: false, close: null, night: null,
+  plan: made ? [{ floor: 'Lantern', label: 'Lantern', items: [{ id: 'i1', title: 'Tidy the README', state }] }] : [] } });
+const counts = [];
+for (const s of [at(null), at(null), at(1795338000, 'proposed'), at(1795338000, 'proposed'), at(1795338000, 'started'), { day: null }]) {
+  watcher(s);
+  counts.push(changed);
+}
+console.log(JSON.stringify(counts));
+"""
+
+
+@unittest.skipUnless(NODE, "Node.js isn't installed")
+class DayPageRedrawTest(unittest.TestCase):
+    def test_the_page_is_drawn_again_when_the_day_changes(self):
+        # found after the night shift's trial: the day page only alerted, so a plan the server made at 09:00, or an item
+        # starting, stayed off the page until something else changed
+        done = subprocess.run([NODE, "--input-type=module", "-e", REDRAW, ROOT], capture_output=True, text=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(json.loads(done.stdout), [0, 0, 1, 1, 2, 3])
+
+
 class DailyCycleWordsTest(unittest.TestCase):
     def test_the_page_words_and_the_made_up_day(self):
         done = subprocess.run([NODE, "--input-type=module", "-e", PAGE, ROOT], capture_output=True, text=True, timeout=30)

@@ -216,7 +216,7 @@ class SetupTest(unittest.TestCase):
         self.assertIsNone(setup.plan_hooks(out)[0])  # already there: nothing changes
         out, added, _ = setup.plan_hooks({}, codex=True)
         self.assertIn("PreToolUse", added)
-        self.assertEqual(out["hooks"]["PreToolUse"][0]["matcher"], "apply_patch|Edit|Write|Bash")
+        self.assertEqual(out["hooks"]["PreToolUse"][0]["matcher"], "apply_patch|Edit|Write|Bash|mcp__.*")
         self.assertIsNone(setup.plan_hooks(out, codex=True)[0])
         self.assertIn("feeds/restore.json", setup.FEEDS)  # the building lists the restore points
 

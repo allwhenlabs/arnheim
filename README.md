@@ -319,6 +319,18 @@ task's title, Done when and Proven by, through the real Claude Code; office hour
 an urgent thing reaching you at once, on a real page; and `serve.py` making the plan at 09:00 and the
 close at 18:00 by its own clock (so far they were made when asked for, or when the page next looked).
 
+### The night shift
+
+Your Claude Code and Codex allowances start again on a timer, and whatever you don't use is lost.
+Switch on **The night shift** in Settings, and during your quiet hours (23:00 to 07:00 unless you set
+others) Arnheim spots allowance that would go unused and runs work you have already approved: ready
+tasks you ticked **Tonight** (or said "do it tonight" to), and the day's approved plan. Never anything
+that needs your decision, names a secret, or would push, publish, deploy, send or delete. Each run keeps
+a restore point, has to pass its check to count as proven, and stops before the limit, leaving the rest
+for another night. With no forecast of your limits, it runs nothing and says why. In the morning, Needs
+you says "4 things finished overnight, 3 proven, 1 not", each with its proof and Undo. In the sample the
+night is made up, and says so. How it works: [docs/connect.md](docs/connect.md), "The night shift".
+
 ## Make it yours
 
 `python3 connect/setup.py` makes your company for you, a floor for each of your projects ("Connect

@@ -1,0 +1,32 @@
+{
+  "about": "Fernhollow's night shift: a made-up night, like the rest of Fernhollow. The page shows it as last night's report and what would run tonight. Undo, Show me and the Tonight ticks change only the page: nothing runs.",
+  "quiet": {"from": "23:00", "to": "07:00"},
+  "share": 80,
+  "margin": 10,
+  "window": {
+    "known": true,
+    "open": true,
+    "words": "Made up: Claude Code's weekly limit starts again at 03:00, before you're back at 07:00, with 38% unused. The night shift may use up to 28% of it (80% of that, keeping 10 points in hand). Codex: at your pace, about 12% of its weekly limit would be left unused when it starts again on Tuesday."
+  },
+  "queued": [
+    {"kind": "ready", "id": "rd-5a3e1c0002", "title": "Add a dark theme to the reading screen", "project": "Lantern", "label": "Lantern", "agent": "Codex", "why": null},
+    {"kind": "day", "id": "d-5a3e0001", "title": "Next step toward: A kit anyone can build in an afternoon", "project": "Tidepool", "label": "Tidepool", "agent": "Claude Code", "why": null},
+    {"kind": "day", "id": "d-5a3e0002", "title": "Publish the build guide", "project": "Tidepool", "label": "Tidepool", "agent": "Claude Code", "why": "It says \"Publish\", and anything to do with secrets, money, deleting, pushing, publishing or sending waits for you, never the night shift."}
+  ],
+  "report": {
+    "items": [
+      {"title": "Tidy the field notes", "project": "Tidepool", "label": "Tidepool", "agent": "Claude Code", "state": "done", "word": "Finished",
+       "proof": {"state": "proven", "word": "Proven", "line": "The tests passed after its last change."}, "show": true, "undo": true},
+      {"title": "Get \"Pictures for the app store\" past the picture sizes check", "project": "Lantern", "label": "Lantern", "agent": "Claude Code", "state": "done", "word": "Finished",
+       "proof": {"state": "proven", "word": "Proven", "line": "The picture sizes check passed after its last change."}, "show": true, "undo": true},
+      {"title": "Add a stunt kite template", "project": "Kitefield", "label": "Kitefield", "agent": "Codex", "state": "done", "word": "Finished",
+       "proof": {"state": "proven", "word": "Proven", "line": "The tests passed after its last change."}, "show": false, "undo": true},
+      {"title": "Calibrate the wind sensor", "project": "Tidepool", "label": "Tidepool", "agent": "Claude Code", "state": "done", "word": "Finished",
+       "proof": {"state": "failed", "word": "Not proven", "line": "The tests failed.", "tail": "1 failed: wind speed reads 0.4 m/s high"}, "show": false, "undo": true,
+       "undo_note": "Undo puts Tidepool's files back as they were before this ran, so what ran there after it goes too: \"Tidy the field notes\"."},
+      {"title": "Write the notes for version 2", "project": "Lantern", "label": "Lantern", "agent": "Claude Code", "state": "braked", "word": "Stopped before the limit",
+       "proof": {"state": "claimed", "word": "Not proven", "line": "It changed files, and nothing has checked them yet."}, "show": false, "undo": true,
+       "why": "Stopped before the limit: Claude Code's weekly limit reached 88%, the most the night shift may use tonight."}
+    ]
+  }
+}

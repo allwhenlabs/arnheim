@@ -75,6 +75,7 @@ from urllib.parse import parse_qs, unquote
 from connect import always, switches
 from connect import secret_scan
 from connect import day as day_cycle  # the daily cycle: a plan in the morning, a close in the evening
+from connect import night as night_shift  # the night shift: approved work, overnight, on allowance that would go unused
 from connect import setup as connect_setup
 from connect import agent_setup  # setting your agents up well, from the page (/setup/well, /setup/agents)
 from connect.brain import Brain
@@ -118,10 +119,13 @@ NEVER_AWAY = NEVER_AWAY + ("/data/day/",)
 # Where the leads' decisions were kept before data/control/: moved there on the first read, never served away before it.
 NEVER_AWAY = NEVER_AWAY + ("/data/decisions.json",)
 HERE_ONLY_FOLDERS = HERE_ONLY_FOLDERS + ("day",)
+READS += night_shift.READS  # the night shift's read, "night" (connect/night.py)
 NOT_SHARED = ("/data/notes.json",)  # the founder's notes: never through a view-only link
 NEVER_SERVED = ("/data/remote/",)  # the paired phones and their log: never to anyone, this computer included
 # One front door's ready tasks (connect/intake.py): read only through /control/, never as files, this computer included.
 NEVER_SERVED += ("/data/control/intake/",)
+# The night shift's nights and Tonight ticks (connect/night.py): read only through /control/ too.
+NEVER_SERVED += ("/data/night/",)
 # A request that came through a proxy carries one of these. Without --remote it is refused; with it, it is a phone's.
 FORWARDED = ("X-Forwarded-For", "X-Forwarded-Host", "X-Forwarded-Proto", "Forwarded", "X-Real-IP",
              "Tailscale-User-Login", "Tailscale-User-Name", "Tailscale-Headers-Info")
@@ -352,6 +356,8 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             if same_file(folder, os.path.join(data, "remote")):
                 return True
             if same_file(folder, os.path.join(data, "control", "intake")):  # one front door's ready tasks, to no one
+                return True
+            if same_file(folder, os.path.join(data, "night")):  # the night shift's nights and Tonight ticks, to no one
                 return True
             folder = os.path.dirname(folder)
         if not self.here():
@@ -1774,6 +1780,9 @@ def main():
     # The daily cycle (connect/day.py): every half a minute, today's plan and close when they are due, and approved items
     # started one at a time on each floor while control is on. It looks at its switch each time.
     threading.Thread(target=day_cycle.keep_going, args=(lambda: server.control, lambda: os.path.dirname(SAVED)), daemon=True).start()
+    # The night shift (connect/night.py): every half a minute, during your quiet hours, approved work started on allowance
+    # that would otherwise go unused, while control is on; and the morning's report once they end.
+    threading.Thread(target=night_shift.keep_going, args=(lambda: server.control, lambda: os.path.dirname(SAVED)), daemon=True).start()
     # The secrets check: at the start, then with the minute's look in project folders (connect/secret_scan.py).
     threading.Thread(target=every_minute, args=("secret_scan.py", lambda: board.on("secrets") and floors_have_folders()), daemon=True).start()
     if board.on("git") and floors_have_folders():
@@ -1789,6 +1798,10 @@ def main():
         times = day_cycle.times_of(os.path.dirname(SAVED))
         print(f"The daily cycle is on: today's plan at {times['day_plan']} and its close at {times['day_close']}, while this "
               "runs (docs/connect.md, \"The daily cycle\").", flush=True)
+    if board.on("night"):  # the night shift (connect/night.py)
+        quiet = night_shift.settings(os.path.dirname(SAVED))["quiet"]
+        print(f"The night shift is on: from {quiet['from']} to {quiet['to']}, approved work runs on allowance that would "
+              "otherwise go unused, while this runs (docs/connect.md, \"The night shift\").", flush=True)
     if os.path.isfile(os.path.join(ROOT, "data", "company.json")):  # your own company: the made-up one has no Switches
         print("Each feature can be switched on or off in Settings, under Switches.", flush=True)
     print("Ctrl-C stops it.", flush=True)

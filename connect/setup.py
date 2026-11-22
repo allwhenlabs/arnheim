@@ -62,8 +62,9 @@ MATCHERS = {}
 CODEX_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PermissionRequest", "Stop", "SessionEnd",
                 "Interrupt")
 CODEX_TIMEOUTS = {"PermissionRequest": 150, "SessionEnd": 3, "Interrupt": 3}
-# Codex reports its file edits as apply_patch and lets Edit and Write match them too; its shell is Bash.
-CODEX_MATCHERS = {"PreToolUse": "apply_patch|Edit|Write|Bash"}
+# Codex reports its file edits as apply_patch and lets Edit and Write match them too; its shell is Bash. Its matcher is a
+# regular expression, and another server's tools come as mcp__server__tool: the night shift's rule reads those too.
+CODEX_MATCHERS = {"PreToolUse": "apply_patch|Edit|Write|Bash|mcp__.*"}
 CODEX_HOOKS = (0, 124)  # the Codex that brought hooks
 FEEDS = ["feeds/claude-code.json", "feeds/agents.json", "feeds/projects.json", "feeds/restore.json"]
 ROOMS = [

@@ -41,6 +41,7 @@ import { createFrontDoor } from './front-door.js'; // one front door: work in yo
 import { createSitting, dueOffice, officeAlert, parseTimes } from './sitting.js'; // a chain of command and office hours
 import { createShowMe } from './show-me.js'; // Show me: pictures of finished work, Looks good or Not quite
 import { createDay } from './day-page.js'; // the daily cycle: a plan in the morning, a close in the evening
+import { createNight } from './night.js'; // the night shift: approved work, overnight, on allowance that would go unused
 
 const $ = (id) => document.getElementById(id);
 const params = new URLSearchParams(location.search);
@@ -156,6 +157,24 @@ const dayCycle = createDay({
   changed: () => render(),
   go: (href) => goTo(href),
   sampleUrl: () => `${dir}/day.json`,
+});
+// The night shift (night.js; docs/connect.md, "The night shift"): the morning's report on Needs you, tonight's work in
+// Activity, its quiet hours under its switch in Settings, the Tonight tick on the front door's cards, its desktop alert,
+// and what the receptionist says about it. Your own company's through control, a phone's too; the made-up company's own.
+const night = createNight({
+  control,
+  where: () => {
+    if (!org || !work) return 'none';
+    if (madeUp() || dir !== 'data') return 'sample';
+    if (fromAway()) return phoneMe?.phone && phoneMe?.control && control.on ? 'phone' : 'none';
+    return 'here';
+  },
+  alerts,
+  changed: () => render(),
+  go: (href) => goTo(href),
+  href: (key) => { const c = convoNow(key); return c ? convoHref(c) : null; },
+  done: (promise, said) => controlDone(Promise.resolve(promise), said),
+  sampleUrl: () => `${dir}/night.json`,
 });
 // The agents Talk can put you through to: those at work or asking you something, the one whose page is open, and
 // the one you are talking to.
@@ -638,6 +657,9 @@ function setupDesk() {
       // The daily cycle (day-page.js): "what's the plan?", "approve the day", "how did today go?"
       const today = dayCycle.heard(text, null);
       if (today != null) return (async function* day() { yield await today; })();
+      // The night shift (night.js): "how did the night go?", "what's on tonight?"
+      const overnight = night.heard(text);
+      if (overnight != null) return (async function* nightShift() { yield await overnight; })();
       const reads = control.on ? allowReadsAsked(text, waitingNow()) : null;
       if (reads) return (async function* allowed() { yield await allowReads(reads); })();
       const decision = rememberAsked(text);
@@ -981,6 +1003,8 @@ const talk = {
     if (lead || who.href === DESK || isAide(who)) {
       const today = dayCycle.heard(text, lead ? { project: lead.project, label: lead.label } : null);
       if (today != null) return today;
+      const overnight = night.heard(text); // the night shift (night.js): "how did the night go?", "what's on tonight?"
+      if (overnight != null) return overnight;
     }
     if (lead) return leads.says(lead, text, { spoken });
     const stand = standOf(who);
@@ -1198,6 +1222,9 @@ const door = createFrontDoor({
   phone: () => fromAway(),
   done: (promise, said) => controlDone(promise, said),
   changed: () => render(),
+  more: (task) => night.tonightButton(task), // the night shift's Tonight tick (night.js)
+  tonight: (id) => night.tick(id, true), // "do it tonight", and work said with "tonight" at its end
+  nightOn: () => night.on(),
 });
 let doorWait = null; // the receptionist's ready task read back ("Start it?") or "Which floor?", waiting for your word
 // The floor you are looking at, when an agent can work there: where work said to the receptionist goes if it names none.
@@ -1343,6 +1370,7 @@ const SWITCH_SETS = [
   ['On this page', ['forecast', 'carry_on']],
 ];
 SWITCH_SETS.find(([label]) => label === 'While Arnheim runs')?.[1].push('daily_cycle'); // the daily cycle (day-page.js)
+SWITCH_SETS.find(([label]) => label === 'While Arnheim runs')?.[1].push('night'); // the night shift (night.js)
 // The words sit outside the label, so tapping them to read them all (a phone has no pointing) never flips the switch.
 const aboutLine = (text) => h('span.small.muted.switch-about', text); // in full: rows that open on a hover move under the pointer
 function switchRow(s) {
@@ -1350,7 +1378,8 @@ function switchRow(s) {
     h('input', { type: 'checkbox', checked: !!s.on, disabled: !!s.set_by, onchange: (event) => flip(s.name, event.currentTarget.checked) }),
     h('span', h('b', s.label), s.set_by && h('span.small', ` Set by ${s.set_by} for this start.`))), aboutLine(s.about),
   s.name === 'review' && reviewersSaid(org.floors) && aboutLine(reviewersSaid(org.floors)), // who reads on each floor (review.js)
-  s.name === 'daily_cycle' && s.on && dayCycle.times()); // the plan's and the close's times (day-page.js)
+  s.name === 'daily_cycle' && s.on && dayCycle.times(), // the plan's and the close's times (day-page.js)
+  s.name === 'night' && s.on && night.settings()); // the night shift's quiet hours and share (night.js)
 }
 // Speaking out loud on this device: the same as the Voice button in Talk, here too, where a person looks for it.
 window.addEventListener('arnheim-voice', () => { if (document.querySelector('#content .switch-list')) render(); });
@@ -2460,6 +2489,7 @@ function viewOverview() {
         sectHead('bell', `More agents waiting (${agentsRest.length})`),
         reads && h('div.control-row', { style: 'margin-bottom: 8px' }, btn(reads.label, () => controlDone(allowReads(reads.ids), (said) => said), '.primary')),
         h('ul.list', agentsRest.map(waitingItem))),
+      night.home(), // the night shift: how last night went, until you've seen it (night.js)
       showMe.needsCard(), // Show me: "3 things to look at" (show-me.js)
       dayCycle.home(), // the daily cycle: today's plan, or in the evening its close (day-page.js)
       door.box(), door.cards(), // one front door: "What needs doing?", and the ready tasks
@@ -2496,6 +2526,7 @@ function viewActivity() {
         return row(`#/${f.id}`, f.label, lines.map((l) => l.text).join(' · '), lines[0]?.kind || 'quiet');
       }))),
       dayCycle.activity(), // the daily cycle: today's plan and its close (day-page.js)
+      night.activity(), // the night shift: what it would run tonight, and why (night.js)
       usageCard(),
       spendCard(),
       healthCard(),
@@ -4253,6 +4284,7 @@ async function boot() {
   }
   beside.start(); // the agents' screens, where they can be read (beside-page.js)
   dayCycle.start(); // the daily cycle: the made-up day, and its alerts (day-page.js)
+  night.start(); // the night shift: the made-up night, and the morning's alert (night.js)
   setupAnswering();
   showAnswering();
   showCounts();

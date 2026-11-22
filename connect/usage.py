@@ -55,6 +55,39 @@ def from_claude(given):
     return out
 
 
+def from_claude_event(info):
+    """The limits in a rate_limit_event that `claude -p --output-format stream-json` writes as it works (an agent started
+    from the building, connect/control.py): {"rateLimitType", "utilization" (a fraction), "resetsAt", "status", and
+    sometimes "unifiedWindows": {"five_hour": {...}, "seven_day": {...}}}, by the status line's names. Utilization is
+    always a fraction, past 1 once the limit is passed. A window it says is refused, or is being paid past its limit
+    (isUsingOverage), counts as used up: for the whole event when it names no window, or for the window it names
+    (rateLimitType). {} when it says nothing usable."""
+    out = {}
+    if not isinstance(info, dict):
+        return out
+    windows = info.get("unifiedWindows") if isinstance(info.get("unifiedWindows"), dict) else {}
+    pairs = [(name, w) for name, w in windows.items() if name in ("five_hour", "seven_day") and isinstance(w, dict)]
+    if not pairs and info.get("rateLimitType") in ("five_hour", "seven_day"):
+        pairs = [(info["rateLimitType"], info)]
+    named = info.get("rateLimitType")
+    whole_full = info.get("status") == "rejected" or info.get("isUsingOverage") is True
+    for name, window in pairs:
+        used = number(window.get("utilization"))
+        if used is not None:
+            used = used * 100  # a fraction, as Claude Code gives it: 1.03 is past the limit, never 1.03%
+        full = window.get("status") == "rejected" or window.get("isUsingOverage") is True or (
+            whole_full and (named not in ("five_hour", "seven_day") or named == name))
+        if full:
+            used = 100.0
+        if used is None:
+            continue
+        resets = number(window.get("resetsAt"))
+        if resets is not None and resets > 1e12:
+            resets = resets / 1000  # milliseconds
+        out[name] = {"used": max(0.0, min(100.0, used)), "resets_at": resets}
+    return out
+
+
 def from_codex(limits, now=None):
     """Codex's rate_limits from a token count: {"primary": {"used_percent", "window_minutes", "resets_at" or
     "resets_in_seconds"}, "secondary": {...}}, by the same names as Claude Code's."""

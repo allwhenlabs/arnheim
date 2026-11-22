@@ -316,7 +316,7 @@ class CodexSetupTest(unittest.TestCase):
         self.assertEqual(code, 0, out)
         hooks = self.hooks()["hooks"]
         self.assertEqual(hooks["PreToolUse"][0], mine["hooks"]["PreToolUse"][0])  # yours first, as it was
-        self.assertEqual(hooks["PreToolUse"][1]["matcher"], "apply_patch|Edit|Write|Bash")  # Arnheim's, for restore points
+        self.assertEqual(hooks["PreToolUse"][1]["matcher"], "apply_patch|Edit|Write|Bash|mcp__.*")  # Arnheim's, for restore points
         self.assertEqual(hooks["Stop"][0], mine["hooks"]["Stop"][0])
         self.assertEqual(len(hooks["Stop"]), 2)
         self.assertIn("hooks = false", out)  # what keeps them from running is said

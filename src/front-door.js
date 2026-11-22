@@ -15,6 +15,9 @@
 //   phone()      whether this page is on a paired phone (the task says it came from there)
 //   done(promise, said)  what the page does with what a button did: show `said(result)`, or the error
 //   changed()    draw the page again
+//   more(task)   more for a card's buttons, or null (the night shift's Tonight tick, night.js)
+//   tonight(id), nightOn()  the night shift: tick a ready task for tonight (a promise of what to say), and whether it is
+//                on, so "do it tonight" and "... tonight" go to it
 
 import { handedOut } from './control.js';
 import { icon } from './icons.js';
@@ -55,6 +58,14 @@ export function workSaid(text, floors = []) {
 // "Yes" to "Start it?", and "no".
 export const START_IT = /^(?:(?:yes|yeah|yep|sure|ok|okay|please|go ahead|do it|start it|start|go)[,.!]?\s*)+(?:now|please)?[.!]?$/i;
 export const NOT_NOW = /^(?:no|nope|not now|not yet|later|leave it|don'?t|cancel|never ?mind)\b/i;
+// The night shift (night.js): "do it tonight" to "Start it?", and work said with "tonight" at its end.
+export const TONIGHT_IT = /^(?:(?:yes|ok|okay|sure|no)[,.!]?\s*)?(?:(?:do|run|leave|save|keep|start|put)\s+it\s+)?(?:tonight|overnight|for tonight|for the night(?:\s+shift)?|on the night shift|in the night)(?:,?\s*please)?[.!]?$/i;
+const TONIGHT_END = /[\s,]+(?:tonight|overnight|on the night shift|for the night shift)[.!]?$/i;
+// The words without "tonight" at their end, or null when they don't end so.
+export function tonightCut(text) {
+  const said = String(text || '').trim();
+  return TONIGHT_END.test(said) ? said.replace(TONIGHT_END, '').trim() : null;
+}
 
 // The floor someone names when asked which: "Tidepool", "on Tidepool", "the Tidepool floor", "tide".
 export function floorPicked(text, floors) {
@@ -122,6 +133,7 @@ export function createFrontDoor(env) {
   const labelOf = (p) => floors().find((f) => f.project === p)?.label || p;
   const changed = () => { try { env.changed?.(); } catch { /* the page draws itself next time */ } };
   const done = (promise, said) => (env.done ? env.done(promise, said) : promise.then(changed, changed));
+  const more = (task) => { try { return env.more?.(task) || null; } catch { return null; } }; // more on a card (the night shift's Tonight)
   const local = []; // the made-up company's tasks typed here: this tab only
   const hidden = new Set(); // its tasks dropped in this tab
   const notes = new Map(); // a box's last answer, by where it is: { said, which: { text, floors } }
@@ -157,14 +169,23 @@ export function createFrontDoor(env) {
   // Work said to the receptionist, a lead or in Talk: a ready task, read back with "Start it?". Null when it isn't work,
   // or the front door is off. `floor`: the floor you are on (a lead's own), or null.
   function take(text, { floor = null, via = 'talk' } = {}) {
-    const said = String(text || '').trim();
+    let said = String(text || '').trim();
+    const nightOn = () => { try { return !!env.tonight && env.nightOn?.() !== false; } catch { return false; } };
+    const late = nightOn() ? tonightCut(said) : null; // "fix the footer on Tidepool tonight": for the night shift
+    if (late) said = late;
     if (!on() || !workSaid(said, floors())) return null;
     if (madeUp()) {
       const f = floors().find((x) => new RegExp(`\\b${x.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i').test(said)) || floors().find((x) => x.project === floor || x.id === floor);
-      return { pending: null, reply: `This company is made up, so nothing real starts. With your own company connected, I'd make that a ready task${f ? ` on ${f.label}` : ''}, with Done when and Proven by, and you'd say "start it" or tap Start.` };
+      return { pending: null, reply: `This company is made up, so nothing real starts. With your own company connected, I'd make that a ready task${f ? ` on ${f.label}` : ''}, with Done when and Proven by, and you'd say "start it" or tap Start${late ? ', or the night shift would run it tonight' : ''}.` };
     }
     if (!control?.on) return null;
-    return ask(said, floor, viaOf(via));
+    const asked = ask(said, floor, viaOf(via));
+    if (!late) return asked;
+    // Ticked for tonight as soon as it is a ready task; "start it" still starts it now.
+    const reply = asked.reply.then((words) => (asked.pending.door === 'start'
+      ? Promise.resolve(env.tonight(asked.pending.id)).then((t) => `${String(words).replace(/ Start it\?$/, '')} ${t} Or say "start it" to start it now.`, (error) => `${words} ${error.message}`)
+      : words));
+    return { pending: asked.pending, reply };
   }
 
   const start = (id) => control.startReady(id).then((r) => r.reply, (error) => error.message);
@@ -176,6 +197,9 @@ export function createFrontDoor(env) {
     const said = String(text || '').trim();
     if (pending.door === 'start') {
       if (START_IT.test(said)) return { pending: null, reply: start(pending.id) };
+      if (env.tonight && env.nightOn?.() !== false && TONIGHT_IT.test(said)) {
+        return { pending: null, reply: Promise.resolve(env.tonight(pending.id)).catch((error) => error.message) };
+      }
       if (NOT_NOW.test(said)) return { pending: null, reply: `All right, it stays ready. It's on Needs you and in ${pending.label}'s Work room when you want it.` };
       return null;
     }
@@ -292,6 +316,7 @@ export function createFrontDoor(env) {
         (task.why || task.held) && h('p.small.door-why', task.why || task.held),
         h('div.control-row',
           !waits && btn('Start', () => act(task, 'start'), '.primary', 'zap'),
+          more(task), // the night shift's Tonight tick (night.js), while it is on
           btn('Change', () => { editing.add(task.id); changed(); }, '.quiet'),
           btn('Drop', () => act(task, 'drop'), '.quiet', 'x')),
       ]);

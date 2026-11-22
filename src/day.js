@@ -126,6 +126,7 @@ export function sampleDay(raw, now = Date.now() / 1000) {
     on: true, sample: true, date: dayOf(now), plan_at: raw?.plan_at || '09:00', close_at: raw?.close_at || '18:00',
     made: Math.min(now, at(raw?.plan_at, now)), plan, approved: false, allowance: raw?.allowance || null,
     close: raw?.close ? { ...raw.close, at: at(raw?.close_at, now) } : null,
+    night: raw?.night || null, // how last night's night shift went, in a line (night.js)
   };
 }
 

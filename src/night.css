@@ -1,0 +1,35 @@
+/* The night shift (night.js): the morning's report on Needs you, tonight's work in Activity, its quiet hours in Settings,
+   and the Tonight tick on the front door's cards. The page's own colours (demo.css), light and dark. On a phone
+   everything stacks, and long titles wrap rather than scroll sideways. */
+
+.night-words { margin: 0 0 6px; overflow-wrap: anywhere; }
+.night-list { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 0; }
+.night-item { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 10px 0; border-top: 1px solid var(--line); overflow-wrap: anywhere; }
+.night-item:first-child { border-top: 0; padding-top: 4px; }
+.night-top { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.night-title { flex: 1 1 auto; min-width: 0; font-weight: 600; overflow-wrap: anywhere; }
+.night-chip { flex: none; margin: 1px 0 0; white-space: nowrap; }
+.night-card .state.k-ok { background: var(--ok-bg); color: var(--ok); }
+.night-card .state.k-quiet { background: var(--surface-2); color: var(--muted); }
+.night-line, .night-tail, .night-why { margin: 2px 0 0; }
+.night-tail { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; white-space: pre-wrap; }
+.night-why { color: var(--amber-text); }
+.night-do { margin: 6px 0 0; }
+.night-do a.btn { text-decoration: none; }
+.night-done { margin: 12px 0 0; }
+.night-window { margin: 0 0 8px; }
+.night-said { margin: 10px 0 0; color: var(--amber-text); }
+.night-sub { margin: 14px 0 6px; font-size: 12px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); }
+.night-plain { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.night-plain li { display: flex; flex-direction: column; gap: 1px; min-width: 0; overflow-wrap: anywhere; }
+.night-times { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 6px 0 2px; }
+.night-times label { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.night-times input { padding: 5px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); color: var(--text); font: inherit; }
+.night-times input[type="number"] { width: 4.5em; }
+.night-tick.on { background: var(--warm-bg); color: var(--warm-text); border-color: transparent; }
+
+@media (max-width: 520px) {
+  .night-top { flex-wrap: wrap; }
+  .night-do .btn, .night-done .btn { flex: 1 1 auto; }
+  .night-times label { flex: 1 1 100%; }
+}

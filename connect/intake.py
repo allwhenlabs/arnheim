@@ -459,7 +459,7 @@ class Intake:
                     reply = f'Queued on {floor["label"]}: "{task["title"]}". {why}'
                 else:
                     try:
-                        self.launch(task)
+                        self.launch(task, night=via == "day" and given.get("night") is True)
                         reply = f'Started on {floor["label"]} by itself: "{task["title"]}". {self.done_said(task)}'
                     except Refusal as why_not:
                         reply += f" It didn't start by itself: {lower_first(str(why_not))}"
@@ -607,8 +607,9 @@ class Intake:
             return f"An agent started from the building is at work on {label}, so it starts when that one finishes."
         return None
 
-    def launch(self, task):
-        """Starts its agent: Claude Code through Control.start, Codex as carrying on does. Under the lock."""
+    def launch(self, task, night=False):
+        """Starts its agent: Claude Code through Control.start, Codex as carrying on does. Under the lock. `night`: the
+        night shift starts it, so its git pushes go nowhere (connect/night.py, no_push_env)."""
         floor = next((f for f in self.control.floors() if f["project"] == task["project"]), None)
         if not floor:
             raise Refusal("Its floor has no folder on this computer any more. Give it one in data/company.json.")
@@ -620,12 +621,14 @@ class Intake:
                 if not carry_on.in_git(floor["folder"]):
                     raise Refusal(f"Codex works only in a project kept in git, and {floor['label']}'s folder isn't.")
                 run = {"key": "cc-" + secrets.token_hex(6), "sid": None, "agent": "Codex", "project": floor["project"],
-                       "folder": floor["folder"], "title": task["title"], "said": "", "at": time.time(), "ready": task["id"]}
+                       "folder": floor["folder"], "title": task["title"], "said": "", "at": time.time(), "ready": task["id"],
+                       **({"night": True} if night else {})}
                 with self.control.lock:
                     self.control.spawn_codex(run, self.control.brief(text, floor))
                 key = run["key"]
             else:
-                key = self.control.start(floor["project"], text, more={"title": task["title"], "ready": task["id"]})["key"]
+                key = self.control.start(floor["project"], text, more={"title": task["title"], "ready": task["id"],
+                                                                       **({"night": True} if night else {})})["key"]
         except Refusal:
             raise
         except Exception as why:  # control's own Refused: Claude Code or Codex didn't start

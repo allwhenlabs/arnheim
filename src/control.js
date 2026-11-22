@@ -156,6 +156,14 @@ export function createControl({ base = BASE, headers = () => ({}), every = 3000,
     changeDay: (floor, words) => after(call('day_change', { floor: floor || null, words })),
     closeDay: () => after(call('day_close', {})),
     dayTimes: (plan, close) => after(call('day_times', { plan, close })),
+    // The night shift (connect/night.py; docs/connect.md, "The night shift"): as the last read had it (null while it is
+    // switched off), reading it afresh, its settings ({on, quiet: {from, to}, share, seen: report id}), a ready task
+    // ticked for tonight or not, and Undo for one of its runs (its restore point put back).
+    nightNow: () => state.night || null,
+    night: () => call('night', {}),
+    setNight: (fields) => after(call('night_set', fields || {})),
+    tickTonight: (id, on = true) => after(call('night_tick', { id, tonight: !!on })),
+    undoNight: (id) => after(call('night_undo', { id })),
     refresh: poll,
   };
 }

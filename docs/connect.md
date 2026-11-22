@@ -378,7 +378,7 @@ the same file:
 {"hooks": {
   "SessionStart": [{"hooks": [{"type": "command", "command": "python3 /path/to/arnheim/connect/codex.py"}]}],
   "UserPromptSubmit": [{"hooks": [{"type": "command", "command": "python3 /path/to/arnheim/connect/codex.py"}]}],
-  "PreToolUse": [{"matcher": "apply_patch|Edit|Write|Bash", "hooks": [{"type": "command", "command": "python3 /path/to/arnheim/connect/codex.py"}]}],
+  "PreToolUse": [{"matcher": "apply_patch|Edit|Write|Bash|mcp__.*", "hooks": [{"type": "command", "command": "python3 /path/to/arnheim/connect/codex.py"}]}],
   "PostToolUse": [{"hooks": [{"type": "command", "command": "python3 /path/to/arnheim/connect/codex.py"}]}],
   "PermissionRequest": [{"hooks": [{"type": "command", "command": "python3 /path/to/arnheim/connect/codex.py", "timeout": 150}]}],
   "Stop": [{"hooks": [{"type": "command", "command": "python3 /path/to/arnheim/connect/codex.py"}]}],
@@ -693,8 +693,9 @@ change needs that page's own token.
   their switch is on again.
 - **While Arnheim runs:** the receptionist and your assistant thinking with Claude (`--brain`),
   routines (`--routines`, step 13), pings (`--pings`, step 15), looking in project folders
-  (`--no-git` turns it off, step 3), looking for a newer Arnheim (below), and the daily cycle (step 29),
-  with its two times under its switch.
+  (`--no-git` turns it off, step 3), looking for a newer Arnheim (below), the daily cycle (step 29),
+  with its two times under its switch, and the night shift (step 30), with its quiet hours and share
+  under its switch.
 - **On this page:** the Your plan card (step 18), carrying on at a limit (step 21), and, on this device,
   desktop alerts (step 4) and the talking switches, which are each browser's own.
 
@@ -1192,6 +1193,117 @@ stopped or failed.
 The made-up company has a made-up plan and close (`sample/day.json`) that say so. Approving or
 changing it changes only the page: nothing starts.
 
+## 30. The night shift
+
+Your Claude Code and Codex allowances start again on a timer, and whatever you haven't used by then
+is lost. The night shift spots allowance that would go unused and runs work you have already approved
+in those gaps, overnight. It is a switch in Settings (step 20), **The night shift**, off unless you
+switch it on, and it needs control (step 4) to start anything. Under the switch are its settings, kept
+in `data/serve.json` beside the switches: the quiet hours (`"night_from": "23:00"`, `"night_to":
+"07:00"` unless you set others; they may run across midnight) and the share (`"night_share": 80`),
+how much of what would go unused it may use.
+
+**Which work.** Only what you approved for it:
+
+- a ready task at the front door (step 25) you ticked **Tonight** on its card, or said "do it tonight"
+  to when the receptionist asked "Start it?", or said with "tonight" at the end ("fix the footer on
+  Tidepool tonight");
+- an item of the day's approved plan (step 29) that didn't start. While the night shift is on, the
+  daily cycle leaves its approved items to it during the quiet hours.
+
+Never one that names a password or key, is work Arnheim never hands out (signing in, sending, buying),
+says something the chain of command never answers for you (secrets, money, deleting, pushing,
+publishing, sending: step 26), reaches outside this computer or tidies away what is there (uploading,
+syncing, a pull request, a reply or a comment, pruning or cleaning up), or asks you to decide something.
+Those stay listed, with why they wait for you, and the Tonight tick refuses them at once. An item of the
+day's plan is read in full, whatever it came from, not only its title. The words err on the safe side:
+"fix the sync bug" or "add comments to the parser" waits for you too. Never while every agent is
+paused, on a floor past its budget (step 7), or on a floor whose folder isn't kept in git, where no
+restore point could be kept.
+
+**When.** Only during the quiet hours, and only while the forecast (step 18) says some of an allowance
+would go unused before it starts again. For each agent, the weekly limit decides: when it starts again
+before you're back, all of what is left of it would be lost; when it starts again later, the forecast
+at your own pace this week says how much would be left. A 5-hour window that ends before you're back
+is said too, since what it doesn't use is lost when the week has room to spare. The night shift may
+use your share of what would go unused, and never comes closer than 10 points to any limit (its
+margin). With no forecast (no reading in the last six hours, or not enough to tell your pace), it runs
+nothing and says why. The cap is set once a night, from the reading when its first run on that agent
+starts, and each start after that waits for a reading taken since the last one began, so it never runs
+twice on the same old numbers. Codex reports its limits through its hooks as it works. Claude Code says
+them once a run, as its first request is answered (its `rate_limit_event`), and not again: so while a
+Claude Code night run works and the newest reading is more than 10 minutes old, the night shift asks
+for a fresh one with a tiny probe of its own (`claude -p "ok"` on Haiku, one turn, no tools, no hooks,
+no session kept, in an empty folder under `data/night/`, at most a minute, one at a time), kept as a
+run's reading is. Claude Code keeps no conversation of it, only an empty folder for that folder among
+its projects.
+
+**Each run.** One agent at a time on each floor, Claude Code or Codex as the floor says, started through
+the front door (or, with it switched off, as an agent started from the building). Its first message
+says it is on the night shift: work only on this, and never push, publish, deploy, merge, upload, open
+a pull request, send, reply or delete. What guards that, and how far:
+
+- Where Arnheim's hooks are set up (step 2), they turn down the steps they recognise by their words,
+  whatever your own allow rules or permission mode would let through: any command (Bash, Monitor,
+  PowerShell, Codex's shell) that pushes, publishes, deploys, sends, uploads, syncs, opens a pull request
+  or deletes files in bulk, with options before git's or gh's own word too; one that names a script for
+  any of that (`./ship.sh`, `npm run release`, `make publish`: the words push, publish, release, ship,
+  deploy or upload anywhere in it); and one that would undo the git settings below. Another server's
+  tool is used only when its own name starts with a word that only reads (get, list, read, search,
+  fetch, view, find, query, describe, show, status); the rest wait. A command you allowed for good
+  (Always allow) still asks. For Codex, its hooks see another server's tools only once Connect has run
+  again since this was added (its PreToolUse matcher takes `mcp__.*` now).
+- Git's pushes to another computer fail in a night run whatever starts them, the agent or a script of
+  the project's: its agent starts with git settings in its environment that send an `https://`,
+  `http://`, `ssh://`, `git://` or `git@` address nowhere for a push. A push to a folder on this
+  computer still works.
+- Publishing some other way from inside a script, under a name the words don't catch, may slip past
+  them, and so may a remote whose push address is set apart from its address in its own settings, or one
+  written another way (`someone@host:path`). A tool whose name starts with query or fetch is let through
+  by its name, and what it is given isn't read. Switching the night shift off while one of its agents
+  works stops the hook turning its steps down, though its git pushes still go nowhere until it ends.
+  A command over 20,000 characters isn't read: it waits for you.
+  Claude Code's and Codex's own permissions stay the last guard. When you carry on a night run's
+  conversation yourself, its turns start as yours always do.
+
+The night shift keeps a restore point of the floor's files just before it starts each run (step
+16), so there is a way back even where Arnheim's hooks aren't set up; with no restore point, nothing
+starts. It counts as proven only when its floor's check passes after its last change (step 5), which
+Arnheim knows only where its hooks see the agent's steps: an agent whose steps it never saw is reported
+as not proven, never as having changed nothing. When a reading shows the night's cap reached, or the
+week started again so what would have gone unused is gone, or nothing says how close the limit is (for
+Claude Code, two probes in a row brought no reading; for Codex, none has come for 15 minutes), it is
+stopped at its next step (the brake;
+an agent started here that hasn't stopped two minutes later is stopped outright), and what is left
+waits for another night. Moving the quiet hours during the night moves its end too.
+
+**In the morning.** A **Night shift** report on Needs you, once the quiet hours end: "4 things finished
+overnight, 3 proven, 1 not", each with its proof, a link to its Show me card (step 28) when there is
+one, and **Undo**, which puts its restore point back (and keeps one of how things were first, so Undo
+can be undone too). When later runs changed the same floor, it says what Undo would take back with
+it. Undo waits while one of the night's agents is still at work on that floor. **Got it** puts the
+report away. A desktop alert says the same when the page next opens, and the
+daily cycle's plan carries the line too, when it is on. Activity shows what is approved for tonight,
+what waits for you and why, the forecast in words, and the last runs.
+
+**Out loud and on a phone.** Ask the receptionist or your assistant "how did the night go?" or "what's
+on tonight?". A paired phone that may control agents ([phone.md](phone.md)) has the same report and
+ticks, through control.
+
+**When it runs.** Nothing runs while Arnheim isn't running: `serve.py` looks every half a minute, and
+the page's reads look too. `python3 connect/night.py --show` says what the night shift would do now,
+and changes nothing.
+
+**Control's names.** For a page of your own, or a phone: `night` reads it (`{on, quiet: {from, to},
+share, margin, quiet_now, from, back, window: {known, open, words, agents}, queued: [{kind, id, title,
+project, label, agent, why}], ticked, ran, said, report: {id, words, items: [{id, title, label, agent,
+state, proof, show, undo, why}]}}`; `null` in `state` while it is off), `night_set` takes `{on, quiet:
+{from, to}, share, seen}` (seen: a report's id, to put it away), `night_tick` takes `{id, tonight}` for a
+ready task, and `night_undo` takes `{id}` for one of its runs.
+
+The made-up company has a made-up night (`sample/night.json`) that says so. Undo, Show me and the
+Tonight ticks there change only the page: nothing runs.
+
 ## What is kept, and where
 
 `connect/setup.py` keeps a copy of each file before it changes it: `data/backups/company.before-arnheim-<when>.json`
@@ -1224,6 +1336,11 @@ Carrying on at a limit keeps `data/control/carry-on.json`, which conversations w
 The daily cycle keeps each day's plan and close in `data/day/<date>.json`, two weeks back (step 29), for this
 computer only: never to another computer, a view-only link or a paired phone, which reads today's plan through
 control. Words you add to it that have a password, token or key in them are refused, as the front door refuses them.
+The night shift keeps each night in `data/night/<date>.json` (the evening it began), two weeks back:
+what it ran, the night's cap for each agent, why anything waited, and the morning's report; and the
+ready tasks you ticked Tonight in `data/night/tonight.json` (step 30), and its last probe of Claude Code's
+limits in `data/night/probe.json` (the probe runs in the empty folder `data/night/probe/`). They are read
+only through control, never served as files.
 The secrets check keeps what it found in `data/.secrets/found.json` (each secret's kind, file, line and
 hint, never the secret), and each copy for Undo in `data/.secrets/undo/`, for a week. `serve.py` never
 serves that folder.

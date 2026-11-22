@@ -3,6 +3,7 @@
    scroll sideways. */
 
 .day-card .day-allowance { margin: 0 0 10px; }
+.day-card .day-night { margin: 0 0 6px; overflow-wrap: anywhere; }
 .day-floor { padding: 10px 0 4px; border-top: 1px solid var(--line); min-width: 0; }
 .day-floor:first-of-type { border-top: 0; }
 .day-floor-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; }

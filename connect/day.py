@@ -315,7 +315,8 @@ def number(value):
 
 def forecast(data, now=None):
     """Each limit's last reading and where it is heading, as src/usage.js's forecastOf works it out: [{source, name,
-    label, used, resets, reaches}], where reaches is now, before, after or unknown. [] with no readings."""
+    label, used, resets, reaches, reach, rate, at}], where reaches is now, before, after or unknown, rate is points a
+    second (None until there is a pace) and at is when it was read. [] with no readings."""
     now = now or time.time()
     sources = (read(os.path.join(data, "feeds", "usage.json")) or {}).get("sources")
     out = []
@@ -347,7 +348,7 @@ def forecast(data, now=None):
             reaches = ("now" if used >= 100 else "before" if reach and (not resets or reach < resets)
                        else "unknown" if rate is None else "after")
             out.append({"source": str(source), "name": str(name), "label": LIMIT_NAMES.get(name, str(name).replace("_", " ")),
-                        "used": round(used, 1), "resets": resets, "reaches": reaches, "reach": reach})
+                        "used": round(used, 1), "resets": resets, "reaches": reaches, "reach": reach, "rate": rate, "at": at})
     return out
 
 
@@ -426,6 +427,33 @@ def call(ctrl, name, body):
 def missing(code, got):
     """Control answered that it has no such request: the front door isn't part of this Arnheim."""
     return code == 404 and got.get("error") == "No such request."
+
+
+_NIGHT = []
+
+
+def night_shift():
+    """connect/night.py, loaded when first wanted: it loads this file itself. None if it can't be."""
+    if not _NIGHT:
+        try:
+            from . import night as got
+        except ImportError:
+            try:
+                import night as got
+            except ImportError:
+                try:
+                    got = _beside("night")
+                except Exception:  # an Arnheim without the night shift
+                    got = None
+        _NIGHT.append(got)
+    return _NIGHT[0]
+
+
+def night_holds(data, now=None):
+    """The night shift is on, and it is its quiet hours: approved items wait for it (connect/night.py), which runs them
+    only on allowance that would otherwise go unused."""
+    shift = night_shift()
+    return bool(shift and shift.quiet_now(data, now))
 
 
 _INSIDE = threading.local()
@@ -903,6 +931,7 @@ def step(data, ctrl, now=None):
         before = json.dumps(doc, sort_keys=True)
         work = work_of(data)
         paused = ctrl.box.paused()
+        night = night_holds(data, now)  # the night shift's quiet hours: what is approved waits for it
         for f in doc["plan"]:
             if not f.get("approved"):
                 continue
@@ -919,6 +948,10 @@ def step(data, ctrl, now=None):
                 continue
             if paused:
                 nxt["waiting"] = "Every agent is paused. It starts when you resume them."
+                continue
+            if night:
+                nxt["waiting"] = ("It's the night shift's quiet hours, so it waits for the night shift, which runs it if allowance "
+                                  "would otherwise go unused.")
                 continue
             over, _ = over_budget(data, work, f["floor"], ctrl, doc["date"])
             if over:
@@ -1085,7 +1118,7 @@ ITEM_SHOWN = ("id", "title", "why", "cost", "state", "waiting", "key", "source")
 def view(data, now=None):
     """Today as the page and a phone get it: {on, date, plan_at, close_at, made, plan: [{floor, label, id, lead,
     approved, note?, later?, items: [{id, title, why, cost?, state, waiting?, key?, source}]}], approved, allowance,
-    close, due}."""
+    close, due, night}, where night is how last night's night shift went, in a line, or None."""
     now = now or time.time()
     times = times_of(data)
     doc = load(data, today(now)) or {}
@@ -1099,9 +1132,11 @@ def view(data, now=None):
                 it["cost"] = it["cost"].get("words")
         plan.append({**{k: f.get(k) for k in ("floor", "label", "id", "lead", "approved", "note", "later") if f.get(k) is not None}, "items": items})
     with_items = [f for f in plan if f["items"]]
+    shift = night_shift()
     return {"on": True, "date": today(now), "plan_at": times["day_plan"], "close_at": times["day_close"], "made": doc.get("made"),
             "plan": plan, "approved": bool(with_items) and all(f.get("approved") for f in with_items),
-            "allowance": doc.get("allowance"), "close": doc.get("close"), "due": due(data, now)}
+            "allowance": doc.get("allowance"), "close": doc.get("close"), "due": due(data, now),
+            "night": shift.morning_line(data, now) if shift else None}  # how last night went (connect/night.py), or None
 
 
 def state_part(ctrl):

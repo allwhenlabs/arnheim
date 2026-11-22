@@ -1163,10 +1163,63 @@ def office_permission(event, box, project, tool, what, command):
     return deputy.park(DATA, "permission", key_of(event), project, seat_title(event), agent, what, tool=tool, what=what, urgent=urgent)
 
 
+def night_run(event):
+    """Whether this conversation is one of the night shift's runs at work (connect/night.py), so nobody is watching it.
+    Only looked at while the night shift is switched on, and only then is its module loaded."""
+    if not switches.on("night", DATA) or not os.path.isdir(os.path.join(DATA, "night")):
+        return False
+    import night  # noqa: E402  (beside this file: the night shift)
+    return night.working_run(DATA, key_of(event))
+
+
+def runs_a_command(event):
+    """Whether a step runs a command: any tool handed one ("command", or Codex's "cmd"), whatever its name (Bash,
+    Monitor, PowerShell, Codex's exec_command), as the night's rule reads it (connect/night.py, shell_command)."""
+    given = event.get("tool_input")
+    return isinstance(given, dict) and (given.get("command") is not None or given.get("cmd") is not None)
+
+
+def night_rule(event):
+    """A night run's step that pushes, publishes, deploys, sends, uploads, syncs, opens a pull request or deletes, or
+    another server's tool that does more than read, is turned down here, whatever the person's own allow rules or
+    permission mode would let through: nobody is watching it, and that waits for them (docs/connect.md, step 30).
+    Gives PreToolUse's answer, or None."""
+    tool = str(event.get("tool_name") or "")
+    if not tool.startswith("mcp__") and not runs_a_command(event):
+        return None
+    if not night_run(event):
+        return None
+    import night  # noqa: E402
+    why = night.step_refusal(tool, event.get("tool_input"))
+    if not why:
+        return None
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny", "permissionDecisionReason": why}}
+
+
 def before_step(event):
-    """PreToolUse: the step under way is on its screen already (watch). Then a question it asks you
-    (AskUserQuestion), a hold from the building, and a restore point before it changes files."""
+    """PreToolUse: the step under way is on its screen already (watch). Then the night shift's rule (a night run never
+    pushes, sends or deletes), a question it asks you (AskUserQuestion), a hold from the building, and a restore point
+    before it changes files."""
     box = control.Box(DATA)
+    try:
+        refused = night_rule(event)
+    except Exception as error:  # the night's records can't be read: while it is on, a push or a bulk delete waits, to be safe
+        note(error)
+        refused = None
+        try:
+            given = event.get("tool_input") if isinstance(event.get("tool_input"), dict) else {}
+            command = given.get("command") if given.get("command") is not None else given.get("cmd")
+            command = " ".join(str(w) for w in command) if isinstance(command, (list, tuple)) else str(command or "")
+            # Only for an agent started from the building (its record in data/control/runs), as every night run is: a
+            # broken night file never turns down the person's own conversation.
+            if (runs_a_command(event) and switches.on("night", DATA) and (deputy.PUSHY.search(command) or restore.risky(command))
+                    and os.path.isfile(os.path.join(DATA, "control", "runs", key_of(event) + ".json"))):
+                refused = {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": "deny",
+                                                  "permissionDecisionReason": "Not run: the night shift's rules couldn't be read, so this step waits."}}
+        except Exception as error_too:  # nothing more can be told: the step goes on to the rest of the hook
+            note(error_too)
+    if refused:
+        return refused
     if event.get("tool_name") == "AskUserQuestion":
         try:
             return ask_question(event, box)
@@ -1253,8 +1306,8 @@ def respond(event):
         project = floor_of(event)
         command = standing.command_in(tool, event.get("tool_input"))  # the exact words it would run, if a plain command
         always = switches.on("always", DATA)  # off: every request asks, and the standing allows are kept
-        try:
-            standing_allow = standing.allows(DATA, project, tool, command) if always else None
+        try:  # a night run never goes on a standing allow: nobody is watching it (connect/night.py)
+            standing_allow = standing.allows(DATA, project, tool, command) if always and not night_run(event) else None
         except Exception as error:  # a standing allow that can't be read never allows anything
             note(error)
             standing_allow = None

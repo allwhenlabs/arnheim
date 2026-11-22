@@ -2,6 +2,7 @@
   "about": "Fernhollow's day for the daily cycle: a made-up plan and close, like the rest of Fernhollow. The page shows it as if made today at 09:00, and the close at 18:00. Approving it or changing it changes only the page: nothing starts.",
   "plan_at": "09:00",
   "close_at": "18:00",
+  "night": "The night shift (made up): 4 things finished overnight, 3 proven, 1 not.",
   "allowance": {
     "known": true,
     "tight": false,
